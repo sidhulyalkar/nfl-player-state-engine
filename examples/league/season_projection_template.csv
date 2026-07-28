@@ -1,0 +1,2 @@
+player_id,player_name,position,season_points_q10,season_points_q50,season_points_q90,availability_probability,opportunity_confidence,role_growth_score,schedule_score,market_cost
+00-0000001,Example Player,RB,120,190,275,0.92,0.80,0.25,0.10,42

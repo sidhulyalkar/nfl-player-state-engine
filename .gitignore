@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+.venv/
+venv/
+ENV/
+.env
+.env.*
+!.env.example
+!**/.env.example
+*.egg-info/
+build/
+dist/
+
+# Node / frontend
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+dist-server/
+*.tsbuildinfo
+*.log
+
+# Local tools and editors
+.smoke/
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Large/generated data
+/data/raw/*
+/data/interim/*
+/data/processed/*
+/data/external/*
+/artifacts/models/*
+/artifacts/predictions/*
+/artifacts/reports/*
+!/data/**/.gitkeep
+!/artifacts/**/.gitkeep
+
+# Bundled reproducibility artifacts and raw-data instructions
+!/data/raw/nflverse/
+!/data/raw/nflverse/README.md
+!/artifacts/reports/benchmark_real/
+!/artifacts/reports/benchmark_real/**

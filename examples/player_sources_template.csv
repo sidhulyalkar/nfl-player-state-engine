@@ -1,0 +1,8 @@
+player_id,player_name,platform,handle,url,enabled,notes
+00-0031234,Example Player,x,example_player,,false,Requires official X API bearer token
+00-0031234,Example Player,threads,example_player,,false,Requires approved Meta Threads access
+00-0031234,Example Player,instagram,example_player,,false,Professional accounts only through Business Discovery
+00-0031234,Example Player,tiktok,example_player,,false,Requires approved TikTok Research API access
+00-0031234,Example Player,rss,,https://example.com/player-news.xml,false,Use official team or licensed feeds
+00-0031234,Example Player,public_web,,https://example.com/player-interview,false,Explicit URL; robots.txt must allow collection
+00-0031234,Example Player,public_browser,,https://example.com/public-player-page,false,JavaScript-rendered but public without authentication; robots must allow

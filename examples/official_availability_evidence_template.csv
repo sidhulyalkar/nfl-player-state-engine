@@ -1,0 +1,4 @@
+evidence_id,player_id,observed_at_utc,source_url,event_type,practice_status,game_status,is_inactive,transaction_status,depth_role,depth_rank,expected_workload_fraction,evidence_text,source_reliability
+example-1,00-0000001,2026-09-10T18:00:00Z,https://team.example/injury-report,practice_participation,limited,unknown,false,unknown,unknown,,,Limited participant,1.0
+example-2,00-0000001,2026-09-12T18:00:00Z,https://team.example/game-status,game_designation,unknown,questionable,false,unknown,unknown,,,Official questionable designation,1.0
+example-3,00-0000001,2026-09-13T18:00:00Z,https://team.example/press-conference,coach_workload,unknown,unknown,false,unknown,starter,1,0.65,Coach expects a managed workload,0.95

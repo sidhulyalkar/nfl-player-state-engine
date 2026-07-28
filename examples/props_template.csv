@@ -1,0 +1,3 @@
+player_id,target,line,over_odds,under_odds,captured_at_utc,source
+ARI_QB1,passing_yards,239.5,-110,-110,2026-09-10T16:00:00Z,manual_example
+ARI_WR1,receiving_yards,64.5,-115,-105,2026-09-10T16:00:00Z,manual_example

@@ -1,0 +1,14 @@
+{
+  "created_at_utc": "2026-07-27T00:00:00+00:00",
+  "protocol": "Official nflverse weekly player statistics and schedules used for the v0.3 benchmark. Raw files are not bundled.",
+  "seasons": [2020, 2021, 2022, 2023, 2024, 2025],
+  "sources": [
+    {"name":"player_stats_2020","url":"https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2020.csv","bytes":7707291,"sha256":"54d9274dfda5637daf5675b41f682959b442ae94e9ea95bc0a779c2024e52d81"},
+    {"name":"player_stats_2021","url":"https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2021.csv","bytes":8288176,"sha256":"63cc3e2400307ee8c1fc5c6283c6c4223471111c0f4aedecd60c8db75c96a06d"},
+    {"name":"player_stats_2022","url":"https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2022.csv","bytes":8220506,"sha256":"9ee25c230db72c8b9cffc3ad3d218482c3ef53c8a06eadaee85f9e8163552f28"},
+    {"name":"player_stats_2023","url":"https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2023.csv","bytes":8146550,"sha256":"ee65341b2f28cfbf48df85571bf512ec62b281043623e7ffed2926e5569126b3"},
+    {"name":"player_stats_2024","url":"https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2024.csv","bytes":8279410,"sha256":"db6379707a8d520f7fb9a90eeacd8a98ec3d5cdca8b98e0943cab5a250d91a97"},
+    {"name":"player_stats_2025","url":"https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2025.csv","bytes":8461830,"sha256":"40b67b296fda02c7f628741d4aa471208352dd42fb670d4854e7ba95295af1a6"},
+    {"name":"schedules","url":"https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv","bytes":2172881,"sha256":"453d1432faf0ae2f0e950f6e39aba6da6ceaa1dfa6ffc70e66a0abacd0dbcd6f"}
+  ]
+}

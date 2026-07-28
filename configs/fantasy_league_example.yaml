@@ -1,0 +1,18 @@
+teams: 12
+scoring: ppr
+roster_slots:
+  QB: 1
+  RB: 2
+  WR: 2
+  TE: 1
+  FLEX: 1
+  BENCH: 6
+replacement_buffer: 1
+playoff_weeks: [15, 16, 17]
+risk_preference: 0.5
+faab_budget: 100
+tight_end_premium: 0.0
+# Override any default scoring rule here.
+scoring_weights:
+  passing_tds: 4.0
+  interceptions: -2.0

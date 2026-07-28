@@ -1,0 +1,2 @@
+claim_id,player_id,claim_type,direction,magnitude,source_url,published_at_utc,collected_at_utc,evidence_text,extractor_confidence,source_reliability,document_id
+example-claim,00-0000001,workload_limit,-1.0,0.8,https://news.example/story,2026-09-13T16:00:00Z,2026-09-13T16:05:00Z,Coach said the player would not receive a full workload,0.85,0.9,document-1

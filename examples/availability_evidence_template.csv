@@ -1,0 +1,2 @@
+player_id,observed_at_utc,source_url,source_type,practice_status,game_status,body_area,evidence_text,source_reliability
+00-0031234,2026-09-09T22:00:00Z,https://example.com/official-report,official_injury_report,limited,questionable,hamstring,Limited participant on Wednesday,1.0

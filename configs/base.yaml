@@ -1,0 +1,66 @@
+project:
+  random_seed: 42
+  data_dir: data
+  artifacts_dir: artifacts
+
+data:
+  seasons: [2020, 2021, 2022, 2023, 2024, 2025]
+  include_optional: false
+  synthetic_players_per_team: 7
+features:
+  rolling_windows: [3, 5, 8]
+  ewm_halflives: [2, 4, 8]
+  min_player_history: 2
+  active_lookback_weeks: 4
+model:
+  targets:
+    - fantasy_points_ppr
+    - targets
+    - carries
+    - receptions
+    - receiving_yards
+    - rushing_yards
+    - passing_yards
+  quantiles: [0.1, 0.5, 0.9]
+  max_iter: 180
+  learning_rate: 0.05
+  max_leaf_nodes: 31
+  min_samples_leaf: 20
+  l2_regularization: 1.0
+backtest:
+  min_train_weeks: 24
+  retrain_every_weeks: 4
+  rolling_window: 5
+continual_learning:
+  enabled: true
+  min_new_completed_weeks: 1
+  holdout_weeks: 4
+  auto_promote: false
+  min_pinball_improvement_pct: 0.0
+  max_coverage_error: 0.08
+  max_position_regression_pct: 5.0
+intelligence:
+  enabled: false
+  lookback_days: 120
+  safety_lag_hours: 1
+  per_source_limit: 50
+simulation:
+  draws: 10000
+  same_team_correlation: 0.12
+  opposing_team_correlation: -0.03
+  seed: 42
+conformal:
+  enabled: true
+  min_group_rows: 75
+  shrinkage_rows: 200.0
+  minimum_calibration_seasons: 1
+opportunity:
+  enabled: false
+  crossfit_by_season: true
+  minimum_training_rows: 50
+  include_offensive_line_context: true
+intelligence_ablation:
+  enabled: false
+  min_improvement_pct: 0.25
+  min_seasons_won: 2
+  max_shuffled_gain_pct: 0.15

@@ -1,0 +1,4 @@
+method,position,target,rows,nominal_coverage,empirical_coverage,coverage_error,mean_interval_width
+position_prior,QB,passing_yards,3180,0.8,0.8254716981132075,0.025471698113207486,306.2090566037736
+quantile_engine,QB,passing_yards,3180,0.8,0.7172955974842767,-0.08270440251572331,191.56007414578295
+rolling_5,QB,passing_yards,3180,0.8,0.7959119496855346,-0.004088050314465463,218.15589412997906

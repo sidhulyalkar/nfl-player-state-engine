@@ -1,0 +1,53 @@
+name: Weekly model refresh
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Thursday refresh captures most official stat corrections from the prior week.
+    - cron: "30 10 * * 4"
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Restore persistent candidate state
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            artifacts/models
+            data/raw/nflverse
+          key: player-state-${{ github.run_id }}
+          restore-keys: |
+            player-state-
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Test
+        run: pytest
+      - name: Refresh and train gated challengers
+        run: python scripts/weekly_refresh.py --config configs/base.yaml
+      - name: Save persistent candidate state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            artifacts/models
+            data/raw/nflverse
+          key: player-state-${{ github.run_id }}
+      - name: Upload review artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-model-review-${{ github.run_id }}
+          path: |
+            artifacts/models
+            data/processed/weekly_features_current.parquet
+          retention-days: 30

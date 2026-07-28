@@ -1,0 +1,35 @@
+services:
+  pse-cli:
+    build: .
+    volumes:
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts
+      - ./configs:/app/configs
+    command: ["--help"]
+
+  pse-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      PSE_PROJECTIONS_PATH: /app/artifacts/predictions/product_player_values.csv
+      PSE_SCHEDULES_PATH: /app/data/raw/nflverse/schedules.csv
+      PSE_LEAGUE_STORE: /app/data/product/leagues
+      PSE_CORS_ORIGINS: http://localhost:5173,http://localhost:8787
+    volumes:
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts
+    ports:
+      - "8000:8000"
+
+  fantasy-console:
+    build: ./apps/gemini-fantasy-console
+    environment:
+      PSE_API_BASE_URL: http://pse-api:8000
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
+      PORT: 8787
+    depends_on:
+      - pse-api
+    ports:
+      - "8787:8787"

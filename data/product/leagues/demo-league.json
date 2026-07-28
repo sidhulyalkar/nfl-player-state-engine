@@ -1,0 +1,521 @@
+{
+  "identity": {
+    "league_id": "demo-league",
+    "platform": "demo",
+    "name": "Fourth Down Demo",
+    "season": 2026,
+    "imported_at": "2026-07-28T21:25:24.087060Z",
+    "source_url": null,
+    "external_user_id": null
+  },
+  "settings": {
+    "teams": 4,
+    "season": 2026,
+    "current_week": 8,
+    "scoring": {
+      "rec": 1.0,
+      "pass_yd": 0.04,
+      "pass_td": 4.0
+    },
+    "roster_positions": [
+      "QB",
+      "RB",
+      "RB",
+      "WR",
+      "WR",
+      "TE",
+      "FLEX",
+      "BN",
+      "BN"
+    ],
+    "playoff_week_start": 15,
+    "waiver_type": null,
+    "faab_budget": 100.0,
+    "dynasty": false,
+    "superflex": false
+  },
+  "managers": [
+    {
+      "manager_id": "manager-1",
+      "display_name": "Manager 1",
+      "team_name": "Neural Blitz",
+      "avatar_url": null
+    },
+    {
+      "manager_id": "manager-2",
+      "display_name": "Manager 2",
+      "team_name": "Shasta Snowdogs",
+      "avatar_url": null
+    },
+    {
+      "manager_id": "manager-3",
+      "display_name": "Manager 3",
+      "team_name": "Fourth & Chaos",
+      "avatar_url": null
+    },
+    {
+      "manager_id": "manager-4",
+      "display_name": "Manager 4",
+      "team_name": "Bayesian Ballers",
+      "avatar_url": null
+    }
+  ],
+  "rosters": [
+    {
+      "roster_id": "1",
+      "manager_id": "manager-1",
+      "team_name": "Neural Blitz",
+      "players": [
+        {
+          "platform_player_id": "demo-001",
+          "canonical_player_id": "demo-001",
+          "player_name": "Demo QB 1",
+          "position": "QB",
+          "nfl_team": "DET",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-002",
+          "canonical_player_id": "demo-002",
+          "player_name": "Demo RB 2",
+          "position": "RB",
+          "nfl_team": "MIN",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-003",
+          "canonical_player_id": "demo-003",
+          "player_name": "Demo RB 3",
+          "position": "RB",
+          "nfl_team": "DAL",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-004",
+          "canonical_player_id": "demo-004",
+          "player_name": "Demo WR 4",
+          "position": "WR",
+          "nfl_team": "ATL",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-005",
+          "canonical_player_id": "demo-005",
+          "player_name": "Demo WR 5",
+          "position": "WR",
+          "nfl_team": "BAL",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-006",
+          "canonical_player_id": "demo-006",
+          "player_name": "Demo WR 6",
+          "position": "WR",
+          "nfl_team": "ARI",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-007",
+          "canonical_player_id": "demo-007",
+          "player_name": "Demo TE 7",
+          "position": "TE",
+          "nfl_team": "TB",
+          "roster_slot": null,
+          "is_starter": false,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        }
+      ],
+      "wins": 6,
+      "losses": 2,
+      "ties": 0,
+      "points_for": 945.0,
+      "points_against": 892.0,
+      "waiver_priority": null,
+      "faab_remaining": 91.0
+    },
+    {
+      "roster_id": "2",
+      "manager_id": "manager-2",
+      "team_name": "Shasta Snowdogs",
+      "players": [
+        {
+          "platform_player_id": "demo-008",
+          "canonical_player_id": "demo-008",
+          "player_name": "Demo QB 8",
+          "position": "QB",
+          "nfl_team": "SF",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-009",
+          "canonical_player_id": "demo-009",
+          "player_name": "Demo RB 9",
+          "position": "RB",
+          "nfl_team": "DET",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-010",
+          "canonical_player_id": "demo-010",
+          "player_name": "Demo RB 10",
+          "position": "RB",
+          "nfl_team": "MIN",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-011",
+          "canonical_player_id": "demo-011",
+          "player_name": "Demo WR 11",
+          "position": "WR",
+          "nfl_team": "DAL",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-012",
+          "canonical_player_id": "demo-012",
+          "player_name": "Demo WR 12",
+          "position": "WR",
+          "nfl_team": "ATL",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-013",
+          "canonical_player_id": "demo-013",
+          "player_name": "Demo WR 13",
+          "position": "WR",
+          "nfl_team": "BAL",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-014",
+          "canonical_player_id": "demo-014",
+          "player_name": "Demo TE 14",
+          "position": "TE",
+          "nfl_team": "ARI",
+          "roster_slot": null,
+          "is_starter": false,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        }
+      ],
+      "wins": 5,
+      "losses": 3,
+      "ties": 0,
+      "points_for": 910.0,
+      "points_against": 914.0,
+      "waiver_priority": null,
+      "faab_remaining": 82.0
+    },
+    {
+      "roster_id": "3",
+      "manager_id": "manager-3",
+      "team_name": "Fourth & Chaos",
+      "players": [
+        {
+          "platform_player_id": "demo-015",
+          "canonical_player_id": "demo-015",
+          "player_name": "Demo QB 15",
+          "position": "QB",
+          "nfl_team": "TB",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-016",
+          "canonical_player_id": "demo-016",
+          "player_name": "Demo RB 16",
+          "position": "RB",
+          "nfl_team": "SF",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-017",
+          "canonical_player_id": "demo-017",
+          "player_name": "Demo RB 17",
+          "position": "RB",
+          "nfl_team": "DET",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-018",
+          "canonical_player_id": "demo-018",
+          "player_name": "Demo WR 18",
+          "position": "WR",
+          "nfl_team": "MIN",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-019",
+          "canonical_player_id": "demo-019",
+          "player_name": "Demo WR 19",
+          "position": "WR",
+          "nfl_team": "DAL",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-020",
+          "canonical_player_id": "demo-020",
+          "player_name": "Demo WR 20",
+          "position": "WR",
+          "nfl_team": "ATL",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-021",
+          "canonical_player_id": "demo-021",
+          "player_name": "Demo TE 21",
+          "position": "TE",
+          "nfl_team": "BAL",
+          "roster_slot": null,
+          "is_starter": false,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        }
+      ],
+      "wins": 4,
+      "losses": 4,
+      "ties": 0,
+      "points_for": 875.0,
+      "points_against": 936.0,
+      "waiver_priority": null,
+      "faab_remaining": 73.0
+    },
+    {
+      "roster_id": "4",
+      "manager_id": "manager-4",
+      "team_name": "Bayesian Ballers",
+      "players": [
+        {
+          "platform_player_id": "demo-022",
+          "canonical_player_id": "demo-022",
+          "player_name": "Demo QB 22",
+          "position": "QB",
+          "nfl_team": "ARI",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-023",
+          "canonical_player_id": "demo-023",
+          "player_name": "Demo RB 23",
+          "position": "RB",
+          "nfl_team": "TB",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-024",
+          "canonical_player_id": "demo-024",
+          "player_name": "Demo RB 24",
+          "position": "RB",
+          "nfl_team": "SF",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-025",
+          "canonical_player_id": "demo-025",
+          "player_name": "Demo WR 25",
+          "position": "WR",
+          "nfl_team": "DET",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-026",
+          "canonical_player_id": "demo-026",
+          "player_name": "Demo WR 26",
+          "position": "WR",
+          "nfl_team": "MIN",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-027",
+          "canonical_player_id": "demo-027",
+          "player_name": "Demo WR 27",
+          "position": "WR",
+          "nfl_team": "DAL",
+          "roster_slot": null,
+          "is_starter": true,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        },
+        {
+          "platform_player_id": "demo-028",
+          "canonical_player_id": "demo-028",
+          "player_name": "Demo TE 28",
+          "position": "TE",
+          "nfl_team": "ATL",
+          "roster_slot": null,
+          "is_starter": false,
+          "is_injured_reserve": false,
+          "acquisition_type": null
+        }
+      ],
+      "wins": 3,
+      "losses": 5,
+      "ties": 0,
+      "points_for": 840.0,
+      "points_against": 958.0,
+      "waiver_priority": null,
+      "faab_remaining": 64.0
+    }
+  ],
+  "free_agents": [
+    {
+      "platform_player_id": "demo-029",
+      "canonical_player_id": "demo-029",
+      "player_name": "Free QB 29",
+      "position": "QB",
+      "nfl_team": "BAL",
+      "roster_slot": null,
+      "is_starter": false,
+      "is_injured_reserve": false,
+      "acquisition_type": null
+    },
+    {
+      "platform_player_id": "demo-030",
+      "canonical_player_id": "demo-030",
+      "player_name": "Free RB 30",
+      "position": "RB",
+      "nfl_team": "ARI",
+      "roster_slot": null,
+      "is_starter": false,
+      "is_injured_reserve": false,
+      "acquisition_type": null
+    },
+    {
+      "platform_player_id": "demo-031",
+      "canonical_player_id": "demo-031",
+      "player_name": "Free RB 31",
+      "position": "RB",
+      "nfl_team": "TB",
+      "roster_slot": null,
+      "is_starter": false,
+      "is_injured_reserve": false,
+      "acquisition_type": null
+    },
+    {
+      "platform_player_id": "demo-032",
+      "canonical_player_id": "demo-032",
+      "player_name": "Free WR 32",
+      "position": "WR",
+      "nfl_team": "SF",
+      "roster_slot": null,
+      "is_starter": false,
+      "is_injured_reserve": false,
+      "acquisition_type": null
+    },
+    {
+      "platform_player_id": "demo-033",
+      "canonical_player_id": "demo-033",
+      "player_name": "Free WR 33",
+      "position": "WR",
+      "nfl_team": "DET",
+      "roster_slot": null,
+      "is_starter": false,
+      "is_injured_reserve": false,
+      "acquisition_type": null
+    },
+    {
+      "platform_player_id": "demo-034",
+      "canonical_player_id": "demo-034",
+      "player_name": "Free TE 34",
+      "position": "TE",
+      "nfl_team": "MIN",
+      "roster_slot": null,
+      "is_starter": false,
+      "is_injured_reserve": false,
+      "acquisition_type": null
+    },
+    {
+      "platform_player_id": "demo-035",
+      "canonical_player_id": "demo-035",
+      "player_name": "Free TE 35",
+      "position": "TE",
+      "nfl_team": "DAL",
+      "roster_slot": null,
+      "is_starter": false,
+      "is_injured_reserve": false,
+      "acquisition_type": null
+    },
+    {
+      "platform_player_id": "demo-036",
+      "canonical_player_id": "demo-036",
+      "player_name": "Free WR 36",
+      "position": "WR",
+      "nfl_team": "ATL",
+      "roster_slot": null,
+      "is_starter": false,
+      "is_injured_reserve": false,
+      "acquisition_type": null
+    }
+  ],
+  "draft_picks": [],
+  "metadata": {}
+}

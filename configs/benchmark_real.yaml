@@ -1,0 +1,58 @@
+project:
+  random_seed: 42
+  data_dir: data
+  artifacts_dir: artifacts
+
+data:
+  seasons: [2020, 2021, 2022, 2023, 2024, 2025]
+  include_optional: false
+
+features:
+  rolling_windows: [3, 5, 8]
+  ewm_halflives: [2, 4, 8]
+  min_player_history: 1
+  active_lookback_weeks: 4
+
+model:
+  targets:
+    - fantasy_points_ppr
+    - targets
+    - carries
+    - receptions
+    - receiving_yards
+    - rushing_yards
+    - passing_yards
+  quantiles: [0.1, 0.5, 0.9]
+  max_iter: 60
+  learning_rate: 0.05
+  max_leaf_nodes: 31
+  min_samples_leaf: 30
+  l2_regularization: 1.0
+
+backtest:
+  # 17 regular-season weeks in 2020 create the warm-up. Testing begins 2021 W1.
+  min_train_weeks: 17
+  # The 2021+ regular seasons contain 18 weeks, so this retrains at season boundaries.
+  retrain_every_weeks: 18
+  rolling_window: 5
+
+continual_learning:
+  enabled: true
+  min_new_completed_weeks: 1
+  holdout_weeks: 4
+  auto_promote: false
+  min_pinball_improvement_pct: 0.0
+  max_coverage_error: 0.08
+  max_position_regression_pct: 5.0
+
+intelligence:
+  enabled: false
+  lookback_days: 120
+  safety_lag_hours: 1
+  per_source_limit: 50
+
+simulation:
+  draws: 10000
+  same_team_correlation: 0.12
+  opposing_team_correlation: -0.03
+  seed: 42
