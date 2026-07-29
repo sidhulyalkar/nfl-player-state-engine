@@ -2,6 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import { tools } from './tools.js';
 
 const base = process.env.PSE_API_BASE_URL ?? 'http://localhost:8000';
+const pseTimeoutMs = Number(process.env.PSE_API_TIMEOUT_MS ?? 15_000);
 
 async function executeTool(name: string, args: Record<string, unknown>) {
   const leagueId = encodeURIComponent(String(args.league_id ?? ''));
@@ -15,14 +16,56 @@ async function executeTool(name: string, args: Record<string, unknown>) {
   };
   const route = routes[name];
   if (!route) throw new Error(`Unknown tool: ${name}`);
-  const response = await fetch(`${base}${route}`);
+  const response = await fetch(`${base}${route}`, {
+    signal: AbortSignal.timeout(pseTimeoutMs),
+  });
   if (!response.ok) throw new Error(await response.text());
   return response.json();
 }
 
+function selectFallbackTool(message: string) {
+  const normalized = message.toLowerCase();
+  if (/\b(waiver|free agent|faab|add|drop)\b/.test(normalized)) return 'get_waiver_board';
+  if (/\b(lineup|start|sit|bench)\b/.test(normalized)) return 'get_optimized_lineup';
+  if (/\b(trade|deal|counteroffer)\b/.test(normalized)) return 'get_trade_suggestions';
+  return 'get_player_board';
+}
+
+function summarizeFallback(name: string, result: unknown) {
+  const rows = Array.isArray(result) ? result : [];
+  if (!rows.length) return 'The deterministic tool returned no eligible results.';
+  if (name === 'get_trade_suggestions') {
+    return rows.slice(0, 3).map((row, index) => {
+      const item = row as Record<string, unknown>;
+      return `${index + 1}. ${String(item.explanation ?? 'Trade proposal returned without an explanation.')}`;
+    }).join('\n');
+  }
+  return rows.slice(0, 8).map((row, index) => {
+    const item = row as Record<string, unknown>;
+    const nameValue = String(item.player_name ?? item.name ?? item.player_id ?? 'Unknown player');
+    const slot = item.assigned_slot ? ` · ${String(item.assigned_slot)}` : '';
+    const score = Number(item.decision_specific_score ?? item.lineup_score ?? item.waiver_upgrade);
+    return `${index + 1}. ${nameValue}${slot}${Number.isFinite(score) ? ` · ${score.toFixed(1)}` : ''}`;
+  }).join('\n');
+}
+
+async function runStructuredFallback(message: string, leagueId?: string, rosterId?: string) {
+  if (!leagueId || leagueId === 'demo-league') {
+    return 'Gemini is not configured. Import a live league to use deterministic offline lineup, waiver, trade, and ranking tools.';
+  }
+  const name = selectFallbackTool(message);
+  const result = await executeTool(name, {
+    league_id: leagueId,
+    roster_id: rosterId,
+    decision: /\bdynasty\b/i.test(message) ? 'dynasty' : /\bdraft\b/i.test(message) ? 'draft' : 'trade',
+    limit: 8,
+  });
+  return `Structured fallback · Gemini unavailable\n\n${summarizeFallback(name, result)}\n\nValues above come directly from the Player State Engine; no language model generated them.`;
+}
+
 export async function runCopilot(message: string, leagueId?: string, rosterId?: string): Promise<string> {
   if (!process.env.GEMINI_API_KEY) {
-    return 'Gemini is not configured yet. Set the server-side GEMINI_API_KEY secret. The deterministic dashboard remains usable without it.';
+    return runStructuredFallback(message, leagueId, rosterId);
   }
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const context = `Current league_id=${leagueId ?? 'unknown'} and roster_id=${rosterId ?? 'unknown'}.`;

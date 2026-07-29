@@ -1,4 +1,15 @@
-import type { LeagueSummary, NFLStateSnapshot, PlayerRow, PowerRanking, TradeSuggestion } from '../../shared/types';
+import type {
+  DecisionType,
+  LeagueNeedsResponse,
+  LeagueSummary,
+  NFLStateSnapshot,
+  PlayerRow,
+  PowerRanking,
+  ResearchPredictionsResponse,
+  ResearchSummary,
+  TeamContextResponse,
+  TradeSuggestion,
+} from '../../shared/types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/pse${path}`, {
@@ -12,6 +23,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+function query(params: Record<string, string | number | undefined>) {
+  const values = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') values.set(key, String(value));
+  });
+  const encoded = values.toString();
+  return encoded ? `?${encoded}` : '';
+}
+
 export const api = {
   leagues: () => request<LeagueSummary[]>('/v1/leagues'),
   importSleeper: (leagueId: string, userId?: string) =>
@@ -19,18 +39,25 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ league_id: leagueId, user_id: userId }),
     }),
-  players: (leagueId: string, decision = 'trade') =>
-    request<PlayerRow[]>(`/v1/leagues/${leagueId}/players?decision=${decision}`),
+  players: (leagueId: string, decision: DecisionType = 'trade') =>
+    request<PlayerRow[]>(`/v1/leagues/${encodeURIComponent(leagueId)}/players${query({ decision })}`),
   powerRankings: (leagueId: string) =>
-    request<PowerRanking[]>(`/v1/leagues/${leagueId}/power-rankings`),
+    request<PowerRanking[]>(`/v1/leagues/${encodeURIComponent(leagueId)}/power-rankings`),
   nflState: (season: number, throughWeek?: number) =>
-    request<NFLStateSnapshot>(`/v1/nfl/state?season=${season}${throughWeek ? `&through_week=${throughWeek}` : ''}`),
+    request<NFLStateSnapshot>(`/v1/nfl/state${query({ season, through_week: throughWeek })}`),
   waivers: (leagueId: string, rosterId: string) =>
-    request<PlayerRow[]>(`/v1/leagues/${leagueId}/waivers?roster_id=${rosterId}`),
+    request<PlayerRow[]>(`/v1/leagues/${encodeURIComponent(leagueId)}/waivers${query({ roster_id: rosterId })}`),
   lineup: (leagueId: string, rosterId: string) =>
-    request<PlayerRow[]>(`/v1/leagues/${leagueId}/lineup?roster_id=${rosterId}`),
+    request<PlayerRow[]>(`/v1/leagues/${encodeURIComponent(leagueId)}/lineup${query({ roster_id: rosterId })}`),
+  needs: (leagueId: string) =>
+    request<LeagueNeedsResponse>(`/v1/leagues/${encodeURIComponent(leagueId)}/needs`),
   tradeSuggestions: (leagueId: string, rosterId: string) =>
-    request<TradeSuggestion[]>(`/v1/leagues/${leagueId}/trades/suggestions?roster_id=${rosterId}`),
+    request<TradeSuggestion[]>(`/v1/leagues/${encodeURIComponent(leagueId)}/trades/suggestions${query({ roster_id: rosterId })}`),
+  researchSummary: () => request<ResearchSummary>('/v1/research/summary'),
+  researchPredictions: (season?: number, week?: number, position?: string, limit?: number) =>
+    request<ResearchPredictionsResponse>(`/v1/research/predictions${query({ season, week, position, limit })}`),
+  teamContext: (season?: number, week?: number) =>
+    request<TeamContextResponse>(`/v1/nfl/team-context${query({ season, week })}`),
   copilot: async (message: string, leagueId?: string, rosterId?: string) => {
     const response = await fetch('/api/copilot', {
       method: 'POST',

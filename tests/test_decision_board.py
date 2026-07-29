@@ -32,3 +32,18 @@ def test_decision_boards_are_decision_specific() -> None:
     assert set(stash["decision_type"]) == {"stash"}
     assert draft.iloc[0]["player_id"] != stash.iloc[0]["player_id"]
     assert stash["decision_reasons"].notna().all()
+
+
+def test_every_decision_board_has_deterministic_overall_and_position_ranks() -> None:
+    cfg = LeagueConfig()
+    for decision in DecisionType:
+        first = build_decision_board(_frame(), cfg, decision)
+        second = build_decision_board(_frame().sample(frac=1.0, random_state=7), cfg, decision)
+        assert first["overall_rank"].tolist() == [1, 2, 3, 4]
+        assert first.groupby("position")["position_rank"].apply(list).to_dict() == {
+            "RB": [1, 2],
+            "WR": [1, 2],
+        }
+        assert first[["player_id", "overall_rank", "position_rank"]].to_dict(
+            orient="records"
+        ) == second[["player_id", "overall_rank", "position_rank"]].to_dict(orient="records")

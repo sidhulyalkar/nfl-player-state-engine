@@ -163,9 +163,8 @@ pse serve-product-api
 For frontend development:
 
 ```bash
-cd apps/gemini-fantasy-console
 npm install
-npm run dev
+npm run frontend:dev
 ```
 
 Before declaring an integration complete, save anonymized fixtures, test canonical normalization, report unresolved player IDs, and verify that the complete league ownership count matches the source platform.

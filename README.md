@@ -107,6 +107,14 @@ pse fantasy-decision-board --projections projections.csv --decision draft
 
 The completed proxy experiment found that repackaged lagged box-score opportunity features did not improve the frozen champion. Mean pinball worsened 3.14%, while a deliberately leaked future-shift control improved 27.04%. This negative result directs the next test toward genuinely new snaps, participation, depth-chart and official-availability information. See `docs/experiment_opportunity_availability_v05.md` and `docs/fantasy_decision_framework.md`.
 
+The subsequent actual-source experiment also rejected promotion: the best
+eligible combination worsened mean pinball by 1.508% across 23,003 held-out
+2022–2025 player-weeks and reduced q10–q90 coverage from 0.821 to 0.717.
+High snap, participation and depth-chart coverage makes this a meaningful
+negative result rather than an inner-join artifact. Compact metrics and coverage
+are available through `/v1/research/summary` and the frontend Model Lab; see
+`docs/historical_source_acquisition.md`.
+
 ## Fastest start: synthetic smoke test
 
 Python 3.11 or newer is recommended.
@@ -484,9 +492,10 @@ v0.6 adds a league-aware product architecture around the research engine:
 - working Sleeper and CSV imports;
 - ownership, free-agent and league power views;
 - two-sided trade analysis and suggested trades;
-- lineup and waiver Product API endpoints;
-- NFL standings/state endpoint;
-- React + Node Gemini application scaffold;
+- ranked lineup, waiver and roster-needs Product API endpoints;
+- provenance-gated NFL standings plus leakage-safe team-context endpoints;
+- frozen research summary and historical player-ranking replay endpoints;
+- React 19 + Express 5 Gemini application on Node.js 22;
 - Google AI Studio Build prompt and product documentation.
 
 ### Run the Product API
@@ -499,13 +508,19 @@ python -m player_state_engine.api
 ### Run the Gemini frontend
 
 ```bash
-cd apps/gemini-fantasy-console
 npm install
-cp .env.example .env
+cp apps/gemini-fantasy-console/.env.example apps/gemini-fantasy-console/.env
 npm run dev
 ```
 
-The frontend enters demo mode until a league and production player-value artifact are available. See:
+The npm workspace starts the Express and Vite application on
+`http://localhost:3000`. The frontend enters clearly labeled synthetic demo
+mode until a league and provenance-bearing player-value artifact are available.
+The standings endpoint also fails closed until `PSE_SCHEDULES_DATA_MODE` is
+explicitly set to `LIVE_OFFICIAL`, `HISTORICAL_BACKTEST`, or
+`SYNTHETIC_DEMO`; the bundled miniature schedule must never be labeled live.
+Use `npm run build` for a production build and `npm start` after building.
+See:
 
 ```text
 docs/product/current_package_state.md

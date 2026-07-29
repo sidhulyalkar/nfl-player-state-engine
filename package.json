@@ -1,0 +1,19 @@
+{
+  "name": "nfl-player-state-engine-workspace",
+  "private": true,
+  "version": "0.6.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "npm run frontend:dev",
+    "build": "npm run frontend:build",
+    "start": "npm run frontend:start",
+    "frontend:dev": "npm run dev --workspace pse-gemini-fantasy-console",
+    "frontend:build": "npm run build --workspace pse-gemini-fantasy-console",
+    "frontend:start": "npm run start --workspace pse-gemini-fantasy-console"
+  }
+}

@@ -10,7 +10,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install -e '.[dev,intelligence]'
+      - run: python -m pip install -e '.[dev,intelligence,api]'
       - run: ruff check src tests
       - run: pytest
 
@@ -27,4 +27,8 @@ jobs:
           cache: npm
           cache-dependency-path: apps/gemini-fantasy-console/package-lock.json
       - run: npm ci
+      - name: Install Rollup Linux native binary
+        run: |
+          ROLLUP_VERSION="$(node -p "require('rollup/package.json').version")"
+          npm install --no-save --package-lock=false "@rollup/rollup-linux-x64-gnu@$ROLLUP_VERSION"
       - run: npm run build

@@ -53,12 +53,25 @@ Implemented in `src/player_state_engine/api/app.py`:
 - `GET /v1/leagues/{league_id}`
 - `GET /v1/leagues/{league_id}/players`
 - `GET /v1/leagues/{league_id}/power-rankings`
+- `GET /v1/leagues/{league_id}/needs`
 - `GET /v1/leagues/{league_id}/waivers`
 - `GET /v1/leagues/{league_id}/lineup`
 - `POST /v1/trades/analyze`
 - `GET /v1/leagues/{league_id}/trades/suggestions`
 - `GET /v1/nfl/state`
+- `GET /v1/nfl/team-context`
+- `GET /v1/research/summary`
+- `GET /v1/research/predictions`
 - `GET /v1/copilot/context/{league_id}`
+
+Player-board rows include deterministic `overall_rank` and `position_rank` for the requested
+decision type. Research, team-context, and roster-needs responses are envelopes rather than bare
+arrays so the frontend can render `data_mode`, artifact timestamps, missing inputs, model version,
+and identity coverage next to the data. The historical team-context contract exposes lagged and
+rolling pregame features only; same-week `*_actual` fields are intentionally excluded.
+The research summary includes source-file availability, explicit evidence coverage, identity
+resolution and post-imputation availability separately from predictive metrics so the UI cannot
+present a low-coverage inner-join gain as a valid promotion result.
 
 ## Persistence evolution
 
@@ -92,6 +105,10 @@ Implemented in `src/player_state_engine/api/app.py`:
 - Validate every Gemini tool argument against server schemas.
 - Rate-limit import, copilot, and simulation endpoints.
 - Maintain an audit log of tool calls and recommendations.
+- Fail closed on schedule artifacts whose data mode is not explicitly one of
+  `LIVE_OFFICIAL`, `HISTORICAL_BACKTEST`, or `SYNTHETIC_DEMO`.
+- Treat filesystem modification time as file metadata only, never as a
+  prediction timestamp or source cutoff.
 
 ## Performance targets
 

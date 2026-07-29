@@ -51,6 +51,7 @@ Desktop.ini
 /artifacts/models/*
 /artifacts/predictions/*
 /artifacts/reports/*
+/artifacts/experiments/*
 !/data/**/.gitkeep
 !/artifacts/**/.gitkeep
 
@@ -59,3 +60,16 @@ Desktop.ini
 !/data/raw/nflverse/README.md
 !/artifacts/reports/benchmark_real/
 !/artifacts/reports/benchmark_real/**
+
+# Reviewed, compact product-showcase artifacts
+!/data/processed/team_play_structure_2025.parquet
+!/artifacts/reports/conformal_real/
+/artifacts/reports/conformal_real/*
+!/artifacts/reports/conformal_real/conformal_master_summary.csv
+!/artifacts/reports/opportunity_ablation_real/
+/artifacts/reports/opportunity_ablation_real/*
+!/artifacts/reports/opportunity_ablation_real/frozen_opportunity_summary.csv
+!/artifacts/reports/historical_source_ablation_hardened/
+/artifacts/reports/historical_source_ablation_hardened/*
+!/artifacts/reports/historical_source_ablation_hardened/historical_source_summary.csv
+!/artifacts/reports/historical_source_ablation_hardened/historical_source_source_coverage.csv
