@@ -125,6 +125,16 @@ def roster_needs(snapshot: LeagueSnapshot, player_values: pd.DataFrame) -> pd.Da
     output = pd.DataFrame(rows)
     if not output.empty:
         output["need_percentile"] = output.groupby("position")["need_score"].rank(pct=True)
+        output["strength_rank"] = (
+            output.groupby("position")["position_strength"]
+            .rank(method="first", ascending=False)
+            .astype(int)
+        )
+        output["need_rank"] = (
+            output.groupby("position")["need_score"]
+            .rank(method="first", ascending=False)
+            .astype(int)
+        )
     return output.sort_values(["roster_id", "need_score"], ascending=[True, False]).reset_index(
         drop=True
     )

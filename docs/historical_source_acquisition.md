@@ -39,4 +39,27 @@ The outputs include source coverage, feature manifests, season metrics, position
 
 ## Current packaged result
 
-The isolated build environment could not transfer GitHub release binaries, so the repository does not claim an official-injury or snap-count performance gain. It does include a completed frozen proxy experiment over 23,003 out-of-sample player-weeks. Repackaged lagged box-score opportunity features worsened mean pinball loss by 3.14%, while the deliberately leaked future-shift control improved it by 27.04%. This establishes that the evaluation is sensitive, but that genuinely new source information is required.
+The hardened actual-source ablation is complete over 23,003 held-out player-weeks
+from 2022–2025, with 2021 used for initial residual-model training. Coverage was
+reported before metrics:
+
+- snap evidence: 99.2–100.0%, with 97.8–98.8% player-ID resolution;
+- pass-participation evidence: 92.6–95.1%, with 100% ID resolution;
+- depth-chart evidence: 91.7–99.8%, with 99.0–100% ID resolution;
+- official injury evidence: 16.6–18.2% in 2021–2024; the present 2025 file had
+  no usable authored timestamps and therefore failed closed as unavailable/NaN.
+
+No feature family passed promotion. The numerical baseline achieved 1.380323
+mean pinball and 0.820936 q10–q90 coverage. The best eligible challenger,
+`objective_sources_combined`, recorded 1.401138 mean pinball
+(-1.508% versus baseline) and 0.717385 coverage. Every challenger lost in every
+held-out season, although the combined source family showed a small isolated QB
+gain that did not survive the full position/season gate. The shuffled-player
+control lost 4.109%, while the deliberately future-shifted control improved
+5.309%, confirming that the evaluation detects both destroyed identity and
+future information.
+
+The complete local experiment contract is written to
+`artifacts/experiments/historical_sources_hardened_v05/`. Compact coverage and
+summary tables are exposed to the Product API and Model Lab; large predictions
+remain gitignored.

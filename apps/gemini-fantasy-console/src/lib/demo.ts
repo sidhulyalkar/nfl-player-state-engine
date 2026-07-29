@@ -16,16 +16,38 @@ export const demoPlayers: PlayerRow[] = names.map(([player_name, position, recen
   owner_roster_id: index < 8 ? String((index % 4) + 1) : null,
   is_free_agent: index >= 8,
   decision_specific_score: 92 - index * 3.7,
+  overall_rank: index + 1,
+  position_rank: names.slice(0, index + 1).filter((entry) => entry[1] === position).length,
   fantasy_points_ppr_q10: 8 + (index % 4),
   fantasy_points_ppr_q50: 17 - index * 0.35,
   fantasy_points_ppr_q90: 29 - index * 0.25,
   season_points_q10: 145 - index * 4,
   season_points_q50: 245 - index * 6,
   season_points_q90: 340 - index * 5,
+  replacement_points: position === 'QB' ? 205 : position === 'TE' ? 175 : 190,
+  vorp: (245 - index * 6) - (position === 'QB' ? 205 : position === 'TE' ? 175 : 190),
   availability_probability: index === 7 ? 0.78 : 0.95,
   opportunity_confidence: 0.64 + (index % 5) * 0.06,
   breakout_probability: index >= 8 ? 0.45 + (index % 3) * 0.12 : 0.18,
   decision_reasons: index >= 8 ? 'role expanding, favorable team fit' : 'stable opportunity, projection-led value',
+  data_mode: 'SYNTHETIC_DEMO',
+  model_version: 'demo-fixture',
+}));
+
+export const demoWaivers: PlayerRow[] = demoPlayers.filter((player) => player.is_free_agent).map((player, index) => ({
+  ...player,
+  decision_type: 'waiver',
+  decision_specific_score: 78 - index * 4,
+  waiver_upgrade: 7.5 - index * 1.2,
+  faab_recommendation: 18 - index * 3,
+  decision_reasons: 'synthetic waiver fixture; connect a league for roster-relative evidence',
+}));
+
+export const demoLineup: PlayerRow[] = demoPlayers.slice(0, 7).map((player, index) => ({
+  ...player,
+  decision_type: 'start_sit',
+  assigned_slot: ['QB1', 'RB1', 'RB2', 'WR1', 'WR2', 'TE1', 'FLEX1'][index],
+  decision_reasons: 'synthetic optimized-lineup fixture',
 }));
 
 export const demoPower: PowerRanking[] = [
@@ -52,6 +74,7 @@ export const demoTrades: TradeSuggestion[] = [
 ];
 
 export const demoNFL = {
+  data_mode: 'SYNTHETIC_DEMO',
   season: 2026,
   week: 8,
   teams: ['DET','SF','BAL','MIN','DAL','ATL','TB','ARI'].map((team, index) => ({

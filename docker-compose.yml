@@ -14,8 +14,10 @@ services:
     environment:
       PSE_PROJECTIONS_PATH: /app/artifacts/predictions/product_player_values.csv
       PSE_SCHEDULES_PATH: /app/data/raw/nflverse/schedules.csv
+      PSE_SCHEDULES_DATA_MODE: UNVERIFIED
+      PSE_HISTORICAL_SOURCE_REPORT_ROOT: /app/artifacts/reports/historical_source_ablation_hardened
       PSE_LEAGUE_STORE: /app/data/product/leagues
-      PSE_CORS_ORIGINS: http://localhost:5173,http://localhost:8787
+      PSE_CORS_ORIGINS: http://localhost:3000,http://localhost:5173
     volumes:
       - ./data:/app/data
       - ./artifacts:/app/artifacts
@@ -28,8 +30,8 @@ services:
       PSE_API_BASE_URL: http://pse-api:8000
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
-      PORT: 8787
+      PORT: 3000
     depends_on:
       - pse-api
     ports:
-      - "8787:8787"
+      - "3000:3000"

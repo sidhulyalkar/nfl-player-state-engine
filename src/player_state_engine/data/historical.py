@@ -180,8 +180,18 @@ def aggregate_pass_play_participation(
 
 
 def _pick(frame: pd.DataFrame, candidates: tuple[str, ...]) -> pd.Series:
-    source = next((c for c in candidates if c in frame), None)
-    return frame[source] if source else pd.Series(pd.NA, index=frame.index)
+    """Coalesce schema aliases row by row.
+
+    Historical releases are commonly concatenated before canonicalization. A
+    simple "first column present" rule loses values when an old and new schema
+    contribute different alias columns to the same concatenated frame.
+    """
+    present = [column for column in candidates if column in frame]
+    if not present:
+        return pd.Series(pd.NA, index=frame.index)
+    if len(present) == 1:
+        return frame[present[0]]
+    return frame[present].bfill(axis=1).iloc[:, 0]
 
 
 def _name_key(values: pd.Series) -> pd.Series:
@@ -219,12 +229,14 @@ def canonicalize_injuries(frame: pd.DataFrame) -> pd.DataFrame:
     out["player_name"] = _pick(frame, ("full_name", "player_name"))
     out["recent_team"] = _pick(frame, ("team", "recent_team"))
     out["position"] = _pick(frame, ("position", "pos"))
-    out["report_status"] = (
-        _pick(frame, ("report_status", "game_status")).astype("string").str.lower()
+    out["report_status"] = _pick(frame, ("report_status", "game_status")).astype("string")
+    out["practice_status"] = _pick(frame, ("practice_status", "practice_participation")).astype(
+        "string"
     )
-    out["practice_status"] = (
-        _pick(frame, ("practice_status", "practice_participation")).astype("string").str.lower()
-    )
+    for column in ("report_status", "practice_status"):
+        out[column] = (
+            out[column].str.strip().str.lower().replace({"": pd.NA, "nan": pd.NA, "<na>": pd.NA})
+        )
     out["primary_injury"] = _pick(
         frame, ("report_primary_injury", "practice_primary_injury", "primary_injury")
     )
@@ -236,9 +248,6 @@ def canonicalize_injuries(frame: pd.DataFrame) -> pd.DataFrame:
         "doubtful": 0.20,
         "questionable": 0.72,
         "probable": 0.93,
-        "": 1.0,
-        "nan": 1.0,
-        "<na>": 1.0,
     }
     practice_map = {
         "did not participate": 0.35,
@@ -247,26 +256,47 @@ def canonicalize_injuries(frame: pd.DataFrame) -> pd.DataFrame:
         "limited": 0.72,
         "full participation": 0.97,
         "full": 0.97,
-        "": 1.0,
-        "nan": 1.0,
-        "<na>": 1.0,
     }
-    out["official_report_availability_prior"] = out["report_status"].map(report_map).fillna(0.85)
+    report_present = out["report_status"].notna()
+    practice_present = out["practice_status"].notna()
+    out["official_report_availability_prior"] = (
+        out["report_status"].map(report_map).where(report_present)
+    )
+    out.loc[
+        report_present & out["official_report_availability_prior"].isna(),
+        "official_report_availability_prior",
+    ] = 0.85
     out["official_practice_availability_prior"] = (
-        out["practice_status"].map(practice_map).fillna(0.85)
+        out["practice_status"].map(practice_map).where(practice_present)
     )
-    out["official_availability_prior"] = np.minimum(
-        out["official_report_availability_prior"], out["official_practice_availability_prior"]
-    )
-    out["official_injury_evidence_present"] = (
-        out["report_status"].notna() | out["practice_status"].notna()
-    ).astype(int)
+    out.loc[
+        practice_present & out["official_practice_availability_prior"].isna(),
+        "official_practice_availability_prior",
+    ] = 0.85
+    evidence_present = report_present | practice_present
+    out["official_availability_prior"] = pd.concat(
+        [
+            out["official_report_availability_prior"].fillna(1.0),
+            out["official_practice_availability_prior"].fillna(1.0),
+        ],
+        axis=1,
+    ).min(axis=1)
+    out["official_availability_prior"] = out["official_availability_prior"].where(evidence_present)
+    out["official_injury_evidence_present"] = evidence_present.astype(int)
     return out
 
 
 def canonicalize_depth_charts(frame: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame(index=frame.index)
+    observed_at = pd.to_datetime(
+        _pick(frame, ("dt", "observed_at", "date_modified")),
+        utc=True,
+        errors="coerce",
+    )
+    out["observed_at"] = observed_at
     out["season"] = pd.to_numeric(_pick(frame, ("season",)), errors="coerce")
+    inferred_season = observed_at.dt.year.where(observed_at.dt.month.gt(3), observed_at.dt.year - 1)
+    out["season"] = out["season"].fillna(inferred_season)
     out["week"] = pd.to_numeric(_pick(frame, ("week",)), errors="coerce")
     out["player_id"] = _pick(frame, ("gsis_id", "player_id")).astype("string")
     out["player_name"] = _pick(frame, ("full_name", "player_name", "player"))
@@ -274,10 +304,26 @@ def canonicalize_depth_charts(frame: pd.DataFrame) -> pd.DataFrame:
     out["position"] = _pick(frame, ("position", "pos", "position_group"))
     out["depth_position"] = _pick(frame, ("depth_position", "depth_chart_position", "position"))
     out["depth_rank"] = pd.to_numeric(
-        _pick(frame, ("depth_team", "depth_rank", "depth_chart_order", "rank")), errors="coerce"
+        _pick(
+            frame,
+            ("depth_team", "depth_rank", "depth_chart_order", "rank", "pos_rank"),
+        ),
+        errors="coerce",
     )
     out["formation"] = _pick(frame, ("formation",))
     out["name_key"] = _name_key(out["player_name"])
+    weekly = out["season"].notna() & out["week"].notna() & out["depth_rank"].notna()
+    timestamped = (
+        out["season"].notna()
+        & out["observed_at"].notna()
+        & out["recent_team"].notna()
+        & out["depth_rank"].notna()
+    )
+    out["schema_status"] = np.select(
+        [weekly, timestamped],
+        ["supported_weekly", "supported_timestamped"],
+        default="unsupported_schema",
+    )
     return out
 
 
@@ -285,34 +331,60 @@ def resolve_snap_player_ids(
     snap_counts: pd.DataFrame, weekly_rosters: pd.DataFrame
 ) -> pd.DataFrame:
     """Resolve PFR snap-count rows to GSIS IDs with an auditable match method."""
-    snaps = canonicalize_snap_counts(snap_counts)
+    snaps = canonicalize_snap_counts(snap_counts).reset_index(drop=True)
+    snaps["_snap_row_id"] = np.arange(len(snaps))
     snaps["name_key"] = _name_key(snaps["player_name"])
+    snaps = snaps.rename(columns={"player_id": "snap_source_player_id"})
+    if "gsis_id" in snap_counts:
+        snaps["source_gsis_id"] = snap_counts.reset_index(drop=True)["gsis_id"].astype("string")
+    else:
+        snaps["source_gsis_id"] = pd.Series(pd.NA, index=snaps.index, dtype="string")
+    snaps["pfr_player_id"] = _pick(
+        snap_counts.reset_index(drop=True), ("pfr_player_id", "pfr_id")
+    ).astype("string")
+    snaps["pfr_player_id"] = snaps["pfr_player_id"].fillna(
+        snaps["snap_source_player_id"].astype("string")
+    )
     rosters = canonicalize_weekly_rosters(weekly_rosters)
     exact = rosters.dropna(subset=["pfr_player_id", "player_id"]).drop_duplicates(
         ["season", "week", "recent_team", "pfr_player_id"], keep="last"
     )
     out = snaps.merge(
         exact[["season", "week", "recent_team", "pfr_player_id", "player_id"]],
-        left_on=["season", "week", "recent_team", "player_id"],
-        right_on=["season", "week", "recent_team", "pfr_player_id"],
+        on=["season", "week", "recent_team", "pfr_player_id"],
         how="left",
-        suffixes=("_pfr", ""),
+        validate="many_to_one",
     )
-    out["id_match_method"] = np.where(out["player_id"].notna(), "pfr_crosswalk", "unmatched")
-    fallback = rosters.dropna(subset=["player_id"]).drop_duplicates(
+    direct_gsis = out["source_gsis_id"].notna()
+    out.loc[direct_gsis, "player_id"] = out.loc[direct_gsis, "source_gsis_id"]
+    out["id_match_method"] = np.select(
+        [direct_gsis, out["player_id"].notna()],
+        ["source_gsis", "pfr_crosswalk"],
+        default="unmatched",
+    )
+
+    fallback = rosters.dropna(subset=["player_id"]).copy()
+    fallback_counts = fallback.groupby(["season", "week", "recent_team", "name_key"], dropna=False)[
+        "player_id"
+    ].transform("nunique")
+    fallback = fallback.loc[fallback_counts.eq(1)].drop_duplicates(
         ["season", "week", "recent_team", "name_key"], keep="last"
     )
     missing = out["player_id"].isna()
     if missing.any():
-        candidate = out.loc[missing].merge(
+        candidate = out.loc[
+            missing, ["_snap_row_id", "season", "week", "recent_team", "name_key"]
+        ].merge(
             fallback[["season", "week", "recent_team", "name_key", "player_id"]],
             on=["season", "week", "recent_team", "name_key"],
             how="left",
+            validate="many_to_one",
         )
-        out.loc[missing, "player_id"] = candidate["player_id"].to_numpy()
+        fallback_ids = candidate.set_index("_snap_row_id")["player_id"]
+        out.loc[missing, "player_id"] = out.loc[missing, "_snap_row_id"].map(fallback_ids)
         out.loc[missing & out["player_id"].notna(), "id_match_method"] = "name_team_week"
-    out["pfr_player_id"] = out["player_id_pfr"]
-    return out.drop(columns=["player_id_pfr"], errors="ignore")
+    out["player_id"] = out["player_id"].astype("string")
+    return out.drop(columns=["_snap_row_id", "source_gsis_id"], errors="ignore")
 
 
 def read_historical_table(path: str | Path) -> pd.DataFrame:

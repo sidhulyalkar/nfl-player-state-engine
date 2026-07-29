@@ -165,4 +165,12 @@ def build_decision_board(
     data["decision_specific_score"] = utility
     data["decision_percentile"] = _percentile(data["decision_specific_score"])
     data["decision_reasons"] = _reason_codes(data, decision)
-    return data.sort_values("decision_specific_score", ascending=False).reset_index(drop=True)
+    tie_breakers = [column for column in ("player_id", "player_name") if column in data.columns]
+    data = data.sort_values(
+        ["decision_specific_score", *tie_breakers],
+        ascending=[False, *([True] * len(tie_breakers))],
+        kind="mergesort",
+    ).reset_index(drop=True)
+    data["overall_rank"] = np.arange(1, len(data) + 1, dtype=int)
+    data["position_rank"] = data.groupby("position", sort=False).cumcount() + 1
+    return data

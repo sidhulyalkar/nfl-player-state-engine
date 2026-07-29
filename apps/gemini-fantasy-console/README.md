@@ -1,6 +1,6 @@
 # Fourth Down Lab: Gemini Fantasy Console
 
-A React + Node full-stack frontend for the NFL Player State Engine. It is designed for Google AI Studio Build mode, local Vite development, or Cloud Run.
+A React 19 + Express 5 full-stack frontend for the NFL Player State Engine. It is designed for the Google AI Studio Node.js 22 runtime, local development, or Cloud Run.
 
 ## Responsibilities
 
@@ -23,7 +23,19 @@ cp .env.example .env
 npm run dev
 ```
 
-The UI includes demo data when the Product API has no imported league yet.
+Express listens on `0.0.0.0:3000` by default and mounts Vite as development middleware. In production it serves the compiled React application, including the SPA route fallback, from the same process. The UI includes clearly labeled synthetic fixtures when the Product API has no imported league yet.
+
+## Evidence-aware product surfaces
+
+- Persistent `SYNTHETIC DEMO`, `HISTORICAL BACKTEST`, or `LIVE` provenance
+- Model version, prediction timestamp, feature cutoff, identity coverage, and missing-input warnings
+- Decision-specific player rankings with overall and positional ranks, VORP, search, sorting, and CSV export
+- Roster-relative waiver and legal-lineup endpoints
+- League positional-needs heatmap and two-sided trade deltas
+- Frozen historical prediction replay and experiment-gate results
+- Lagged team-context fingerprints separated from observed standings
+
+Gemini explains deterministic Product API results. When `GEMINI_API_KEY` is absent, the server can still route lineup, waiver, trade, and ranking questions to the corresponding Product API tool and returns a labeled structured fallback.
 
 ## Google AI Studio
 
