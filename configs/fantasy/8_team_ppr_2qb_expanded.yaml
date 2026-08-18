@@ -1,0 +1,15 @@
+teams: 8
+scoring: ppr
+median_scoring: false
+risk_preference: 0.55
+replacement_buffer: 1
+bench_value_weight: 0.25
+roster_slots:
+  QB: 2
+  RB: 3
+  WR: 3
+  TE: 1
+  FLEX: 3
+  DEF: 1
+  K: 1
+  BENCH: 6

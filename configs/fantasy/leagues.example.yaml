@@ -1,0 +1,23 @@
+season: 2026
+snapshot_root: data/product/live_leagues
+
+# Fill in league IDs after platform setup. Sleeper can also discover every league
+# for a username when league_id is omitted.
+leagues:
+  - key: league_12_half_ppr_median
+    platform: sleeper
+    username: YOUR_SLEEPER_USERNAME
+    # league_id: "OPTIONAL_IF_DISCOVERING_BY_USERNAME"
+    profile: configs/fantasy/12_team_half_ppr_median.yaml
+
+  - key: league_8_ppr_a
+    platform: sleeper
+    league_id: "YOUR_SLEEPER_LEAGUE_ID"
+    profile: configs/fantasy/8_team_ppr_2qb_expanded.yaml
+
+  - key: league_8_ppr_b
+    platform: espn
+    league_id: "YOUR_ESPN_LEAGUE_ID"
+    profile: configs/fantasy/8_team_ppr_2qb_expanded.yaml
+    espn_s2_env: PSE_ESPN_S2
+    swid_env: PSE_ESPN_SWID

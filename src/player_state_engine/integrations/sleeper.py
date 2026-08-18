@@ -21,9 +21,57 @@ class SleeperImporter(LeagueImporter):
 
     def __init__(self, client: JsonClient | None = None) -> None:
         self.client = client or StandardLibraryJsonClient()
+        self._player_map_cache: dict[str, Any] | None = None
+        self._state_cache: dict[str, Any] | None = None
 
     def _get(self, path: str) -> Any:
         return self.client.get_json(f"{self.base_url}/{path.lstrip('/')}")
+
+    def get_nfl_state(self, *, refresh: bool = False) -> dict[str, Any]:
+        if self._state_cache is None or refresh:
+            self._state_cache = dict(self._get("state/nfl") or {})
+        return self._state_cache
+
+    def get_player_map(self, *, refresh: bool = False) -> dict[str, Any]:
+        if self._player_map_cache is None or refresh:
+            payload = self._get("players/nfl") or {}
+            self._player_map_cache = payload if isinstance(payload, dict) else {}
+        return self._player_map_cache
+
+    def get_user(self, username_or_user_id: str) -> dict[str, Any]:
+        return dict(self._get(f"user/{username_or_user_id}") or {})
+
+    def list_user_leagues(
+        self, username_or_user_id: str, *, season: int | None = None
+    ) -> list[dict[str, Any]]:
+        user = self.get_user(username_or_user_id)
+        user_id = str(user.get("user_id") or username_or_user_id)
+        resolved_season = int(season or self.get_nfl_state().get("season"))
+        payload = self._get(f"user/{user_id}/leagues/nfl/{resolved_season}") or []
+        return [dict(item) for item in payload]
+
+    def import_user_leagues(
+        self,
+        username_or_user_id: str,
+        *,
+        season: int | None = None,
+        include_free_agents: bool = True,
+        player_pool_limit: int | None = None,
+    ) -> list[LeagueSnapshot]:
+        user = self.get_user(username_or_user_id)
+        user_id = str(user.get("user_id") or username_or_user_id)
+        leagues = self.list_user_leagues(user_id, season=season)
+        if include_free_agents:
+            self.get_player_map()
+        return [
+            self.import_league(
+                str(league["league_id"]),
+                external_user_id=user_id,
+                include_free_agents=include_free_agents,
+                player_pool_limit=player_pool_limit,
+            )
+            for league in leagues
+        ]
 
     def import_league(
         self,
@@ -37,8 +85,8 @@ class SleeperImporter(LeagueImporter):
         rosters = self._get(f"league/{league_id}/rosters")
         users = self._get(f"league/{league_id}/users")
         traded_picks = self._get(f"league/{league_id}/traded_picks")
-        state = self._get("state/nfl")
-        player_map = self._get("players/nfl") if include_free_agents else {}
+        state = self.get_nfl_state()
+        player_map = self.get_player_map() if include_free_agents else {}
 
         user_by_id = {str(user.get("user_id")): user for user in users}
         managers: list[FantasyManager] = []
@@ -71,27 +119,25 @@ class SleeperImporter(LeagueImporter):
                 player_id = str(player_id)
                 owned.add(player_id)
                 player = player_map.get(player_id, {}) if isinstance(player_map, dict) else {}
+                fantasy_positions = player.get("fantasy_positions") or []
                 entries.append(
                     RosterEntry(
                         platform_player_id=player_id,
                         canonical_player_id=player.get("gsis_id") or player.get("sportradar_id"),
                         player_name=player.get("full_name") or player.get("first_name"),
-                        position=player.get("fantasy_positions", [player.get("position")])[0]
-                        if player.get("fantasy_positions")
-                        else player.get("position"),
+                        position=(fantasy_positions[0] if fantasy_positions else player.get("position")),
                         nfl_team=player.get("team"),
                         is_starter=player_id in starters,
                         is_injured_reserve=player_id in reserve,
                     )
                 )
             settings = roster.get("settings") or {}
-            total_fpts = (
-                float(settings.get("fpts", 0)) + float(settings.get("fpts_decimal", 0)) / 100.0
-            )
-            total_against = (
-                float(settings.get("fpts_against", 0))
-                + float(settings.get("fpts_against_decimal", 0)) / 100.0
-            )
+            total_fpts = float(settings.get("fpts", 0) or 0) + float(
+                settings.get("fpts_decimal", 0) or 0
+            ) / 100.0
+            total_against = float(settings.get("fpts_against", 0) or 0) + float(
+                settings.get("fpts_against_decimal", 0) or 0
+            ) / 100.0
             budget_total = float(league.get("settings", {}).get("waiver_budget", 100) or 100)
             budget_used = float(settings.get("waiver_budget_used", 0) or 0)
             normalized_rosters.append(
@@ -119,7 +165,8 @@ class SleeperImporter(LeagueImporter):
             for player_id, player in player_map.items():
                 if str(player_id) in owned or not player.get("active"):
                     continue
-                position = player.get("fantasy_positions", [player.get("position")])[0]
+                fantasy_positions = player.get("fantasy_positions") or []
+                position = fantasy_positions[0] if fantasy_positions else player.get("position")
                 if position not in {"QB", "RB", "WR", "TE", "K", "DEF"}:
                     continue
                 free_agents.append(
@@ -143,15 +190,39 @@ class SleeperImporter(LeagueImporter):
             DraftPickAsset(
                 season=int(pick["season"]),
                 round=int(pick["round"]),
-                original_roster_id=str(pick.get("roster_id"))
-                if pick.get("roster_id") is not None
-                else None,
-                current_roster_id=str(pick.get("owner_id"))
-                if pick.get("owner_id") is not None
-                else None,
+                original_roster_id=(str(pick.get("roster_id")) if pick.get("roster_id") is not None else None),
+                current_roster_id=(str(pick.get("owner_id")) if pick.get("owner_id") is not None else None),
             )
             for pick in traded_picks
         ]
+
+        current_week = int(state.get("week")) if state.get("week") is not None else None
+        matchups = self._get(f"league/{league_id}/matchups/{current_week}") if current_week else []
+        drafts = self._get(f"league/{league_id}/drafts") or []
+        active_draft = next(
+            (draft for draft in drafts if draft.get("status") in {"pre_draft", "drafting"}),
+            drafts[0] if drafts else None,
+        )
+        draft_picks_live: list[dict[str, Any]] = []
+        if active_draft and active_draft.get("draft_id"):
+            draft_picks_live = self._get(f"draft/{active_draft['draft_id']}/picks") or []
+
+        external_roster_id = None
+        if external_user_id:
+            external_roster_id = next(
+                (
+                    str(roster.get("roster_id"))
+                    for roster in rosters
+                    if str(roster.get("owner_id")) == str(external_user_id)
+                ),
+                None,
+            )
+
+        median_scoring = bool(
+            settings_payload.get("league_average_match")
+            or settings_payload.get("median_matchup")
+            or settings_payload.get("median_scoring")
+        )
         return LeagueSnapshot(
             identity=LeagueIdentity(
                 league_id=str(league_id),
@@ -164,20 +235,27 @@ class SleeperImporter(LeagueImporter):
             settings=LeagueSettings(
                 teams=int(league.get("total_rosters") or len(normalized_rosters)),
                 season=int(league.get("season") or state.get("season")),
-                current_week=int(state.get("week")) if state.get("week") is not None else None,
+                current_week=current_week,
                 scoring=scoring,
                 roster_positions=roster_positions,
                 playoff_week_start=settings_payload.get("playoff_week_start"),
-                waiver_type=str(settings_payload.get("waiver_type"))
-                if settings_payload.get("waiver_type") is not None
-                else None,
+                waiver_type=(str(settings_payload.get("waiver_type")) if settings_payload.get("waiver_type") is not None else None),
                 faab_budget=float(settings_payload.get("waiver_budget", 0) or 0),
                 dynasty=bool(settings_payload.get("type") == 2 or league.get("previous_league_id")),
-                superflex="SUPER_FLEX" in roster_positions,
+                superflex=any(slot in {"SUPER_FLEX", "SUPERFLEX", "OP"} for slot in roster_positions),
+                median_scoring=median_scoring,
+                draft_type=(str(active_draft.get("type")) if active_draft else None),
             ),
             managers=managers,
             rosters=normalized_rosters,
             free_agents=free_agents,
             draft_picks=picks,
-            metadata={"nfl_state": state, "raw_status": league.get("status")},
+            metadata={
+                "nfl_state": state,
+                "raw_status": league.get("status"),
+                "matchups": matchups,
+                "active_draft": active_draft,
+                "live_draft_picks": draft_picks_live,
+                "external_roster_id": external_roster_id,
+            },
         )

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nfl-player-state-engine"
-version = "0.6.0"
+version = "0.7.0"
 description = "Leakage-safe probabilistic NFL player projections and game simulation."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -40,7 +40,8 @@ api = ["fastapi>=0.115", "uvicorn>=0.30"]
 intelligence = ["httpx>=0.27", "beautifulsoup4>=4.12", "feedparser>=6.0"]
 browser = ["httpx>=0.27", "beautifulsoup4>=4.12", "feedparser>=6.0", "playwright>=1.50"]
 historical = ["pyreadr>=0.5"]
-all = ["nfl-player-state-engine[dev,dashboard,intelligence,historical,api]"]
+espn = ["espn-api>=0.46.0"]
+all = ["nfl-player-state-engine[dev,dashboard,intelligence,historical,api,espn]"]
 
 [project.scripts]
 pse = "player_state_engine.cli:app"
