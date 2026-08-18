@@ -71,14 +71,25 @@ class PlayCallModel:
         if valid.sum() < 50 or target.loc[valid].nunique() < 2:
             raise ValueError("PlayCallModel requires at least 50 labeled run/dropback plays")
         self.pipeline.fit(self._features(frame.loc[valid]), target.loc[valid].astype(int))
-        if "season" in frame:
-            self.train_max_season = int(
-                pd.to_numeric(frame.loc[valid, "season"], errors="coerce").max()
-            )
-        if "week" in frame:
-            self.train_max_week = int(
-                pd.to_numeric(frame.loc[valid, "week"], errors="coerce").max()
-            )
+
+        if "season" in frame and "week" in frame:
+            cutoff = pd.DataFrame(
+                {
+                    "season": pd.to_numeric(frame.loc[valid, "season"], errors="coerce"),
+                    "week": pd.to_numeric(frame.loc[valid, "week"], errors="coerce"),
+                }
+            ).dropna()
+            if not cutoff.empty:
+                latest = cutoff.sort_values(["season", "week"], kind="mergesort").iloc[-1]
+                self.train_max_season = int(latest["season"])
+                self.train_max_week = int(latest["week"])
+        elif "season" in frame:
+            season = pd.to_numeric(frame.loc[valid, "season"], errors="coerce").dropna()
+            self.train_max_season = int(season.max()) if not season.empty else None
+        elif "week" in frame:
+            week = pd.to_numeric(frame.loc[valid, "week"], errors="coerce").dropna()
+            self.train_max_week = int(week.max()) if not week.empty else None
+
         self.fitted = True
         return self
 
