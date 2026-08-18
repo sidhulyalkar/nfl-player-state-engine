@@ -38,7 +38,7 @@ def _patterned_plays() -> pd.DataFrame:
         "trailing",
         "neutral",
     )
-    plays["seconds_between_plays"] = np.where(
+    plays["seconds_to_next_play"] = np.where(
         score_state == "trailing",
         14.0,
         np.where(plays["play_family"].eq("RUSH"), 31.0, 24.0),
@@ -63,6 +63,23 @@ def _research_inputs():
         players=_players(),
     )
     return plays, tendencies, usage, play_model, outcome_model, opportunity_model, drive_model
+
+
+def test_forward_pace_target_is_aligned_to_current_play() -> None:
+    plays = build_play_intelligence_frame(_synthetic_pbp())
+    drive = plays.loc[
+        plays["game_id"].eq("2026_02_BBB_AAA")
+        & plays["posteam"].eq("AAA")
+        & (pd.to_numeric(plays["drive"], errors="coerce") == 1)
+    ].sort_values("play_id")
+    assert len(drive) >= 2
+    assert pd.isna(drive.iloc[0]["seconds_between_plays"])
+    expected = (
+        float(drive.iloc[0]["game_seconds_remaining"])
+        - float(drive.iloc[1]["game_seconds_remaining"])
+    )
+    assert drive.iloc[0]["seconds_to_next_play"] == expected
+    assert pd.isna(drive.iloc[-1]["seconds_to_next_play"])
 
 
 def test_drive_extraction_and_observed_volume_are_game_team_scoped() -> None:
@@ -119,10 +136,17 @@ def test_pace_permutation_preserves_team_season_distribution() -> None:
         challenger = permuted.loc[
             (permuted["season"] == key[0]) & permuted["posteam"].eq(key[1])
         ]
-        assert sorted(original["seconds_between_plays"].tolist()) == sorted(
-            challenger["seconds_between_plays"].tolist()
+        original_values = pd.to_numeric(
+            original["seconds_to_next_play"], errors="coerce"
         )
-    assert not permuted["seconds_between_plays"].equals(plays["seconds_between_plays"])
+        challenger_values = pd.to_numeric(
+            challenger["seconds_to_next_play"], errors="coerce"
+        )
+        assert sorted(original_values.dropna().tolist()) == sorted(
+            challenger_values.dropna().tolist()
+        )
+        assert original_values.isna().sum() == challenger_values.isna().sum()
+    assert not permuted["seconds_to_next_play"].equals(plays["seconds_to_next_play"])
 
 
 def test_volume_probe_is_deterministic_and_tracks_drive_metrics() -> None:
