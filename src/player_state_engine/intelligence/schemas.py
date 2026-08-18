@@ -7,7 +7,18 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 Platform = Literal[
-    "public_web", "public_browser", "rss", "x", "threads", "instagram", "tiktok", "manual"
+    "public_web",
+    "public_browser",
+    "rss",
+    "nfl_official",
+    "team_official",
+    "beat_reporter",
+    "fantasy_analysis",
+    "x",
+    "threads",
+    "instagram",
+    "tiktok",
+    "manual",
 ]
 
 
