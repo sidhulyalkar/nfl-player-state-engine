@@ -40,6 +40,15 @@ RANKING_SOURCES: tuple[RankingSourceSpec, ...] = (
         notes="Use API credentials; preserve expert dispersion and capture timestamp.",
     ),
     RankingSourceSpec(
+        "fantasypros_adp",
+        "FantasyPros ADP",
+        "market",
+        "api",
+        True,
+        True,
+        notes="Official API market snapshot; capture the source timestamp before every draft replay.",
+    ),
+    RankingSourceSpec(
         "nflverse_ff_rankings",
         "nflverse ffverse rankings",
         "expert",
