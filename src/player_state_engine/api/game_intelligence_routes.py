@@ -90,7 +90,7 @@ def install_game_intelligence_routes(
     )
     benchmark = Path(
         benchmark_root
-        or os.getenv("PSE_GAME_INTELLIGENCE_BENCHMARK_ROOT", "artifacts/game_intelligence/v012")
+        or os.getenv("PSE_GAME_INTELLIGENCE_BENCHMARK_ROOT", "artifacts/game_intelligence/v013")
     )
 
     @app.get("/v1/research/game-intelligence/sources")
@@ -108,7 +108,7 @@ def install_game_intelligence_routes(
         artifact_dir = _latest_artifact_dir(root) if root.exists() else None
         benchmark_summary = _latest_benchmark_summary(benchmark)
         return {
-            "model_family": "game_intelligence_v012_research",
+            "model_family": "game_intelligence_v013_research",
             "latest_registry_entry": latest,
             "registry_entries": len(entries),
             "artifact_available": artifact_dir is not None,
@@ -133,7 +133,7 @@ def install_game_intelligence_routes(
         if summary is None:
             raise HTTPException(
                 status_code=503,
-                detail=f"No v0.12 game-intelligence benchmark summary available under {benchmark}",
+                detail=f"No v0.13 game-intelligence benchmark summary available under {benchmark}",
             )
         path, payload = summary
         return {
