@@ -17,16 +17,22 @@ class LeagueSettings(BaseModel):
     faab_budget: float | None = None
     dynasty: bool = False
     superflex: bool = False
+    median_scoring: bool = False
+    draft_type: str | None = None
 
 
 class LeagueIdentity(BaseModel):
     league_id: str
-    platform: Literal["sleeper", "yahoo", "fleaflicker", "csv", "manual", "demo"]
+    platform: Literal["sleeper", "espn", "yahoo", "fleaflicker", "csv", "manual", "demo"]
     name: str
     season: int
     imported_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     source_url: str | None = None
     external_user_id: str | None = None
+
+    @property
+    def canonical_key(self) -> str:
+        return f"{self.platform}:{self.league_id}:{self.season}"
 
 
 class FantasyManager(BaseModel):
