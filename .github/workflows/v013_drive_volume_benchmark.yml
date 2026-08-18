@@ -1,0 +1,121 @@
+name: v013-drive-volume-benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Smoke validates plumbing; full runs the requested historical window"
+        required: true
+        type: choice
+        options:
+          - smoke
+          - full
+        default: smoke
+      source_seasons:
+        description: "Comma-separated seasons to acquire, including warm-up history"
+        required: true
+        default: "2021,2022,2023,2024,2025"
+      test_seasons:
+        description: "Comma-separated held-out seasons to replay in full mode"
+        required: true
+        default: "2023,2024,2025"
+      week_start:
+        description: "First regular-season week in full mode"
+        required: true
+        default: "1"
+      week_end:
+        description: "Last regular-season week in full mode"
+        required: true
+        default: "18"
+      simulations_per_game:
+        description: "Monte Carlo draws per game and variant in full mode"
+        required: true
+        default: "15"
+      max_games_per_week:
+        description: "Optional full-mode cap; blank runs every game"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  drive-volume-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install engine
+        run: python -m pip install -e '.[intelligence]'
+      - name: Acquire historical evidence
+        shell: bash
+        run: |
+          IFS=',' read -ra SEASONS <<< "${{ inputs.source_seasons }}"
+          ARGS=()
+          for season in "${SEASONS[@]}"; do
+            season="$(echo "$season" | xargs)"
+            ARGS+=(--season "$season")
+          done
+          python scripts/acquire_game_intelligence_sources.py \
+            "${ARGS[@]}" \
+            --output-dir data/raw/game_intelligence/v013
+      - name: Resolve benchmark mode
+        id: mode
+        shell: bash
+        run: |
+          if [ "${{ inputs.mode }}" = "smoke" ]; then
+            echo "test_seasons=2025" >> "$GITHUB_OUTPUT"
+            echo "week_start=1" >> "$GITHUB_OUTPUT"
+            echo "week_end=4" >> "$GITHUB_OUTPUT"
+            echo "simulations=3" >> "$GITHUB_OUTPUT"
+            echo "max_games=2" >> "$GITHUB_OUTPUT"
+          else
+            echo "test_seasons=${{ inputs.test_seasons }}" >> "$GITHUB_OUTPUT"
+            echo "week_start=${{ inputs.week_start }}" >> "$GITHUB_OUTPUT"
+            echo "week_end=${{ inputs.week_end }}" >> "$GITHUB_OUTPUT"
+            echo "simulations=${{ inputs.simulations_per_game }}" >> "$GITHUB_OUTPUT"
+            echo "max_games=${{ inputs.max_games_per_week }}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Run eight-cell expanding replay
+        shell: bash
+        run: |
+          IFS=',' read -ra TEST_SEASONS <<< "${{ steps.mode.outputs.test_seasons }}"
+          TEST_ARGS=()
+          for season in "${TEST_SEASONS[@]}"; do
+            season="$(echo "$season" | xargs)"
+            TEST_ARGS+=(--test-season "$season")
+          done
+          MAX_ARGS=()
+          if [ -n "${{ steps.mode.outputs.max_games }}" ]; then
+            MAX_ARGS=(--max-games-per-week "${{ steps.mode.outputs.max_games }}")
+          fi
+          PLAYER_ARGS=()
+          if [ -f data/raw/game_intelligence/v013/players.parquet ]; then
+            PLAYER_ARGS=(--players data/raw/game_intelligence/v013/players.parquet)
+          fi
+          python scripts/run_v013_drive_volume_benchmark.py \
+            --pbp data/raw/game_intelligence/v013/play_by_play.parquet \
+            --schedules data/raw/game_intelligence/v013/schedules.parquet \
+            --player-actuals data/raw/game_intelligence/v013/player_stats.parquet \
+            "${PLAYER_ARGS[@]}" \
+            "${TEST_ARGS[@]}" \
+            --week-start "${{ steps.mode.outputs.week_start }}" \
+            --week-end "${{ steps.mode.outputs.week_end }}" \
+            --simulations-per-game "${{ steps.mode.outputs.simulations }}" \
+            "${MAX_ARGS[@]}" \
+            --output-dir artifacts/game_intelligence/v013
+      - name: Publish report to job summary
+        shell: bash
+        run: cat artifacts/game_intelligence/v013/report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload drive-volume benchmark evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: v013-drive-volume-benchmark-${{ github.run_id }}
+          path: |
+            artifacts/game_intelligence/v013
+            data/raw/game_intelligence/v013/acquisition_manifest.json
+          if-no-files-found: error
+          retention-days: 30

@@ -2,6 +2,11 @@ name: ci
 on:
   push:
   pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   python:
     runs-on: ubuntu-latest
@@ -21,7 +26,8 @@ jobs:
             scripts/weekly_game_intelligence_refresh.py \
             scripts/run_v011_game_benchmark.py \
             scripts/run_v011_blend_benchmark.py \
-            scripts/run_v012_factorial_benchmark.py
+            scripts/run_v012_factorial_benchmark.py \
+            scripts/run_v013_drive_volume_benchmark.py
       - name: Compile Python sources and all scripts
         run: python -m compileall -q src scripts tests
       - run: pytest
