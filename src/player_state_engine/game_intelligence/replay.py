@@ -7,21 +7,23 @@ import pandas as pd
 
 from player_state_engine.fantasy.league import LeagueConfig
 from player_state_engine.game_intelligence.evaluation import (
-    evaluate_player_opportunity,
     evaluate_play_call_probabilities,
+    evaluate_player_opportunity,
     evaluate_team_simulation_draws,
     interval_coverage,
 )
 from player_state_engine.game_intelligence.models import EmpiricalPlayOutcomeModel, PlayCallModel
 from player_state_engine.game_intelligence.play_features import build_play_intelligence_frame
 from player_state_engine.game_intelligence.schema import MatchupSpec, SimulationConfig
-from player_state_engine.game_intelligence.simulator import PlayByPlaySimulationResult, simulate_matchup
+from player_state_engine.game_intelligence.simulator import (
+    PlayByPlaySimulationResult,
+    simulate_matchup,
+)
 from player_state_engine.game_intelligence.tendencies import (
     attach_point_in_time_matchup_features,
     build_team_tendency_snapshots,
 )
 from player_state_engine.game_intelligence.usage import build_player_usage_profiles
-
 
 @dataclass(slots=True)
 class GameReplayResult:
@@ -107,7 +109,9 @@ def observed_team_games(play_frame: pd.DataFrame, schedules: pd.DataFrame) -> pd
 
 def observed_player_opportunity(play_frame: pd.DataFrame) -> pd.DataFrame:
     carries = (
-        play_frame.loc[play_frame["play_family"].eq("RUSH") & play_frame["rusher_player_id"].notna()]
+        play_frame.loc[
+            play_frame["play_family"].eq("RUSH") & play_frame["rusher_player_id"].notna()
+        ]
         .groupby(["game_id", "rusher_player_id"], dropna=False)
         .size()
         .rename("carries")
@@ -144,7 +148,9 @@ def predicted_player_opportunity(
         return pd.DataFrame(columns=["game_id", "player_id", "carries", "targets"])
     dropbacks = joined["plays"] * joined["pass_rate"]
     rushes = (joined["plays"] - dropbacks).clip(lower=0.0)
-    joined["targets"] = dropbacks * pd.to_numeric(joined["target_share"], errors="coerce").fillna(0)
+    joined["targets"] = dropbacks * pd.to_numeric(
+        joined["target_share"], errors="coerce"
+    ).fillna(0)
     joined["carries"] = rushes * pd.to_numeric(joined["carry_share"], errors="coerce").fillna(0)
     return joined[["game_id", "player_id", "carries", "targets"]].copy()
 
@@ -165,7 +171,11 @@ def _fantasy_metrics(
     )
     if value_column is None or "player_id" not in actual:
         return {}
-    keys = [column for column in ("season", "week", "player_id") if column in predictions and column in actual]
+    keys = [
+        column
+        for column in ("season", "week", "player_id")
+        if column in predictions and column in actual
+    ]
     if "player_id" not in keys:
         return {}
     observed = actual[keys + [value_column]].copy()
@@ -328,7 +338,9 @@ def frozen_game_replay(
 
     test_game_ids = set(candidate_team["game_id"].astype(str))
     observed_teams = observed_team_games(play_frame, test_schedule)
-    observed_teams = observed_teams.loc[observed_teams["game_id"].astype(str).isin(test_game_ids)]
+    observed_teams = observed_teams.loc[
+        observed_teams["game_id"].astype(str).isin(test_game_ids)
+    ]
     observed_opportunity = observed_player_opportunity(play_frame)
     observed_opportunity = observed_opportunity.loc[
         observed_opportunity["game_id"].astype(str).isin(test_game_ids)
