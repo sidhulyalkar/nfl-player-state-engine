@@ -47,6 +47,12 @@ def _merge_optional(
     return base.merge(renamed, on=keys, how="left", validate="many_to_one")
 
 
+def _possession_sequence(frame: pd.DataFrame) -> pd.Series:
+    return frame.groupby("game_id", sort=False)["posteam"].transform(
+        lambda values: values.ne(values.shift()).cumsum()
+    )
+
+
 def build_play_intelligence_frame(
     pbp: pd.DataFrame,
     participation: pd.DataFrame | None = None,
@@ -135,7 +141,11 @@ def build_play_intelligence_frame(
         | ((data["play_family"].eq("DROPBACK")) & data["yards_gained"].ge(20))
     ).astype(int)
 
-    drive = data["drive"] if "drive" in data else pd.Series(0, index=data.index)
+    fallback_drive = _possession_sequence(data)
+    if "drive" in data:
+        drive = pd.to_numeric(data["drive"], errors="coerce").fillna(fallback_drive)
+    else:
+        drive = fallback_drive
     groups = [data["game_id"], drive, data["posteam"]]
     grouped_clock = data.groupby(groups, sort=False)["game_seconds_remaining"]
     previous_clock = grouped_clock.shift(1)
