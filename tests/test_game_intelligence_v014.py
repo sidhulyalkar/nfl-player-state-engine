@@ -5,6 +5,7 @@ import pandas as pd
 
 from player_state_engine.fantasy.league import LeagueConfig
 from player_state_engine.game_intelligence.drive import DriveVolumeModel
+from player_state_engine.game_intelligence.drive_simulator import simulate_matchup_volume_probe
 from player_state_engine.game_intelligence.models import EmpiricalPlayOutcomeModel, PlayCallModel
 from player_state_engine.game_intelligence.opportunity import StateConditionedOpportunityModel
 from player_state_engine.game_intelligence.play_features import build_play_intelligence_frame
@@ -19,6 +20,7 @@ from player_state_engine.game_intelligence.transition import (
     evaluate_field_goal_scores,
     evaluate_transition_event_scores,
     extract_field_goal_attempts,
+    observed_transition_team_games,
     permute_field_goal_results_within_distance_season,
     permute_transition_targets_within_type_season,
 )
@@ -34,24 +36,40 @@ from player_state_engine.game_intelligence.usage import build_player_usage_profi
 from tests.test_game_intelligence_v011 import _players
 
 
+def _next_start(previous_kind: int, next_team: str) -> float:
+    if previous_kind == 0:
+        return 86.0 if next_team == "AAA" else 74.0
+    if previous_kind == 1:
+        return 76.0
+    if previous_kind == 2:
+        return 62.0
+    if previous_kind == 3:
+        return 58.0 if next_team == "AAA" else 66.0
+    if previous_kind == 4:
+        return 75.0
+    return 55.0 if next_team == "AAA" else 63.0
+
+
 def _transition_pbp() -> pd.DataFrame:
     rows: list[dict[str, object]] = []
-    games = [(2025, 17), (2025, 18), (2026, 1), (2026, 2)]
+    games = ((2025, 17), (2025, 18), (2026, 1), (2026, 2))
     for season, week in games:
         game_id = f"{season}_{week:02d}_BBB_AAA"
         clock = 3600.0
         play_id = 1
+        previous_kind: int | None = None
         for possession in range(20):
             team = "AAA" if possession % 2 == 0 else "BBB"
             defense = "BBB" if team == "AAA" else "AAA"
-            source_yardline = 68.0 if possession % 3 else 42.0
-            next_start = 84.0 if defense == "AAA" else 72.0
-            transition_kind = possession % 6
+            start_yardline = 75.0 if previous_kind is None else _next_start(previous_kind, team)
+            kind = possession % 6
+
             for local in range(2):
                 is_pass = int(local == 0)
-                touchdown = int(local == 1 and transition_kind == 4)
-                interception = int(local == 1 and transition_kind == 3)
-                down = 1 if local == 0 else 4
+                terminal = local == 1
+                touchdown = int(terminal and kind == 4)
+                interception = int(terminal and kind == 3)
+                first_down = int(local == 0)
                 rows.append(
                     {
                         "season": season,
@@ -68,10 +86,10 @@ def _transition_pbp() -> pd.DataFrame:
                         "qb_dropback": is_pass,
                         "sack": 0,
                         "qb_scramble": 0,
-                        "down": down,
+                        "down": 1 if local == 0 else 4,
                         "ydstogo": 7.0,
-                        "yardline_100": source_yardline - local * 6,
-                        "qtr": min(4, 1 + int((3600 - clock) // 900)),
+                        "yardline_100": start_yardline if local == 0 else max(5.0, start_yardline - 6.0),
+                        "qtr": min(4, 1 + int((3600.0 - clock) // 900.0)),
                         "game_seconds_remaining": clock,
                         "score_differential": 0.0,
                         "goal_to_go": 0,
@@ -79,7 +97,7 @@ def _transition_pbp() -> pd.DataFrame:
                         "no_huddle": 0,
                         "yards_gained": 6.0,
                         "touchdown": touchdown,
-                        "first_down": int(local == 0),
+                        "first_down": first_down,
                         "complete_pass": is_pass,
                         "interception": interception,
                         "fumble_lost": 0,
@@ -96,8 +114,9 @@ def _transition_pbp() -> pd.DataFrame:
                     }
                 )
                 play_id += 1
-                clock -= 18.0 if is_pass else 26.0
-            if transition_kind == 0:
+                clock -= 18.0 if is_pass else 12.0
+
+            if kind == 0:
                 rows.append(
                     {
                         "season": season,
@@ -116,8 +135,8 @@ def _transition_pbp() -> pd.DataFrame:
                         "qb_scramble": 0,
                         "down": 4,
                         "ydstogo": 7.0,
-                        "yardline_100": source_yardline - 6.0,
-                        "qtr": min(4, 1 + int((3600 - clock) // 900)),
+                        "yardline_100": max(5.0, start_yardline - 6.0),
+                        "qtr": min(4, 1 + int((3600.0 - clock) // 900.0)),
                         "game_seconds_remaining": clock,
                         "score_differential": 0.0,
                         "yards_gained": 0.0,
@@ -135,9 +154,8 @@ def _transition_pbp() -> pd.DataFrame:
                 )
                 play_id += 1
                 clock -= 8.0
-                next_start = 86.0 if defense == "AAA" else 74.0
-            elif transition_kind in {1, 2}:
-                made = transition_kind == 1
+            elif kind in {1, 2}:
+                made = kind == 1
                 rows.append(
                     {
                         "season": season,
@@ -157,7 +175,7 @@ def _transition_pbp() -> pd.DataFrame:
                         "down": 4,
                         "ydstogo": 7.0,
                         "yardline_100": 28.0 if made else 38.0,
-                        "qtr": min(4, 1 + int((3600 - clock) // 900)),
+                        "qtr": min(4, 1 + int((3600.0 - clock) // 900.0)),
                         "game_seconds_remaining": clock,
                         "score_differential": 0.0,
                         "yards_gained": 0.0,
@@ -176,42 +194,9 @@ def _transition_pbp() -> pd.DataFrame:
                 )
                 play_id += 1
                 clock -= 5.0
-                next_start = 76.0 if made else 62.0
-            elif transition_kind == 3:
-                next_start = 58.0 if defense == "AAA" else 66.0
-            elif transition_kind == 4:
-                next_start = 75.0
-            else:
-                next_start = 55.0 if defense == "AAA" else 63.0
             clock -= 4.0
-            if possession < 19:
-                # The following possession's first scrimmage row will carry this target.
-                pass
-    frame = pd.DataFrame(rows)
-
-    # Re-encode each possession's first scrimmage starting yardline from its prior transition.
-    for game_id, game in frame.groupby("game_id", sort=False):
-        scrimmage = game.loc[(game["pass_attempt"] + game["rush_attempt"]).gt(0)].copy()
-        groups = [g for _, g in scrimmage.groupby("drive", sort=False)]
-        for previous, following in zip(groups[:-1], groups[1:], strict=True):
-            terminal_id = int(previous["play_id"].iloc[-1])
-            window = game.loc[
-                game["play_id"].between(terminal_id, int(following["play_id"].iloc[0]))
-            ]
-            if window["punt_attempt"].fillna(0).gt(0).any():
-                target = 86.0 if str(following["posteam"].iloc[0]) == "AAA" else 74.0
-            elif window["field_goal_attempt"].fillna(0).gt(0).any():
-                fg = window.loc[window["field_goal_attempt"].fillna(0).gt(0)].iloc[-1]
-                target = 76.0 if str(fg["field_goal_result"]).lower() == "good" else 62.0
-            elif previous["interception"].fillna(0).gt(0).any():
-                target = 58.0 if str(following["posteam"].iloc[0]) == "AAA" else 66.0
-            elif previous["touchdown"].fillna(0).gt(0).any():
-                target = 75.0
-            else:
-                target = 55.0 if str(following["posteam"].iloc[0]) == "AAA" else 63.0
-            first_index = following.index[0]
-            frame.loc[first_index, "yardline_100"] = target
-    return frame.reset_index(drop=True)
+            previous_kind = kind
+    return pd.DataFrame(rows)
 
 
 def _transition_schedules() -> pd.DataFrame:
@@ -265,16 +250,47 @@ def _research_inputs():
     )
 
 
+def _matchup() -> MatchupSpec:
+    return MatchupSpec(
+        season=2026,
+        week=2,
+        home_team="AAA",
+        away_team="BBB",
+        game_id="2026_02_BBB_AAA",
+        home_spread=-2.5,
+        game_total=46.0,
+    )
+
+
 def test_transition_extractor_uses_terminal_special_teams_event() -> None:
     raw = _transition_pbp()
     transitions = build_possession_transition_frame(raw)
     assert not transitions.empty
-    assert {"PUNT", "FIELD_GOAL_GOOD", "FIELD_GOAL_MISSED", "TURNOVER", "TOUCHDOWN"} <= set(
-        transitions["transition_type"]
-    )
+    assert {
+        "PUNT",
+        "FIELD_GOAL_GOOD",
+        "FIELD_GOAL_MISSED",
+        "TURNOVER",
+        "TOUCHDOWN",
+        "DOWNS",
+    } <= set(transitions["transition_type"])
     punt = transitions.loc[transitions["transition_type"].eq("PUNT")].iloc[0]
     assert punt["transition_seconds"] < 20.0
     assert punt["next_start_yardline_100"] in {74.0, 86.0}
+
+
+def test_raw_observed_counts_include_final_special_teams_event() -> None:
+    raw = _transition_pbp()
+    final_game = raw["game_id"].iloc[-1]
+    final_team = raw.loc[raw["game_id"].eq(final_game), "posteam"].dropna().iloc[-1]
+    observed = observed_transition_team_games(raw)
+    row = observed.loc[
+        observed["game_id"].eq(final_game) & observed["team"].eq(str(final_team))
+    ].iloc[0]
+    assert row["punts"] + row["field_goal_attempts"] + row["turnovers"] >= 0.0
+    raw_events = raw.loc[raw["game_id"].eq(final_game) & raw["posteam"].eq(final_team)]
+    assert row["punts"] == float(raw_events["punt_attempt"].fillna(0).sum())
+    assert row["field_goal_attempts"] == float(raw_events["field_goal_attempt"].fillna(0).sum())
 
 
 def test_transition_permutations_preserve_group_marginals() -> None:
@@ -313,6 +329,47 @@ def test_transition_model_is_point_in_time_and_scores_finite() -> None:
     assert np.isfinite(field_goal_metrics["field_goal_log_loss"])
 
 
+def test_instrumented_transition_off_probe_matches_frozen_v013_core_draws() -> None:
+    (
+        _,
+        tendencies,
+        usage,
+        play_model,
+        outcome_model,
+        opportunity_model,
+        drive_model,
+        _,
+    ) = _research_inputs()
+    config = SimulationConfig(simulations=3, max_plays=60, seed=29)
+    frozen = simulate_matchup_volume_probe(
+        _matchup(),
+        tendencies=tendencies,
+        usage=usage,
+        outcome_model=outcome_model,
+        play_call_model=play_model,
+        opportunity_model=opportunity_model,
+        drive_volume_model=drive_model,
+        league_config=LeagueConfig(),
+        config=config,
+    )
+    instrumented = simulate_matchup_transition_probe(
+        _matchup(),
+        tendencies=tendencies,
+        usage=usage,
+        outcome_model=outcome_model,
+        play_call_model=play_model,
+        opportunity_model=opportunity_model,
+        drive_volume_model=drive_model,
+        transition_model=None,
+        league_config=LeagueConfig(),
+        config=config,
+    )
+    pd.testing.assert_frame_equal(frozen.game_draws, instrumented.game_draws)
+    pd.testing.assert_frame_equal(frozen.player_draws, instrumented.player_draws)
+    common = list(frozen.team_draws.columns)
+    pd.testing.assert_frame_equal(frozen.team_draws, instrumented.team_draws[common])
+
+
 def test_transition_probe_is_deterministic_and_tracks_special_teams() -> None:
     (
         _,
@@ -324,40 +381,20 @@ def test_transition_probe_is_deterministic_and_tracks_special_teams() -> None:
         drive_model,
         transition_model,
     ) = _research_inputs()
-    matchup = MatchupSpec(
-        season=2026,
-        week=2,
-        home_team="AAA",
-        away_team="BBB",
-        game_id="2026_02_BBB_AAA",
-        home_spread=-2.5,
-        game_total=46.0,
-    )
     config = SimulationConfig(simulations=3, max_plays=60, seed=29)
-    first = simulate_matchup_transition_probe(
-        matchup,
-        tendencies=tendencies,
-        usage=usage,
-        outcome_model=outcome_model,
-        play_call_model=play_model,
-        opportunity_model=opportunity_model,
-        drive_volume_model=drive_model,
-        transition_model=transition_model,
-        league_config=LeagueConfig(),
-        config=config,
-    )
-    second = simulate_matchup_transition_probe(
-        matchup,
-        tendencies=tendencies,
-        usage=usage,
-        outcome_model=outcome_model,
-        play_call_model=play_model,
-        opportunity_model=opportunity_model,
-        drive_volume_model=drive_model,
-        transition_model=transition_model,
-        league_config=LeagueConfig(),
-        config=config,
-    )
+    kwargs = {
+        "tendencies": tendencies,
+        "usage": usage,
+        "outcome_model": outcome_model,
+        "play_call_model": play_model,
+        "opportunity_model": opportunity_model,
+        "drive_volume_model": drive_model,
+        "transition_model": transition_model,
+        "league_config": LeagueConfig(),
+        "config": config,
+    }
+    first = simulate_matchup_transition_probe(_matchup(), **kwargs)
+    second = simulate_matchup_transition_probe(_matchup(), **kwargs)
     pd.testing.assert_frame_equal(first.team_draws, second.team_draws)
     pd.testing.assert_frame_equal(first.player_draws, second.player_draws)
     assert {
@@ -367,7 +404,8 @@ def test_transition_probe_is_deterministic_and_tracks_special_teams() -> None:
         "turnovers",
         "turnovers_on_downs",
     } <= set(first.team_draws)
-    assert first.diagnostics["component_rng_version"] == 14
+    assert first.diagnostics["component_rng_base_version"] == 13
+    assert first.diagnostics["transition_rng_stream_added"] is True
     assert first.diagnostics["transition_model"].endswith("v014")
     assert first.diagnostics["production_projection_changed"] is False
 
