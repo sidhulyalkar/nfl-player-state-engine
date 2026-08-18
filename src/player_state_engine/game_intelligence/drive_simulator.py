@@ -53,10 +53,9 @@ def _make_possession_starter(
     matchup: MatchupSpec,
     drive_volume_model: DriveVolumeModel | None,
     rng_tempo: np.random.Generator,
-    drives: dict[str, int],
-    start_yardline_sum: dict[str, float],
+    pending_drive: dict[str, object],
 ) -> _PossessionStarter:
-    """Bind one simulation's possession accounting without closing over the outer loop."""
+    """Create possession state and defer drive accounting until a scrimmage play occurs."""
 
     def start_possession(
         new_offense: str,
@@ -73,8 +72,10 @@ def _make_possession_starter(
                 rng=rng_tempo,
                 fallback_yardline_100=float(fallback_yardline),
             )
-        drives[new_offense] += 1
-        start_yardline_sum[new_offense] += start_yardline
+        pending_drive.clear()
+        pending_drive.update(
+            {"team": str(new_offense), "start_yardline_100": float(start_yardline)}
+        )
         return new_offense, new_defense, start_yardline, 1, min(10.0, start_yardline)
 
     return start_possession
@@ -147,12 +148,12 @@ def simulate_matchup_volume_probe(
         start_yardline_sum = {matchup.home_team: 0.0, matchup.away_team: 0.0}
         continuing_runoff_sum = {matchup.home_team: 0.0, matchup.away_team: 0.0}
         continuing_runoff_count = {matchup.home_team: 0, matchup.away_team: 0}
+        pending_drive: dict[str, object] = {}
         start_possession = _make_possession_starter(
             matchup,
             drive_volume_model,
             rng_tempo,
-            drives,
-            start_yardline_sum,
+            pending_drive,
         )
 
         initial_offense = (
@@ -192,6 +193,13 @@ def simulate_matchup_volume_probe(
                     continue
 
             play_offense = offense
+            if pending_drive and str(pending_drive.get("team")) == str(play_offense):
+                drives[play_offense] += 1
+                start_yardline_sum[play_offense] += float(
+                    pending_drive.get("start_yardline_100", yardline)
+                )
+                pending_drive.clear()
+
             state = {
                 "down": float(down),
                 "ydstogo": float(distance),
@@ -463,6 +471,7 @@ def simulate_matchup_volume_probe(
         "component_rng_streams": True,
         "pace_target": "seconds_to_next_play within continuing drive",
         "seconds_per_play_estimand": "continuing-drive forward runoff",
+        "drive_count_estimand": "possessions with at least one scrimmage play",
         "pace_model_applies_to_continuing_drives_only": True,
         "modeled_pace_plays": int(modeled_pace_plays),
         "state_allocation_attempts": int(state_allocation_attempts),
