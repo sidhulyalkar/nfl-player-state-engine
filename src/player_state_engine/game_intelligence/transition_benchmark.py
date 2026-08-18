@@ -147,14 +147,26 @@ def _aggregate(records: list[dict[str, float]]) -> dict[str, float]:
     return result
 
 
+def _isolated_weight_column(column: str) -> str:
+    if "field_goal" in column or column.startswith("real_fg"):
+        return "field_goal_rows"
+    if "transition_seconds" in column or column.startswith("real_seconds"):
+        return "transition_seconds_rows"
+    if "start_yardline" in column or column.startswith("real_start"):
+        return "transition_start_rows"
+    return "transition_rows"
+
+
 def _aggregate_isolated(frame: pd.DataFrame) -> dict[str, float]:
     if frame.empty:
         return {}
-    result: dict[str, float] = {}
-    weight_columns = {
-        "transition": "transition_rows",
-        "field_goal": "field_goal_rows",
+    totals = {
+        "transition_rows",
+        "transition_start_rows",
+        "transition_seconds_rows",
+        "field_goal_rows",
     }
+    result: dict[str, float] = {}
     for column in frame.columns:
         if column in {"season", "week"}:
             continue
@@ -162,15 +174,22 @@ def _aggregate_isolated(frame: pd.DataFrame) -> dict[str, float]:
         valid = values.notna()
         if not valid.any():
             continue
-        prefix = "field_goal" if column.startswith("field_goal") else "transition"
-        weight_column = weight_columns[prefix]
-        weights = pd.to_numeric(frame.loc[valid, weight_column], errors="coerce").fillna(1.0)
-        if column in {"transition_rows", "transition_start_rows", "transition_seconds_rows", "field_goal_rows"}:
+        if column in totals:
             result[column] = float(values[valid].sum())
-        else:
-            result[column] = float(
-                np.average(values[valid].to_numpy(dtype=float), weights=weights.to_numpy(dtype=float))
+            continue
+        weight_column = _isolated_weight_column(column)
+        if weight_column not in frame:
+            continue
+        weights = pd.to_numeric(frame.loc[valid, weight_column], errors="coerce").fillna(0.0)
+        positive = weights.gt(0)
+        if not positive.any():
+            continue
+        result[column] = float(
+            np.average(
+                values.loc[positive.index][positive].to_numpy(dtype=float),
+                weights=weights[positive].to_numpy(dtype=float),
             )
+        )
     return result
 
 
@@ -192,7 +211,10 @@ def _effect_columns(
 ) -> None:
     comparisons = {
         "transition_on_drive": ("drive_transition", "drive_legacy_transition"),
-        "transition_without_drive": ("legacy_drive_transition", "legacy_drive_legacy_transition"),
+        "transition_without_drive": (
+            "legacy_drive_transition",
+            "legacy_drive_legacy_transition",
+        ),
         "drive_with_transition": ("drive_transition", "legacy_drive_transition"),
         "combined": ("drive_transition", "legacy_drive_legacy_transition"),
     }
@@ -268,7 +290,11 @@ def run_v014_transition_benchmark(
             ].copy()
             if len(train) < 50 or test_plays.empty or train_raw.empty or test_raw.empty:
                 skipped.append(
-                    {"season": season, "week": week, "reason": "insufficient pre-cutoff evidence"}
+                    {
+                        "season": season,
+                        "week": week,
+                        "reason": "insufficient pre-cutoff evidence",
+                    }
                 )
                 continue
 
@@ -373,7 +399,9 @@ def run_v014_transition_benchmark(
                 players=players,
             )
             if usage.empty:
-                skipped.append({"season": season, "week": week, "reason": "empty point-in-time usage"})
+                skipped.append(
+                    {"season": season, "week": week, "reason": "empty point-in-time usage"}
+                )
                 continue
 
             variant_team_draws: dict[str, list[pd.DataFrame]] = {
@@ -426,21 +454,29 @@ def run_v014_transition_benchmark(
                 name: pd.concat(frames, ignore_index=True)
                 for name, frames in variant_player_summaries.items()
             }
-            game_ids = set(team_frames["legacy_drive_legacy_transition"]["game_id"].astype(str))
+            game_ids = set(
+                team_frames["legacy_drive_legacy_transition"]["game_id"].astype(str)
+            )
 
             observed_teams = observed_team_games(play_frame, schedule_fold)
-            observed_teams = observed_teams.loc[observed_teams["game_id"].astype(str).isin(game_ids)]
+            observed_teams = observed_teams.loc[
+                observed_teams["game_id"].astype(str).isin(game_ids)
+            ]
             observed_opportunity = observed_player_opportunity(play_frame)
             observed_opportunity = observed_opportunity.loc[
                 observed_opportunity["game_id"].astype(str).isin(game_ids)
             ]
             observed_drive = observed_drive_volume(test_plays)
-            observed_drive = observed_drive.loc[observed_drive["game_id"].astype(str).isin(game_ids)]
+            observed_drive = observed_drive.loc[
+                observed_drive["game_id"].astype(str).isin(game_ids)
+            ]
             observed_transitions = observed_transition_team_games(test_raw)
             observed_transitions = observed_transitions.loc[
                 observed_transitions["game_id"].astype(str).isin(game_ids)
             ]
-            fold_test_plays = test_plays.loc[test_plays["game_id"].astype(str).isin(game_ids)]
+            fold_test_plays = test_plays.loc[
+                test_plays["game_id"].astype(str).isin(game_ids)
+            ]
             learned_probability = play_call_model.predict_pass_probability(fold_test_plays)
             play_metrics = evaluate_play_call_probabilities(
                 fold_test_plays["is_dropback"], learned_probability
@@ -448,8 +484,12 @@ def run_v014_transition_benchmark(
 
             fold_metrics: dict[str, dict[str, float]] = {}
             for variant in _VARIANTS:
-                team_metrics = evaluate_team_simulation_draws(team_frames[variant], observed_teams)
-                drive_metrics = evaluate_drive_volume_draws(team_frames[variant], observed_drive)
+                team_metrics = evaluate_team_simulation_draws(
+                    team_frames[variant], observed_teams
+                )
+                drive_metrics = evaluate_drive_volume_draws(
+                    team_frames[variant], observed_drive
+                )
                 transition_metrics = evaluate_transition_team_draws(
                     team_frames[variant], observed_transitions
                 )
@@ -460,7 +500,9 @@ def run_v014_transition_benchmark(
                     predicted_opportunity,
                     observed_opportunity,
                 )
-                fantasy_metrics = _fantasy_metrics(player_summaries[variant], player_actuals)
+                fantasy_metrics = _fantasy_metrics(
+                    player_summaries[variant], player_actuals
+                )
                 metrics = _combine_metrics(
                     play_metrics,
                     team_metrics,
@@ -495,7 +537,10 @@ def run_v014_transition_benchmark(
         "folds": int(len(weekly)),
         "simulations_per_game": int(simulations_per_game),
         "variants": {
-            name: {"drive_volume_model": drive, "possession_transition_model": transition}
+            name: {
+                "drive_volume_model": drive,
+                "possession_transition_model": transition,
+            }
             for name, (drive, transition) in _VARIANTS.items()
         },
         "play_call_model_fixed": "learned",
@@ -505,6 +550,14 @@ def run_v014_transition_benchmark(
             "field-goal outcomes permuted within distance-bucket/season"
         ),
         "component_rng_streams": True,
+        "component_rng_base_version": 13,
+        "baseline_parity_contract": (
+            "transition-off instrumented probe must match frozen v0.13 core draws"
+        ),
+        "isolated_metric_weighting": (
+            "start metrics by transition_start_rows; timing by transition_seconds_rows; "
+            "field-goal metrics by field_goal_rows"
+        ),
         "raw_special_teams_evidence": True,
         "skipped_folds": skipped,
         "research_only": True,
@@ -594,7 +647,8 @@ def v014_transition_promotion_gate(
             reasons.append("field-goal calibrator failed permuted control")
 
     start_ratio = _safe_ratio(
-        candidate.get("team_start_yardline_mae"), baseline.get("team_start_yardline_mae")
+        candidate.get("team_start_yardline_mae"),
+        baseline.get("team_start_yardline_mae"),
     )
     if start_ratio is None:
         reasons.append("missing full-simulation starting-field comparison")
@@ -611,6 +665,7 @@ def v014_transition_promotion_gate(
         "team_field_goal_attempts_mae",
         "team_field_goals_made_mae",
         "team_turnovers_mae",
+        "team_turnovers_on_downs_mae",
         "player_opportunity_mae",
         "fantasy_pinball_loss",
     ):
@@ -629,7 +684,8 @@ def v014_transition_promotion_gate(
         reasons.append("missing weekly starting-field win-rate evidence")
     elif win_rate < float(min_weekly_start_win_rate):
         reasons.append(
-            f"weekly starting-field win rate below floor: {win_rate:.3f} < {min_weekly_start_win_rate:.3f}"
+            f"weekly starting-field win rate below floor: "
+            f"{win_rate:.3f} < {min_weekly_start_win_rate:.3f}"
         )
 
     metrics: dict[str, float] = {}
@@ -656,18 +712,24 @@ def recommend_v015_development(benchmark: TransitionBenchmarkResult) -> dict[str
     candidate = benchmark.aggregate_metrics.get("drive_transition", {})
     isolated = benchmark.aggregate_isolated_metrics
     start_ratio = _safe_ratio(
-        candidate.get("team_start_yardline_mae"), baseline.get("team_start_yardline_mae")
+        candidate.get("team_start_yardline_mae"),
+        baseline.get("team_start_yardline_mae"),
     )
-    points_ratio = _safe_ratio(candidate.get("team_points_mae"), baseline.get("team_points_mae"))
+    points_ratio = _safe_ratio(
+        candidate.get("team_points_mae"), baseline.get("team_points_mae")
+    )
     fantasy_ratio = _safe_ratio(
         candidate.get("fantasy_pinball_loss"), baseline.get("fantasy_pinball_loss")
     )
-    play_ratio = _safe_ratio(candidate.get("team_plays_mae"), baseline.get("team_plays_mae"))
+    play_ratio = _safe_ratio(
+        candidate.get("team_plays_mae"), baseline.get("team_plays_mae")
+    )
     isolated_start_signal = (
         isolated.get("transition_start_yardline_mae") is not None
         and isolated.get("type_base_start_yardline_mae") is not None
         and isolated.get("permuted_transition_start_yardline_mae") is not None
-        and isolated["transition_start_yardline_mae"] < isolated["type_base_start_yardline_mae"]
+        and isolated["transition_start_yardline_mae"]
+        < isolated["type_base_start_yardline_mae"]
         and isolated["transition_start_yardline_mae"]
         < isolated["permuted_transition_start_yardline_mae"]
     )
