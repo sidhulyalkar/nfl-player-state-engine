@@ -24,18 +24,25 @@ export interface DraftBoardPlayer {
   live_draft_score: number;
   draft_action: string;
   decision_specific_score?: number;
+  valuation_points_q10?: number;
+  valuation_points_q50?: number;
+  valuation_points_q90?: number;
   season_points_q10?: number;
   season_points_q50?: number;
   season_points_q90?: number;
   fantasy_points_ppr_q10?: number;
   fantasy_points_ppr_q50?: number;
   fantasy_points_ppr_q90?: number;
+  league_scoring_source?: string;
+  league_scoring_coverage?: number;
+  league_scoring_fallback?: boolean;
   vorp?: number;
   floor_vorp?: number;
   upside_vorp?: number;
   replacement_rank?: number;
   league_starter_demand?: number;
   scarcity_score?: number;
+  dynamic_scarcity_score?: number;
   roster_need_score?: number;
   tier_cliff?: number;
   tier_cliff_percentile?: number;
@@ -47,6 +54,17 @@ export interface DraftBoardPlayer {
   survival_model_version?: string;
   market_urgency?: number;
   reach_rounds?: number;
+  position_supply_remaining?: number;
+  expected_position_drafted_before_next?: number;
+  expected_position_supply_next_pick?: number;
+  position_wait_value?: number;
+  position_wait_loss?: number;
+  position_wait_loss_percentile?: number;
+  draft_dynamic_scarcity_score?: number;
+  ranking_challenger_score?: number;
+  ranking_challenger_delta?: number;
+  ranking_challenger_promoted?: boolean;
+  challenger_rank?: number;
   availability_probability?: number;
   opportunity_confidence?: number;
   draft_reasons?: string;
@@ -172,4 +190,97 @@ export interface DraftCompareResponse {
   survival_model: SurvivalModelMetadata;
   refresh_warning?: string | null;
   generated_at: string;
+}
+
+export interface RankingAuditRow {
+  player_id: string;
+  player_name: string;
+  position: string;
+  overall_rank?: number;
+  position_rank?: number;
+  valuation_points_q10?: number;
+  valuation_points_q50?: number;
+  valuation_points_q90?: number;
+  vorp?: number;
+  replacement_rank?: number;
+  league_starter_demand?: number;
+  dynamic_scarcity_score?: number;
+  league_scoring_source?: string;
+  league_scoring_coverage?: number;
+  league_scoring_fallback?: boolean;
+  external_consensus_rank?: number | null;
+  external_rank_sd?: number | null;
+  external_rank_min?: number | null;
+  external_rank_max?: number | null;
+  external_source_count?: number;
+  market_consensus_adp?: number | null;
+  market_rank_sd?: number | null;
+  market_source_count?: number;
+  model_vs_external_rank_delta?: number | null;
+  external_disagreement_score?: number;
+}
+
+export interface RankingAuditResponse {
+  league_id: string;
+  format: {
+    teams: number;
+    scoring: string;
+    qb_format: string;
+    roster_slots: Record<string, number>;
+    tight_end_premium: number;
+    median_scoring: boolean;
+  };
+  scoring_status: {
+    exact_share?: number | null;
+    fallback_share?: number | null;
+    sources: string[];
+    unsupported_live_scoring_keys: string[];
+    scoring_exact?: boolean;
+  };
+  ranking_context: {
+    available: boolean;
+    sources?: string[];
+    expert_sources?: string[];
+    market_sources?: string[];
+    matched_rows?: number;
+    unresolved_rows?: number;
+    external_values_are_audit_only?: boolean;
+  };
+  rows: RankingAuditRow[];
+}
+
+export interface DraftPlanTarget {
+  player_id: string;
+  player_name: string;
+  position: string;
+  probability_selected_next: number;
+  value: number;
+  survival_to_next_pick: number;
+}
+
+export interface TwoTurnDraftPlan {
+  player_id: string;
+  player_name: string;
+  position: string;
+  current_value: number;
+  expected_next_pick_value: number;
+  expected_two_pick_value: number;
+  two_pick_q10: number;
+  two_pick_q50: number;
+  two_pick_q90: number;
+  probability_no_preferred_target_survives: number;
+  most_common_next_targets: DraftPlanTarget[];
+  simulations: number;
+  model_source: string;
+  promoted: boolean;
+}
+
+export interface DraftPlanResponse {
+  league_id: string;
+  roster_id: string;
+  draft_state?: DraftBoardResponse['draft_state'];
+  plans: TwoTurnDraftPlan[];
+  model_source: string;
+  promoted: boolean;
+  caveats: string[];
 }
