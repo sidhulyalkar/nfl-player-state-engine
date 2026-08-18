@@ -23,6 +23,30 @@ SLEEPER_SCORING_MAP = {
     "fum_lost": "fumbles_lost",
 }
 
+# espn-api exposes abbreviations from its SETTINGS_SCORING_FORMAT_MAP. Keep this mapping
+# intentionally limited to statistics represented by the projection engine. Unsupported ESPN
+# bonuses remain visible in snapshot metadata rather than being guessed into a generic weight.
+ESPN_SCORING_MAP = {
+    "PY": "passing_yards",
+    "PTD": "passing_tds",
+    "INT": "interceptions",
+    "RY": "rushing_yards",
+    "RTD": "rushing_tds",
+    "REC": "receptions",
+    "REY": "receiving_yards",
+    "RETD": "receiving_tds",
+    "FUML": "fumbles_lost",
+    "PASSING YARDS": "passing_yards",
+    "TD PASS": "passing_tds",
+    "INTERCEPTIONS THROWN": "interceptions",
+    "RUSHING YARDS": "rushing_yards",
+    "RUSHING TD": "rushing_tds",
+    "EACH RECEPTION": "receptions",
+    "RECEIVING YARDS": "receiving_yards",
+    "RECEIVING TD": "receiving_tds",
+    "TOTAL FUMBLES LOST": "fumbles_lost",
+}
+
 SLOT_ALIASES = {
     "BN": "BENCH",
     "BE": "BENCH",
@@ -30,8 +54,11 @@ SLOT_ALIASES = {
     "DST": "DEF",
     "W/R/T": "FLEX",
     "WR/RB/TE": "FLEX",
+    "RB/WR/TE": "FLEX",
     "Q/W/R/T": "SUPER_FLEX",
+    "OP": "SUPER_FLEX",
     "SUPERFLEX": "SUPER_FLEX",
+    "SUPER_FLEX": "SUPER_FLEX",
     "SF": "SUPER_FLEX",
 }
 
@@ -75,11 +102,15 @@ class LeaguePortfolio:
             item = dict(row)
             item.setdefault("season", default_season)
             connections.append(LeagueConnection.from_dict(item))
-        return cls(connections, root=payload.get("snapshot_root", "data/product/live_leagues"))
+        return cls(
+            connections, root=payload.get("snapshot_root", "data/product/live_leagues")
+        )
 
     def _save(self, snapshot: LeagueSnapshot, key: str) -> Path:
         self.root.mkdir(parents=True, exist_ok=True)
-        safe_key = "".join(character for character in key if character.isalnum() or character in "-_")
+        safe_key = "".join(
+            character for character in key if character.isalnum() or character in "-_"
+        )
         path = self.root / f"{safe_key}.json"
         path.write_text(snapshot.model_dump_json(indent=2), encoding="utf-8")
         return path
@@ -102,7 +133,9 @@ class LeaguePortfolio:
                     paths[connection.key] = self._save(snapshot, connection.key)
                     continue
                 if not connection.username:
-                    raise ValueError(f"Sleeper connection {connection.key!r} needs league_id or username")
+                    raise ValueError(
+                        f"Sleeper connection {connection.key!r} needs league_id or username"
+                    )
                 snapshots = sleeper.import_user_leagues(
                     connection.username,
                     season=connection.season,
@@ -133,10 +166,25 @@ def _roster_slot_counts(roster_positions: list[str]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for raw_slot in roster_positions:
         slot = SLOT_ALIASES.get(str(raw_slot).upper(), str(raw_slot).upper())
-        if slot in {"IR", "RESERVE", "TAXI"}:
+        if slot in {"IR", "RESERVE", "TAXI", "ER"}:
             continue
         counts[slot] = counts.get(slot, 0) + 1
     return counts
+
+
+def _map_scoring(
+    raw: dict[str, float], mapping: dict[str, str]
+) -> tuple[dict[str, float], list[str]]:
+    mapped: dict[str, float] = {}
+    unsupported: list[str] = []
+    for raw_name, value in raw.items():
+        normalized = str(raw_name).strip().upper()
+        target = mapping.get(raw_name) or mapping.get(normalized)
+        if target:
+            mapped[target] = float(value)
+        elif abs(float(value)) > 1e-12:
+            unsupported.append(str(raw_name))
+    return mapped, sorted(set(unsupported))
 
 
 def league_config_from_snapshot(
@@ -145,7 +193,11 @@ def league_config_from_snapshot(
     profile: str | Path | None = None,
 ) -> LeagueConfig:
     """Turn live platform settings into the same LeagueConfig used by the draft model."""
-    base = LeagueConfig.from_yaml(profile) if profile else LeagueConfig(teams=snapshot.settings.teams)
+    base = (
+        LeagueConfig.from_yaml(profile)
+        if profile
+        else LeagueConfig(teams=snapshot.settings.teams)
+    )
     base.teams = snapshot.settings.teams
 
     live_slots = _roster_slot_counts(snapshot.settings.roster_positions)
@@ -153,21 +205,38 @@ def league_config_from_snapshot(
         base.roster_slots = live_slots
 
     mapped_scoring: dict[str, float] = {}
+    unsupported_scoring: list[str] = []
+    reception: float | None = None
     if snapshot.identity.platform == "sleeper":
-        for raw_name, value in snapshot.settings.scoring.items():
-            mapped = SLEEPER_SCORING_MAP.get(raw_name)
-            if mapped:
-                mapped_scoring[mapped] = float(value)
-        reception = snapshot.settings.scoring.get("rec")
-        if reception is not None:
-            if abs(float(reception) - 0.5) < 1e-9:
-                base.scoring = "half_ppr"
-            elif float(reception) >= 0.95:
-                base.scoring = "ppr"
-            else:
-                base.scoring = "standard"
+        mapped_scoring, unsupported_scoring = _map_scoring(
+            snapshot.settings.scoring, SLEEPER_SCORING_MAP
+        )
+        raw_reception = snapshot.settings.scoring.get("rec")
+        if raw_reception is not None:
+            reception = float(raw_reception)
+    elif snapshot.identity.platform == "espn":
+        mapped_scoring, unsupported_scoring = _map_scoring(
+            snapshot.settings.scoring, ESPN_SCORING_MAP
+        )
+        if "REC" in snapshot.settings.scoring:
+            reception = float(snapshot.settings.scoring["REC"])
+        elif "Each Reception" in snapshot.settings.scoring:
+            reception = float(snapshot.settings.scoring["Each Reception"])
+
     if mapped_scoring:
         base.scoring_weights.update(mapped_scoring)
+    if reception is not None:
+        if abs(reception - 0.5) < 1e-9:
+            base.scoring = "half_ppr"
+        elif reception >= 0.95:
+            base.scoring = "ppr"
+        else:
+            base.scoring = "standard"
+
+    # Preserve unsupported live scoring rules in snapshot metadata so product provenance can
+    # warn that component-level rescoring is incomplete instead of silently inventing values.
+    if unsupported_scoring:
+        snapshot.metadata["unsupported_scoring_keys"] = unsupported_scoring
 
     base.median_scoring = bool(snapshot.settings.median_scoring or base.median_scoring)
     if snapshot.settings.superflex and "SUPER_FLEX" not in base.roster_slots:
