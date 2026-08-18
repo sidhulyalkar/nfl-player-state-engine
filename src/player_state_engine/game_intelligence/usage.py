@@ -5,7 +5,7 @@ import pandas as pd
 
 
 def _chronology(frame: pd.DataFrame) -> pd.Series:
-    return pd.to_numeric(frame["season"], errors="coerce") * 100 + pd.to_numeric(
+    return pd.to_numeric(frame["season"], errors="coerce") * 25 + pd.to_numeric(
         frame["week"], errors="coerce"
     )
 
@@ -23,7 +23,9 @@ def _weighted_counts(
     age = (reference_ordinal - _chronology(subset)).clip(lower=0)
     weights = np.power(0.5, age / max(float(half_life_weeks), 0.25))
     subset["weight"] = weights
-    subset["weighted_red_zone"] = weights * pd.to_numeric(subset["red_zone"], errors="coerce").fillna(0.0)
+    subset["weighted_red_zone"] = weights * pd.to_numeric(
+        subset["red_zone"], errors="coerce"
+    ).fillna(0.0)
     subset["player_id"] = subset[player_column].astype(str)
     return (
         subset.groupby(["posteam", "player_id"], dropna=False)
@@ -47,9 +49,11 @@ def build_player_usage_profiles(
     missing = required - set(play_frame)
     if missing:
         raise ValueError(f"Usage profiles missing columns: {sorted(missing)}")
-    reference = int(season) * 100 + int(week)
+    reference = int(season) * 25 + int(week)
     ordinal = _chronology(play_frame)
-    history = play_frame.loc[(ordinal < reference) & (ordinal >= reference - int(lookback_weeks))].copy()
+    history = play_frame.loc[
+        (ordinal < reference) & (ordinal >= reference - int(lookback_weeks))
+    ].copy()
     if history.empty:
         return pd.DataFrame(
             columns=[
@@ -83,7 +87,9 @@ def build_player_usage_profiles(
         passer_column,
         reference_ordinal=reference,
         half_life_weeks=half_life_weeks,
-    ).rename(columns={"weighted_count": "dropback_weight"})[["team", "player_id", "dropback_weight"]]
+    ).rename(columns={"weighted_count": "dropback_weight"})[
+        ["team", "player_id", "dropback_weight"]
+    ]
 
     profile = carries.merge(targets, on=["team", "player_id"], how="outer")
     profile = profile.merge(dropbacks, on=["team", "player_id"], how="outer")
@@ -115,7 +121,11 @@ def build_player_usage_profiles(
     if players is not None and not players.empty:
         player_frame = players.copy()
         id_column = next(
-            (column for column in ("gsis_id", "player_id", "canonical_player_id") if column in player_frame),
+            (
+                column
+                for column in ("gsis_id", "player_id", "canonical_player_id")
+                if column in player_frame
+            ),
             None,
         )
         if id_column and "position" in player_frame:
