@@ -145,8 +145,8 @@ def simulate_matchup_volume_probe(
         dropbacks = {matchup.home_team: 0, matchup.away_team: 0}
         drives = {matchup.home_team: 0, matchup.away_team: 0}
         start_yardline_sum = {matchup.home_team: 0.0, matchup.away_team: 0.0}
-        runoff_sum = {matchup.home_team: 0.0, matchup.away_team: 0.0}
-        runoff_count = {matchup.home_team: 0, matchup.away_team: 0}
+        continuing_runoff_sum = {matchup.home_team: 0.0, matchup.away_team: 0.0}
+        continuing_runoff_count = {matchup.home_team: 0, matchup.away_team: 0}
         start_possession = _make_possession_starter(
             matchup,
             drive_volume_model,
@@ -348,8 +348,9 @@ def simulate_matchup_volume_probe(
                     config.maximum_seconds_per_play,
                 )
             )
-            runoff_sum[play_offense] += runoff
-            runoff_count[play_offense] += 1
+            if drive_continues:
+                continuing_runoff_sum[play_offense] += runoff
+                continuing_runoff_count[play_offense] += 1
             clock = max(0.0, clock - runoff)
 
             if before_clock > 1800 >= clock:
@@ -361,6 +362,11 @@ def simulate_matchup_volume_probe(
                 )
 
         for team in (matchup.home_team, matchup.away_team):
+            seconds_per_play = (
+                continuing_runoff_sum[team] / continuing_runoff_count[team]
+                if continuing_runoff_count[team] > 0
+                else float("nan")
+            )
             team_rows.append(
                 {
                     "game_id": game_id,
@@ -375,7 +381,7 @@ def simulate_matchup_volume_probe(
                     "pass_rate": dropbacks[team] / max(plays[team], 1),
                     "drives": float(drives[team]),
                     "plays_per_drive": plays[team] / max(drives[team], 1),
-                    "seconds_per_play": runoff_sum[team] / max(runoff_count[team], 1),
+                    "seconds_per_play": seconds_per_play,
                     "mean_start_yardline_100": (
                         start_yardline_sum[team] / max(drives[team], 1)
                     ),
@@ -456,6 +462,7 @@ def simulate_matchup_volume_probe(
         ),
         "component_rng_streams": True,
         "pace_target": "seconds_to_next_play within continuing drive",
+        "seconds_per_play_estimand": "continuing-drive forward runoff",
         "pace_model_applies_to_continuing_drives_only": True,
         "modeled_pace_plays": int(modeled_pace_plays),
         "state_allocation_attempts": int(state_allocation_attempts),
