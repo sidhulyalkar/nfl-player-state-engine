@@ -27,6 +27,12 @@ class SleeperImporter(LeagueImporter):
     def _get(self, path: str) -> Any:
         return self.client.get_json(f"{self.base_url}/{path.lstrip('/')}")
 
+    def _optional_get(self, path: str, default: Any) -> Any:
+        try:
+            return self._get(path)
+        except (RuntimeError, AssertionError):
+            return default
+
     def get_nfl_state(self, *, refresh: bool = False) -> dict[str, Any]:
         if self._state_cache is None or refresh:
             self._state_cache = dict(self._get("state/nfl") or {})
@@ -190,22 +196,32 @@ class SleeperImporter(LeagueImporter):
             DraftPickAsset(
                 season=int(pick["season"]),
                 round=int(pick["round"]),
-                original_roster_id=(str(pick.get("roster_id")) if pick.get("roster_id") is not None else None),
-                current_roster_id=(str(pick.get("owner_id")) if pick.get("owner_id") is not None else None),
+                original_roster_id=(
+                    str(pick.get("roster_id")) if pick.get("roster_id") is not None else None
+                ),
+                current_roster_id=(
+                    str(pick.get("owner_id")) if pick.get("owner_id") is not None else None
+                ),
             )
             for pick in traded_picks
         ]
 
         current_week = int(state.get("week")) if state.get("week") is not None else None
-        matchups = self._get(f"league/{league_id}/matchups/{current_week}") if current_week else []
-        drafts = self._get(f"league/{league_id}/drafts") or []
+        matchups = (
+            self._optional_get(f"league/{league_id}/matchups/{current_week}", [])
+            if current_week
+            else []
+        )
+        drafts = self._optional_get(f"league/{league_id}/drafts", []) or []
         active_draft = next(
             (draft for draft in drafts if draft.get("status") in {"pre_draft", "drafting"}),
             drafts[0] if drafts else None,
         )
         draft_picks_live: list[dict[str, Any]] = []
         if active_draft and active_draft.get("draft_id"):
-            draft_picks_live = self._get(f"draft/{active_draft['draft_id']}/picks") or []
+            draft_picks_live = (
+                self._optional_get(f"draft/{active_draft['draft_id']}/picks", []) or []
+            )
 
         external_roster_id = None
         if external_user_id:
@@ -239,10 +255,16 @@ class SleeperImporter(LeagueImporter):
                 scoring=scoring,
                 roster_positions=roster_positions,
                 playoff_week_start=settings_payload.get("playoff_week_start"),
-                waiver_type=(str(settings_payload.get("waiver_type")) if settings_payload.get("waiver_type") is not None else None),
+                waiver_type=(
+                    str(settings_payload.get("waiver_type"))
+                    if settings_payload.get("waiver_type") is not None
+                    else None
+                ),
                 faab_budget=float(settings_payload.get("waiver_budget", 0) or 0),
                 dynasty=bool(settings_payload.get("type") == 2 or league.get("previous_league_id")),
-                superflex=any(slot in {"SUPER_FLEX", "SUPERFLEX", "OP"} for slot in roster_positions),
+                superflex=any(
+                    slot in {"SUPER_FLEX", "SUPERFLEX", "OP"} for slot in roster_positions
+                ),
                 median_scoring=median_scoring,
                 draft_type=(str(active_draft.get("type")) if active_draft else None),
             ),
