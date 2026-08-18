@@ -13,7 +13,7 @@ export const tools: FunctionDeclaration[] = [
   },
   {
     name: 'get_live_draft_board',
-    description: 'Retrieve the authoritative live Draft War Room board including 2QB scarcity, roster need, tier cliffs, room timing, survival-to-next-pick, and recent picks.',
+    description: 'Retrieve the authoritative live Draft War Room board including 2QB scarcity, roster need, tier cliffs, room timing, survival-to-next-pick, dynamic wait-loss diagnostics, and recent picks.',
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -26,6 +26,28 @@ export const tools: FunctionDeclaration[] = [
   {
     name: 'compare_draft_candidates',
     description: 'Compare 2 to 5 currently available draft candidates using server-side football value, league scarcity, pick timing, and roster counterfactual simulation.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        league_id: { type: Type.STRING }, roster_id: { type: Type.STRING },
+        player_ids: { type: Type.ARRAY, items: { type: Type.STRING } },
+        draft_slot: { type: Type.INTEGER }, simulations: { type: Type.INTEGER },
+      },
+      required: ['league_id', 'roster_id', 'player_ids'],
+    },
+  },
+  {
+    name: 'get_ranking_calibration',
+    description: 'Retrieve scoring-exactness provenance plus model-versus-expert and market disagreement for a league. External rankings are audit signals and never the numerical source of truth.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: { league_id: { type: Type.STRING }, limit: { type: Type.INTEGER } },
+      required: ['league_id'],
+    },
+  },
+  {
+    name: 'plan_two_turn_draft',
+    description: 'Run the explicitly unpromoted research two-turn draft lookahead for 2 to 5 candidates. Use only to explain future-pick opportunity, never as the production recommendation.',
     parameters: {
       type: Type.OBJECT,
       properties: {

@@ -33,6 +33,22 @@ async function executeTool(name: string, args: Record<string, unknown>) {
       }),
       signal: AbortSignal.timeout(pseTimeoutMs),
     };
+  } else if (name === 'get_ranking_calibration') {
+    route = `/v1/leagues/${leagueId}/rankings/audit?limit=${Number(args.limit ?? 250)}`;
+  } else if (name === 'plan_two_turn_draft') {
+    route = `/v1/leagues/${leagueId}/draft/plan`;
+    init = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roster_id: args.roster_id,
+        player_ids: args.player_ids,
+        draft_slot: args.draft_slot,
+        simulations: Number(args.simulations ?? 2000),
+        refresh: false,
+      }),
+      signal: AbortSignal.timeout(pseTimeoutMs),
+    };
   } else if (name === 'get_trade_suggestions') {
     route = `/v1/leagues/${leagueId}/trades/suggestions?roster_id=${rosterId}&limit=${Number(args.limit ?? 8)}`;
   } else if (name === 'get_waiver_board') {
@@ -50,6 +66,7 @@ async function executeTool(name: string, args: Record<string, unknown>) {
 
 function selectFallbackTool(message: string) {
   const normalized = message.toLowerCase();
+  if (/\b(consensus|experts?|rank disagreement|calibration|scoring exact)\b/.test(normalized)) return 'get_ranking_calibration';
   if (/\b(draft|pick|on the clock|available|adp|qb2|superflex)\b/.test(normalized)) return 'get_live_draft_board';
   if (/\b(waiver|free agent|faab|add|drop)\b/.test(normalized)) return 'get_waiver_board';
   if (/\b(lineup|start|sit|bench)\b/.test(normalized)) return 'get_optimized_lineup';
@@ -64,6 +81,24 @@ function summarizeFallback(name: string, result: unknown) {
     return board.slice(0, 8).map((item, index) =>
       `${index + 1}. ${String(item.player_name ?? item.player_id)} · ${String(item.position ?? '')} · ${Number(item.live_draft_score ?? 0).toFixed(1)} · ${String(item.draft_action ?? '')}`
     ).join('\n');
+  }
+  if (name === 'get_ranking_calibration' && result && typeof result === 'object') {
+    const payload = result as {
+      scoring_status?: { scoring_exact?: boolean; fallback_share?: number };
+      ranking_context?: { sources?: string[] };
+      rows?: Array<Record<string, unknown>>;
+    };
+    const status = payload.scoring_status?.scoring_exact
+      ? 'league scoring exact'
+      : `${Math.round(Number(payload.scoring_status?.fallback_share ?? 0) * 100)}% scoring fallback`;
+    const sources = payload.ranking_context?.sources?.join(', ') || 'no external sources installed';
+    const disagreements = (payload.rows ?? [])
+      .filter((row) => Number.isFinite(Number(row.model_vs_external_rank_delta)))
+      .sort((a, b) => Math.abs(Number(b.model_vs_external_rank_delta)) - Math.abs(Number(a.model_vs_external_rank_delta)))
+      .slice(0, 5)
+      .map((row) => `${String(row.player_name)}: ${Number(row.model_vs_external_rank_delta) > 0 ? '+' : ''}${Number(row.model_vs_external_rank_delta).toFixed(0)} ranks vs consensus`)
+      .join('\n');
+    return `${status}; sources: ${sources}${disagreements ? `\n${disagreements}` : ''}`;
   }
   const rows = Array.isArray(result) ? result : [];
   if (!rows.length) return 'The deterministic tool returned no eligible results.';
@@ -101,7 +136,7 @@ export async function runCopilot(message: string, leagueId?: string, rosterId?: 
   const context = `Current league_id=${leagueId ?? 'unknown'} and roster_id=${rosterId ?? 'unknown'}.`;
   const contents: any[] = [{ role: 'user', parts: [{ text: `${context}\n\n${message}` }] }];
   const config = {
-    systemInstruction: `You are Fourth Down Copilot, an evidence-grounded fantasy football analyst. Use deterministic tools before factual claims. For draft questions distinguish raw projection, league-specific VORP and scarcity, roster counterfactual fit, and probability of surviving to the next pick. Never invent projections, ADP, ownership, or draft state. Treat 2QB and superflex rules as first-class. Mention material uncertainty and whether market survival is empirical or fallback. Be concise but analytically useful.`,
+    systemInstruction: `You are Fourth Down Copilot, an evidence-grounded fantasy football analyst. Use deterministic tools before factual claims. For draft questions distinguish raw football projection, league-specific VORP and scarcity, roster counterfactual fit, and probability of surviving to the next pick. Use ranking calibration to explain disagreement with experts or markets, but never treat consensus as ground truth. State when league scoring uses a generic fallback. The two-turn planner is an unpromoted research challenger and must never replace the production best-pick-now result. Never invent projections, ADP, ownership, or draft state. Treat 2QB and superflex rules as first-class. Mention material uncertainty and whether market survival is empirical or fallback. Be concise but analytically useful.`,
     tools: [{ functionDeclarations: tools }],
   };
   for (let iteration = 0; iteration < 5; iteration += 1) {
@@ -118,5 +153,5 @@ export async function runCopilot(message: string, leagueId?: string, rosterId?: 
       } }] });
     }
   }
-  return 'The request required too many tool steps. Narrow the question to one draft comparison, lineup, trade, or waiver decision.';
+  return 'The request required too many tool steps. Narrow the question to one draft comparison, lineup, trade, waiver, or ranking-calibration decision.';
 }

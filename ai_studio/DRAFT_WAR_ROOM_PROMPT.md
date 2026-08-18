@@ -1,148 +1,218 @@
-# Google AI Studio prompt: Draft War Room
+# Google AI Studio prompt: Draft War Room v0.9
 
 Import this repository into Google AI Studio Build mode and work inside the existing `apps/gemini-fantasy-console` React + Express application.
 
-Your highest-priority task is to build a production-quality **Draft War Room** for the NFL Player State Engine. Do not replace the existing application architecture or create a disconnected toy app.
+The Draft War Room is already operational. Your job is to preserve and refine it as a production-quality decision surface. Do not replace the architecture, rebuild numerical logic in JavaScript, or create a disconnected toy application.
 
 ## Read these files first
 
 Before modifying code, read:
 
+- `README.md`
 - `docs/product/draft_war_room_frontend.md`
 - `docs/modeling/draft_intelligence_models.md`
+- `docs/modeling/ranking_calibration_v09.md`
+- `docs/modeling/draft_survival_training.md`
+- `docs/data/ranking_and_news_sources.md`
 - `docs/product/live_draft_room.md`
 - `docs/product/gemini_ai_studio.md`
 - `apps/gemini-fantasy-console/README.md`
+- `src/player_state_engine/fantasy/scoring.py`
+- `src/player_state_engine/fantasy/valuation.py`
 - `src/player_state_engine/fantasy/draft.py`
+- `src/player_state_engine/fantasy/roster_simulator.py`
+- `src/player_state_engine/fantasy/draft_planner.py`
+- `src/player_state_engine/fantasy/rankings.py`
 - `src/player_state_engine/integrations/portfolio.py`
-- `src/player_state_engine/api/app.py`
+- `src/player_state_engine/api/operational.py`
 
 Treat the Python Player State Engine as the numerical source of truth.
 
 ## Product objective
 
-During a live fantasy draft, the user will often be deciding among 2 to 5 players. The interface must help answer four different questions:
+During a live fantasy draft, the user commonly decides among 2 to 5 players. The interface must distinguish these questions:
 
-1. Who has the best underlying football projection?
-2. Who has the most value in this exact league format?
-3. Who fits the user's current roster best?
-4. Who must be selected now because he is unlikely to survive to the user's next pick?
+1. Who has the best underlying football outcome distribution?
+2. Who has the most value under this league's exact scoring and replacement economy?
+3. Who creates the greatest marginal value on the user's current roster?
+4. Who is most costly to pass because positional supply or the player himself is unlikely to survive to the next pick?
+5. Where does the model disagree with external experts or markets, and how uncertain is that disagreement?
+6. What does the unpromoted research lookahead say about the current pick plus the next turn?
 
-Do not collapse these into one opaque answer. Show the component signals and then show the final room-aware recommendation.
+Do not collapse these into one opaque answer.
+
+## Mandatory epistemic boundaries
+
+Keep these systems separate:
+
+```text
+football projection
+league scoring and replacement value
+roster marginal value
+draft-room market timing
+external expert and market calibration
+research challengers
+```
+
+External consensus is not ground truth. A provider rank must never silently overwrite a model projection or `live_draft_score`.
+
+A research challenger must never be presented as production merely because it produces a useful-looking number.
+
+## League scoring correctness
+
+The frontend must surface the Python scoring provenance when available:
+
+```text
+correlated_or_provided_league_quantiles
+component_quantile_rescore
+generic_points_fallback
+```
+
+If `league_scoring_fallback` is true or the league reports unsupported scoring keys:
+
+- show a visible scoring-provenance warning;
+- do not call the result custom-scoring exact;
+- do not recalculate the missing scoring rule in the browser;
+- do not ask Gemini to guess the adjustment.
+
+The correct fix is to add the missing football component or scoring implementation in Python.
 
 ## League formats
 
-The product must support arbitrary settings from live platform snapshots, especially 2QB and superflex.
+Support arbitrary live roster/scoring settings, especially 2QB and superflex.
 
-Never assume an 8-team league is shallow. A league with 8 teams, 2 QB, 3 RB, 3 WR, 3 FLEX and 1 TE has substantial starter demand.
+Never assume an 8-team league is shallow. An 8-team league with 2 QB, 3 RB, 3 WR, 3 FLEX and 1 TE has substantial starter demand.
 
-Never use generic one-QB expert ranks as if their ordinal values transfer to 2QB leagues.
+Never use generic one-QB expert ranks as if their ordinal positions transfer to 2QB leagues.
 
-Live Sleeper / ESPN roster positions and scoring settings override fallback profiles when available.
+Live Sleeper and ESPN settings are authoritative when available. Unsupported live rules must remain visible as provenance.
 
-## Required Draft War Room layout
-
-### Persistent top bar
+## Required persistent header
 
 Show:
 
-- active league selector;
+- league selector;
 - platform;
 - compact format label such as `12T • 2QB • Half PPR • Median`;
 - current pick;
-- user's next pick;
+- next pick;
 - draft slot;
 - snapshot freshness;
 - projection freshness;
 - model version;
+- scoring exactness or fallback state;
 - manual refresh.
 
-Use a clear `LIVE`, `STALE`, `HISTORICAL`, or `SYNTHETIC DEMO` badge.
+Use clear `LIVE`, `STALE`, `HISTORICAL`, or `SYNTHETIC DEMO` labeling.
 
-### My roster rail
+## My roster rail
 
-Group drafted players by QB / RB / WR / TE / FLEX / bench.
+Group players by QB / RB / WR / TE / FLEX / bench and make 2QB depth visually obvious.
 
-For each position display:
+Show server-returned current counts and starter/depth context. Do not invent target counts or projected legal slots in React when Python has not returned them.
 
-- current count;
-- target count;
-- projected starters;
-- positional need;
-- depth status.
+## Available-player board
 
-Make 2QB depth visually obvious.
-
-### Available-player board
-
-Required columns:
+Prefer columns that answer a decision:
 
 - live rank;
-- player name;
-- position;
-- team;
-- draft action;
-- live draft score;
-- q10 / q50 / q90;
+- player;
+- position/team;
+- production draft action;
+- production live score;
+- unpromoted challenger score or rank when available;
+- league-scored q10 / q50 / q90;
 - VORP;
 - replacement rank;
 - league starter demand;
-- roster need score;
-- tier-cliff indicator;
-- market ADP;
-- survival to next pick.
-
-Support fast search, position filters, keyboard navigation and CSV export.
+- tier cliff;
+- positional supply;
+- positional wait loss;
+- ADP;
+- survival to next pick;
+- external consensus rank;
+- model-versus-external delta;
+- scoring provenance.
 
 Selecting a row should add the player to the compare tray without navigating away.
 
-### Room-state rail
+## Dynamic scarcity
 
-Show:
+The board may expose:
 
-- recent picks;
-- positional run counts;
-- remaining positional tiers;
-- teams selecting before the user's next pick;
-- their positional needs when available.
+- `position_supply_remaining`;
+- `expected_position_drafted_before_next`;
+- `expected_position_supply_next_pick`;
+- `position_wait_value`;
+- `position_wait_loss`;
+- `draft_dynamic_scarcity_score`;
+- `ranking_challenger_score`;
+- `ranking_challenger_delta`;
+- `ranking_challenger_promoted`.
 
-If opponent roster-need information is unavailable, omit it rather than infer it with Gemini.
+The production `live_draft_score` and `draft_action` remain authoritative unless Python explicitly marks a challenger promoted.
 
-### Candidate compare tray
+Use the dynamic-scarcity fields to explain *why waiting is dangerous*, not to create a second unofficial ranking formula in React.
+
+## Candidate compare tray
 
 Allow 2 to 5 players.
 
-For each candidate organize data into five sections:
+For each candidate show the following groups.
 
-**Football**
-- q10 / q50 / q90;
+### Football
+
+- league-scored q10 / q50 / q90;
 - availability;
 - opportunity confidence;
-- role-growth / breakout signals.
+- role-growth or evidence state when available.
 
-**League value**
+### League value
+
 - VORP;
 - replacement rank;
 - starter demand;
-- scarcity / tier cliff.
+- dynamic scarcity;
+- positional wait loss.
 
-**Roster fit**
-- position need;
-- likely starting slot;
-- marginal starter value when available;
-- post-pick depth.
+### Roster fit
 
-**Draft timing**
+- roster-fit score;
+- likely legal starter slot;
+- marginal floor / median / ceiling;
+- starter probability;
+- displaced player when applicable;
+- depth delta.
+
+### Calibration
+
+- external expert consensus;
+- expert dispersion;
+- expert source count;
+- market consensus ADP when available;
+- model-versus-external rank delta.
+
+Always label external values as calibration or market context, not model truth.
+
+### Draft timing
+
 - current pick;
 - next pick;
 - ADP;
-- ADP uncertainty;
-- survival to next pick;
-- reach rounds.
+- survival probability;
+- expected positional supply next turn.
 
-**Team impact**
-- only display simulator-produced values;
-- if unavailable, label the section `MODEL NOT YET AVAILABLE` rather than estimating it.
+### Research lookahead
+
+When `/draft/plan` is available, show:
+
+- expected two-pick value;
+- q10 / q50 / q90 two-pick value;
+- expected next-pick value;
+- likely next target;
+- probability no preferred target survives.
+
+This section must visibly say `RESEARCH`, `UNPROMOTED`, or equivalent unless the API explicitly says otherwise.
 
 At the bottom explicitly identify:
 
@@ -153,169 +223,181 @@ At the bottom explicitly identify:
 
 They are allowed to disagree.
 
-## API boundary
+## Ranking calibration
 
-All authoritative calculations belong in Python.
-
-The frontend may sort or filter server-returned rows, but it must not implement its own formulas for:
-
-- VORP;
-- replacement level;
-- starter allocation;
-- QB scarcity;
-- roster-fit utility;
-- tier cliffs;
-- survival-to-next-pick;
-- draft action;
-- player projections.
-
-Prefer dedicated Product API endpoints as they become available:
+The API provides:
 
 ```text
-GET  /v1/leagues/{league_id}/draft/board
-POST /v1/leagues/{league_id}/draft/compare
+GET /v1/rankings/sources
+GET /v1/leagues/{league_id}/rankings/audit
 ```
 
-If those endpoints are not yet implemented, use the closest existing Product API response and clearly mark missing live-draft dimensions. Do not recreate missing metrics in JavaScript.
+Use these to expose:
 
-## Live update behavior
+- which external sources are installed;
+- format match metadata;
+- scoring exactness;
+- consensus rank;
+- expert dispersion;
+- source count;
+- model-versus-external disagreement;
+- market ADP dispersion.
 
-The UI should support a conservative active-draft refresh loop:
+Do not convert consensus rank into `live_draft_score` in the browser.
 
-1. request latest platform-backed league state from the Product API;
-2. request the server-generated live draft board;
-3. preserve the last valid board while the new request is in flight;
-4. update the UI atomically;
+Large disagreement should visually communicate:
+
+> the model and outside information disagree, investigate the evidence.
+
+It should not communicate:
+
+> the model is wrong, move it to consensus.
+
+## Room-state rail
+
+Show:
+
+- recent picks;
+- positional runs;
+- current and next picks;
+- market-survival model source;
+- scoring exactness;
+- installed calibration-source count;
+- stale/fresh state.
+
+If opponent roster needs are unavailable, omit them rather than infer them with Gemini.
+
+## API boundary
+
+All authoritative numerical calculations belong in Python.
+
+Core endpoints:
+
+```text
+GET  /v1/draft/leagues
+GET  /v1/leagues/{league_id}/draft/board
+POST /v1/leagues/{league_id}/draft/compare
+POST /v1/leagues/{league_id}/draft/plan
+GET  /v1/rankings/sources
+GET  /v1/leagues/{league_id}/rankings/audit
+```
+
+The frontend may sort, filter, select, and visualize server-returned values. It must not implement its own formulas for:
+
+- fantasy projections;
+- custom league scoring;
+- replacement levels;
+- starter allocation;
+- VORP;
+- QB scarcity;
+- roster marginal value;
+- tier cliffs;
+- draft survival;
+- dynamic wait loss;
+- production draft actions;
+- ranking promotion decisions.
+
+If the API does not expose a needed metric, extend Python instead of reproducing the formula in TypeScript.
+
+## Live refresh behavior
+
+Use the existing conservative refresh flow:
+
+1. request current platform-backed league state;
+2. request the server-generated board;
+3. keep the last valid board while the request is in flight;
+4. atomically replace state after success;
 5. cancel obsolete requests;
-6. back off on repeated errors;
-7. stop active polling after the draft ends.
+6. back off after errors;
+7. stop active polling when the draft ends;
+8. refresh the ranking audit without blocking the production board.
 
-Always include a manual refresh button.
-
-Never hammer Sleeper or ESPN from the browser. Platform access belongs behind the server boundary.
+Never hammer Sleeper, ESPN, FantasyPros, or another provider from the browser. Provider access belongs on the server or in offline data-ingestion jobs.
 
 ## Gemini Copilot
 
-Gemini is a read-only draft analyst and explanation layer.
+Gemini is a read-only explanation and orchestration layer.
 
-Use Gemini function calling to retrieve deterministic data before making factual claims. Use structured output for the final comparison payload where appropriate.
+Available draft-related tools include conceptual equivalents of:
 
-Add or extend tools conceptually equivalent to:
-
-- `get_league_context`
 - `get_live_draft_board`
 - `compare_draft_candidates`
-- `get_player_detail`
-- `get_my_roster`
-- `get_recent_draft_picks`
-- `get_model_evidence`
+- `get_ranking_calibration`
+- `plan_two_turn_draft`
+- `get_league_context`
 
-Do not give Gemini a tool that silently drafts a player or performs a fantasy-platform transaction.
+Rules:
 
-A good user query is:
+- call deterministic tools before factual claims;
+- distinguish production from research outputs;
+- state when scoring uses fallback;
+- explain external disagreement without treating it as truth;
+- identify whether survival is empirical or fallback;
+- expose material uncertainty;
+- never make a fantasy-platform transaction.
 
-> “I am deciding between these three players. Compare their inherent value, how they fit my current roster, the positional scarcity if I pass, and how likely each is to return at my next pick.”
+The two-turn planner must never override the production `best_pick_now` result unless Python later promotes it.
 
-A good answer should distinguish evidence such as:
+## Evidence and news
 
-- highest projected player;
-- highest VORP player;
-- strongest roster fit;
-- biggest tier cliff;
-- lowest survival-to-next-pick probability;
-- assumptions that could flip the recommendation.
+Do not render every headline as equivalent evidence.
 
-Every answer should expose material uncertainty.
+When evidence metadata exists, distinguish:
 
-## Gemini safety / grounding rules
+```text
+OFFICIAL
+DIRECT_OBSERVATION
+REPORTED
+COACH_QUOTE
+PLAYER_QUOTE
+ANALYSIS
+SPECULATION
+```
 
-Gemini must not:
+Prefer structured injuries, depth charts, snaps, participation, and opportunity data over free-text inference when both exist.
 
-- invent a projection;
-- invent live draft picks;
-- invent ownership;
-- invent an injury or news item;
-- calculate replacement value itself;
-- make up an ADP value;
-- overwrite stale data with a plausible guess;
-- claim a custom model exists before the Python artifact exists;
-- fine-tune itself and call that the fantasy model.
-
-If a required field is missing, say so.
-
-## Model architecture boundary
-
-Custom trained fantasy models live in Python, not in the React / Gemini layer.
-
-The roadmap includes:
-
-- availability / participation model;
-- position-specific opportunity heads;
-- conditional efficiency model;
-- weekly and season distribution simulator;
-- QB starter-security model;
-- deterministic replacement / scarcity engine;
-- empirical draft-survival model;
-- roster marginal-value simulator;
-- later opponent-room positional hazard model.
-
-The UI should be designed so these models can be added without redesigning the product.
+Never invent an injury, practice role, route share, or reporter claim.
 
 ## Design direction
 
-Keep the existing dark analytical identity, but make the Draft War Room faster and less dashboard-like than the research pages.
+Keep the dark analytical identity. The draft screen should be fast, compact, and number-forward.
 
-Use:
+Prefer:
 
-- crisp typography;
-- compact tables;
-- aligned numerical comparison;
-- small distribution plots;
+- aligned numerical tables;
+- compact fan/quantile displays;
 - tier separators;
-- scarcity bars;
-- before / after roster deltas;
+- positional-supply bars;
+- before/after roster deltas;
+- clear calibration badges;
 - restrained motion when a new pick changes the board.
 
 Avoid:
 
 - decorative radar charts;
 - giant KPI cards;
-- excessive gradients;
-- chat-first layouts that hide the draft board;
-- green/red coloring without text or icons;
-- animations that distract during a running draft clock.
+- chat-first layouts;
+- consensus ranks visually dominating the production model;
+- unlabeled research outputs;
+- excessive animation during the draft clock.
 
-Desktop is primary. Make the compare tray usable on a laptop at draft time. Mobile should still support roster view, player search, compare and refresh.
-
-## Build sequence
-
-Implement in this order:
-
-1. make sure the existing app builds without regressions;
-2. add the Draft War Room route and navigation;
-3. build format / freshness header;
-4. build roster rail;
-5. build available-player table from existing API data;
-6. build candidate compare tray;
-7. build room-state rail;
-8. wire server-side refresh behavior;
-9. add Gemini comparison tool routing;
-10. add robust loading, stale and error states;
-11. test 12-team 2QB half-PPR median and 8-team expanded 2QB PPR fixtures;
-12. verify the full production build.
-
-Do not rewrite unrelated views while implementing this feature.
+Desktop is primary, but mobile should preserve player search, roster, compare, scoring provenance, and refresh.
 
 ## Acceptance scenarios
 
-Test at least these cases:
+Test at least:
 
-1. The top two players are both QBs in a 12-team 2QB league and QB replacement falls sharply behind them.
-2. A high-ranked RB has a better raw projection, but the user's roster already has strong RB depth and zero QB2.
-3. A WR is the best roster fit but has an 80% estimated chance to survive to the next pick.
-4. A candidate is missing market ADP. The UI should show unknown timing rather than zero urgency.
-5. Platform refresh fails after several successful picks. Keep the last valid board and display stale state.
-6. Gemini is unavailable. The deterministic Draft War Room remains fully functional.
-7. Projection data is unavailable. Do not silently fall back to fake live rankings.
+1. 12-team 2QB half-PPR: QB replacement becomes materially deeper than 1QB and the UI makes the supply consequence visible.
+2. 8-team PPR with 2QB / 3RB / 3WR / 3FLEX: the league is not visually or numerically treated as shallow.
+3. PPR versus standard with component projections: league-scored values change before VORP.
+4. Generic fantasy-point artifact: scoring fallback is visibly labeled rather than called exact.
+5. ESPN league with current `position_slot_counts` and `OP`: the UI shows the correct roster construction.
+6. Large model-versus-expert disagreement: the UI highlights disagreement without moving the production rank.
+7. Missing external rankings: the production draft product remains fully functional.
+8. Strong WR likely to survive while a scarcer QB probably does not: compare timing and roster fit separately.
+9. Research two-turn planner disagrees with production: production remains visually authoritative and research remains labeled unpromoted.
+10. Platform refresh fails after successful picks: preserve the last valid board and show stale state.
+11. Gemini is unavailable: deterministic draft and ranking-audit workflows still work.
+12. Projection data is unavailable: do not fabricate live rankings.
 
-Finish by running the existing frontend build and preserving the Python source-of-truth boundary.
+Finish by running the production frontend build and preserving the Python source-of-truth and champion/challenger boundaries.

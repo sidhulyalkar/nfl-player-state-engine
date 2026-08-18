@@ -45,7 +45,9 @@ def _owner_id(team: object) -> str:
 
 
 def _player_entry(player: object) -> RosterEntry:
-    player_id = str(_get(player, "playerId", "player_id", default=_get(player, "name", default="unknown")))
+    player_id = str(
+        _get(player, "playerId", "player_id", default=_get(player, "name", default="unknown"))
+    )
     name = _get(player, "name", "playerName")
     position = _get(player, "position", "eligibleSlots")
     if isinstance(position, (list, tuple)):
@@ -56,14 +58,83 @@ def _player_entry(player: object) -> RosterEntry:
     is_ir = bool(lineup_text and lineup_text.upper() in {"IR", "RES"})
     return RosterEntry(
         platform_player_id=player_id,
-        canonical_player_id=str(_get(player, "proId", "pro_id")) if _get(player, "proId", "pro_id") else None,
+        canonical_player_id=(
+            str(_get(player, "proId", "pro_id")) if _get(player, "proId", "pro_id") else None
+        ),
         player_name=str(name) if name is not None else None,
         position=str(position).upper() if position is not None else None,
-        nfl_team=str(_get(player, "proTeam", "pro_team")) if _get(player, "proTeam", "pro_team") else None,
+        nfl_team=(
+            str(_get(player, "proTeam", "pro_team"))
+            if _get(player, "proTeam", "pro_team")
+            else None
+        ),
         roster_slot=lineup_text,
         is_starter=is_starter,
         is_injured_reserve=is_ir,
     )
+
+
+def _espn_roster_positions(settings_obj: object) -> list[str]:
+    """Read the current espn-api Settings.position_slot_counts representation first."""
+    roster_positions: list[str] = []
+    slot_counts = _get(settings_obj, "position_slot_counts", default=None)
+    if isinstance(slot_counts, dict):
+        for slot, count in slot_counts.items():
+            try:
+                amount = int(count)
+            except (TypeError, ValueError):
+                continue
+            if amount > 0:
+                roster_positions.extend([str(slot).upper()] * amount)
+        if roster_positions:
+            return roster_positions
+
+    # Older/fake adapters used in tests may expose a roster_settings mapping instead.
+    roster_settings = _get(settings_obj, "roster_settings", "rosterSettings", default={}) or {}
+    if isinstance(roster_settings, dict):
+        for slot, count in roster_settings.items():
+            try:
+                amount = int(count)
+            except (TypeError, ValueError):
+                continue
+            if amount > 0:
+                roster_positions.extend([str(slot).upper()] * amount)
+    return roster_positions
+
+
+def _espn_scoring(settings_obj: object) -> tuple[dict[str, float], list[dict[str, Any]]]:
+    """Normalize both current list-based and legacy mapping-based espn-api scoring settings."""
+    scoring: dict[str, float] = {}
+    raw_rows: list[dict[str, Any]] = []
+    scoring_format = _get(settings_obj, "scoring_format", "scoringFormat", default=[]) or []
+    if isinstance(scoring_format, dict):
+        for key, value in scoring_format.items():
+            try:
+                scoring[str(key)] = float(value)
+            except (TypeError, ValueError):
+                continue
+        return scoring, raw_rows
+
+    for raw in _as_list(scoring_format):
+        if not isinstance(raw, dict):
+            continue
+        row = dict(raw)
+        raw_rows.append(row)
+        points = row.get("points")
+        try:
+            value = float(points)
+        except (TypeError, ValueError):
+            continue
+        abbreviation = row.get("abbr")
+        label = row.get("label")
+        stat_id = row.get("id")
+        if abbreviation:
+            scoring[str(abbreviation)] = value
+        elif label:
+            scoring[str(label)] = value
+        elif stat_id is not None:
+            scoring[f"stat_{stat_id}"] = value
+    return scoring, raw_rows
 
 
 class ESPNImporter(LeagueImporter):
@@ -108,7 +179,9 @@ class ESPNImporter(LeagueImporter):
         league = self._factory()(**kwargs)
 
         settings_obj = _get(league, "settings", default=None)
-        league_name = _get(settings_obj, "name", default=None) or _get(league, "name", default=None)
+        league_name = _get(settings_obj, "name", default=None) or _get(
+            league, "name", default=None
+        )
         teams_raw = _as_list(_get(league, "teams", default=[]))
 
         managers: list[FantasyManager] = []
@@ -121,7 +194,9 @@ class ESPNImporter(LeagueImporter):
             managers.append(
                 FantasyManager(manager_id=owner_id, display_name=owner_id, team_name=team_name)
             )
-            entries = [_player_entry(player) for player in _as_list(_get(team, "roster", default=[]))]
+            entries = [
+                _player_entry(player) for player in _as_list(_get(team, "roster", default=[]))
+            ]
             owned_ids.update(entry.platform_player_id for entry in entries)
             rosters.append(
                 FantasyRoster(
@@ -147,26 +222,11 @@ class ESPNImporter(LeagueImporter):
                     entry = _player_entry(player)
                     if entry.platform_player_id not in owned_ids:
                         free_agents.append(entry)
-            except Exception:
+            except Exception:  # noqa: BLE001 - third-party adapter is intentionally fail-soft here.
                 free_agents = []
 
-        roster_positions: list[str] = []
-        roster_settings = _get(settings_obj, "roster_settings", "rosterSettings", default={}) or {}
-        if isinstance(roster_settings, dict):
-            for slot, count in roster_settings.items():
-                try:
-                    roster_positions.extend([str(slot).upper()] * int(count))
-                except (TypeError, ValueError):
-                    continue
-
-        scoring: dict[str, float] = {}
-        scoring_format = _get(settings_obj, "scoring_format", "scoringFormat", default={}) or {}
-        if isinstance(scoring_format, dict):
-            for key, value in scoring_format.items():
-                try:
-                    scoring[str(key)] = float(value)
-                except (TypeError, ValueError):
-                    continue
+        roster_positions = _espn_roster_positions(settings_obj)
+        scoring, raw_scoring = _espn_scoring(settings_obj)
 
         draft_rows: list[dict[str, Any]] = []
         for pick in _as_list(_get(league, "draft", default=[])):
@@ -177,13 +237,19 @@ class ESPNImporter(LeagueImporter):
                     "round": _get(pick, "round_num", "roundNum"),
                     "round_pick": _get(pick, "round_pick", "roundPick"),
                     "overall_pick": _get(pick, "overall_pick", "overallPick"),
-                    "team_id": str(_get(_get(pick, "team", default=None), "team_id", default="")),
+                    "team_id": str(
+                        _get(_get(pick, "team", default=None), "team_id", default="")
+                    ),
                 }
             )
 
         current_week = _get(league, "nfl_week", "current_week", default=None)
-        team_count = int(_get(settings_obj, "team_count", "teamCount", default=len(rosters)) or len(rosters))
-        superflex = any(slot in {"OP", "SUPER_FLEX", "SUPERFLEX", "SF"} for slot in roster_positions)
+        team_count = int(
+            _get(settings_obj, "team_count", "teamCount", default=len(rosters)) or len(rosters)
+        )
+        superflex = any(
+            slot in {"OP", "SUPER_FLEX", "SUPERFLEX", "SF"} for slot in roster_positions
+        )
 
         return LeagueSnapshot(
             identity=LeagueIdentity(
@@ -210,5 +276,6 @@ class ESPNImporter(LeagueImporter):
                 "live_draft_picks": draft_rows,
                 "adapter": "espn-api",
                 "credentials_present": bool(s2 and resolved_swid),
+                "espn_scoring_format": raw_scoring,
             },
         )

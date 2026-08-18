@@ -38,7 +38,7 @@ class RosterImpact:
     depth_delta: float
     roster_fit_score: float
     simulations: int
-    model_source: str = "quantile_roster_counterfactual_v1"
+    model_source: str = "league_scored_quantile_roster_counterfactual_v2"
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -46,6 +46,8 @@ class RosterImpact:
 
 def _quantile_columns(frame: pd.DataFrame) -> tuple[str, str, str]:
     candidates = (
+        ("valuation_points_q10", "valuation_points_q50", "valuation_points_q90"),
+        ("league_season_points_q10", "league_season_points_q50", "league_season_points_q90"),
         ("season_points_q10", "season_points_q50", "season_points_q90"),
         ("fantasy_points_ppr_q10", "fantasy_points_ppr_q50", "fantasy_points_ppr_q90"),
         ("q10", "q50", "q90"),

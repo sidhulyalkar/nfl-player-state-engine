@@ -9,6 +9,7 @@ from player_state_engine.data.io import read_table
 from player_state_engine.fantasy.decision_board import DecisionType, build_decision_board
 from player_state_engine.fantasy.decisions import optimize_lineup, rank_waiver_candidates
 from player_state_engine.fantasy.league import LeagueConfig
+from player_state_engine.integrations.portfolio import league_config_from_snapshot
 from player_state_engine.integrations.sleeper import SleeperImporter
 from player_state_engine.product.league_picture import (
     attach_ownership,
@@ -41,40 +42,13 @@ def _load_optional_table(path: str | Path | None) -> pd.DataFrame:
 
 
 def _league_config(snapshot: LeagueSnapshot) -> LeagueConfig:
-    slots: dict[str, int] = {
-        "QB": 0,
-        "RB": 0,
-        "WR": 0,
-        "TE": 0,
-        "FLEX": 0,
-        "SUPERFLEX": 0,
-        "BENCH": 0,
-    }
-    slot_map = {
-        "QB": "QB",
-        "RB": "RB",
-        "WR": "WR",
-        "TE": "TE",
-        "FLEX": "FLEX",
-        "SUPER_FLEX": "SUPERFLEX",
-        "SUPERFLEX": "SUPERFLEX",
-        "BN": "BENCH",
-        "BENCH": "BENCH",
-    }
-    for slot in snapshot.settings.roster_positions:
-        mapped = slot_map.get(slot)
-        if mapped:
-            slots[mapped] = slots.get(mapped, 0) + 1
-    if not any(slots[position] for position in ("QB", "RB", "WR", "TE")):
-        slots.update({"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 1, "BENCH": 6})
-    scoring = "ppr" if snapshot.settings.scoring.get("rec", 1.0) >= 0.75 else "half_ppr"
-    return LeagueConfig(
-        teams=snapshot.settings.teams,
-        scoring=scoring,
-        roster_slots=slots,
-        faab_budget=snapshot.settings.faab_budget or 100.0,
-        playoff_weeks=tuple(range(snapshot.settings.playoff_week_start or 15, 18)),
-    )
+    """Use the same authoritative live league translation as the Draft War Room."""
+    config = league_config_from_snapshot(snapshot)
+    if snapshot.settings.faab_budget is not None:
+        config.faab_budget = float(snapshot.settings.faab_budget)
+    if snapshot.settings.playoff_week_start is not None:
+        config.playoff_weeks = tuple(range(int(snapshot.settings.playoff_week_start), 18))
+    return config
 
 
 def create_app(
@@ -91,7 +65,7 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(
         title="NFL Player State Engine Product API",
-        version="0.6.0",
+        version="0.9.0",
         description="League imports, probabilistic player cards, trade analysis and fantasy decisions.",
     )
     origins = [
@@ -105,7 +79,9 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    store = LeagueSnapshotStore(store_root or os.getenv("PSE_LEAGUE_STORE", "data/product/leagues"))
+    store = LeagueSnapshotStore(
+        store_root or os.getenv("PSE_LEAGUE_STORE", "data/product/leagues")
+    )
     projection_location = projections_path or os.getenv(
         "PSE_PROJECTIONS_PATH", "artifacts/predictions/product_player_values.csv"
     )
@@ -136,7 +112,8 @@ def create_app(
         frame = _load_optional_table(projection_location)
         if frame.empty:
             raise HTTPException(
-                status_code=503, detail=f"Projection artifact unavailable: {projection_location}"
+                status_code=503,
+                detail=f"Projection artifact unavailable: {projection_location}",
             )
         return frame
 
@@ -175,7 +152,7 @@ def create_app(
         )
         return {
             "status": "ok",
-            "version": "0.6.0",
+            "version": "0.9.0",
             "projection_artifact": str(projection_location),
             "projection_available": Path(projection_location).exists(),
             "league_count": len(store.list()),
@@ -194,11 +171,15 @@ def create_app(
         try:
             snapshot = SleeperImporter().import_league(
                 league_id,
-                external_user_id=str(payload.get("user_id")) if payload.get("user_id") else None,
+                external_user_id=(
+                    str(payload.get("user_id")) if payload.get("user_id") else None
+                ),
                 include_free_agents=bool(payload.get("include_free_agents", True)),
-                player_pool_limit=int(payload["player_pool_limit"])
-                if payload.get("player_pool_limit")
-                else None,
+                player_pool_limit=(
+                    int(payload["player_pool_limit"])
+                    if payload.get("player_pool_limit")
+                    else None
+                ),
             )
             path = store.save(snapshot)
             return {"league": snapshot.model_dump(mode="json"), "stored_at": str(path)}
@@ -207,7 +188,10 @@ def create_app(
 
     @app.post("/v1/leagues/snapshot")
     def save_snapshot(snapshot: LeagueSnapshot) -> dict[str, str]:
-        return {"stored_at": str(store.save(snapshot)), "league_id": snapshot.identity.league_id}
+        return {
+            "stored_at": str(store.save(snapshot)),
+            "league_id": snapshot.identity.league_id,
+        }
 
     @app.get("/v1/leagues/{league_id}")
     def get_league(league_id: str) -> dict[str, object]:
@@ -247,7 +231,9 @@ def create_app(
             "data_mode": trust["data_mode"],
             "league_id": league_id,
             "model_version": trust["model_version"],
-            "projection_artifact_file_modified_at": trust["projection_artifact_file_modified_at"],
+            "projection_artifact_file_modified_at": trust[
+                "projection_artifact_file_modified_at"
+            ],
             "identity_coverage": trust["identity_coverage"],
             "missing_inputs": trust["missing_inputs"],
             "needs": frame_records(needs),
@@ -322,7 +308,8 @@ def create_app(
         schedules = _load_optional_table(schedule_location)
         if schedules.empty:
             raise HTTPException(
-                status_code=503, detail=f"Schedule artifact unavailable: {schedule_location}"
+                status_code=503,
+                detail=f"Schedule artifact unavailable: {schedule_location}",
             )
         return {
             "data_mode": schedule_mode,
@@ -359,7 +346,9 @@ def create_app(
         target: str = Query("fantasy_points_ppr", pattern="^[a-z0-9_]+$"),
         season: int | None = None,
         week: int | None = Query(None, ge=1, le=25),
-        position: str | None = Query(None, pattern="^(QB|RB|WR|TE|qb|rb|wr|te)$"),
+        position: str | None = Query(
+            None, pattern="^(QB|RB|WR|TE|qb|rb|wr|te)$"
+        ),
         method: str | None = None,
         limit: int = Query(100, ge=1, le=1000),
     ) -> dict[str, object]:
@@ -379,7 +368,9 @@ def create_app(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/v1/copilot/context/{league_id}")
-    def copilot_context(league_id: str, roster_id: str | None = None) -> dict[str, object]:
+    def copilot_context(
+        league_id: str, roster_id: str | None = None
+    ) -> dict[str, object]:
         snapshot = store.load(league_id)
         config = _league_config(snapshot)
         board, trust = trusted_board(snapshot, config, DecisionType.TRADE)
@@ -387,8 +378,12 @@ def create_app(
         response: dict[str, object] = {
             "league": snapshot.model_dump(mode="json"),
             "trust": trust,
-            "power_rankings": frame_records(league_power_rankings(snapshot, board).head(12)),
-            "top_free_agents": frame_records(board.loc[board["is_free_agent"]].head(20)),
+            "power_rankings": frame_records(
+                league_power_rankings(snapshot, board).head(12)
+            ),
+            "top_free_agents": frame_records(
+                board.loc[board["is_free_agent"]].head(20)
+            ),
         }
         if roster_id:
             response["roster_players"] = frame_records(

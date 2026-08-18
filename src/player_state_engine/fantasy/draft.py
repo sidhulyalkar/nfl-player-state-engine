@@ -10,6 +10,7 @@ import pandas as pd
 
 from player_state_engine.fantasy.decision_board import DecisionType, build_decision_board
 from player_state_engine.fantasy.league import LeagueConfig
+from player_state_engine.fantasy.scoring import prepare_league_scoring_quantiles
 from player_state_engine.fantasy.valuation import starter_allocation
 
 
@@ -81,7 +82,8 @@ def _roster_counts(board: pd.DataFrame, roster_player_ids: Iterable[str]) -> Cou
 
 
 def _target_roster_counts(projections: pd.DataFrame, config: LeagueConfig) -> dict[str, float]:
-    starter_counts = starter_allocation(projections, config)
+    scored = prepare_league_scoring_quantiles(projections, config)
+    starter_counts = starter_allocation(scored, config, value_column="valuation_points_q50")
     targets = {position: count / config.teams for position, count in starter_counts.items()}
 
     # Bench players still matter in deep formats, but not equally across positions. Spread
@@ -110,12 +112,82 @@ def _tier_cliff(board: pd.DataFrame) -> pd.Series:
     return cliff
 
 
+def _add_dynamic_draft_scarcity(available: pd.DataFrame, state: DraftState) -> pd.DataFrame:
+    """Estimate the positional value lost by waiting until the manager's next turn.
+
+    This is an audit/challenger feature in v0.9, not a silently promoted replacement for the
+    v0.8 live score. It combines the league's projected replacement curve with the room's
+    probability that same-position alternatives disappear before the next selection.
+    """
+    out = available.copy()
+    if out.empty:
+        return out
+
+    out["position_supply_remaining"] = 0
+    out["expected_position_drafted_before_next"] = 0.0
+    out["expected_position_supply_next_pick"] = 0.0
+    out["position_wait_value"] = 0.0
+    out["position_wait_loss"] = 0.0
+
+    for _, group in out.groupby("position", sort=False):
+        ordered = group.sort_values("vorp", ascending=False)
+        positive = ordered.loc[ordered["vorp"] > 0].copy()
+        supply = len(positive)
+        out.loc[group.index, "position_supply_remaining"] = supply
+        if positive.empty:
+            continue
+
+        urgency = pd.to_numeric(positive["market_urgency"], errors="coerce").fillna(0.5).clip(0, 1)
+        expected_taken = float(urgency.sum())
+        expected_remaining = max(0.0, supply - expected_taken)
+        out.loc[group.index, "expected_position_drafted_before_next"] = expected_taken
+        out.loc[group.index, "expected_position_supply_next_pick"] = expected_remaining
+
+        for row_index, row in ordered.iterrows():
+            candidate_vorp = max(0.0, float(row.get("vorp", 0.0)))
+            other = positive.loc[positive.index != row_index].copy()
+            if other.empty or state.next_pick is None:
+                wait_value = 0.0
+            else:
+                survival = pd.to_numeric(
+                    other["survival_to_next_pick"], errors="coerce"
+                ).fillna(0.5).clip(0, 1)
+                other_vorp = pd.to_numeric(other["vorp"], errors="coerce").fillna(0.0).clip(lower=0.0)
+                # Probability-weighted maximum is approximated by ordering alternatives and
+                # accumulating their chance of being the best survivor. This stays transparent.
+                best_survivor_probability = 1.0
+                wait_value = 0.0
+                for value, probability in sorted(
+                    zip(other_vorp, survival, strict=False), reverse=True, key=lambda item: item[0]
+                ):
+                    contribution = best_survivor_probability * float(probability)
+                    wait_value += contribution * float(value)
+                    best_survivor_probability *= 1.0 - float(probability)
+                    if best_survivor_probability < 1e-4:
+                        break
+            out.at[row_index, "position_wait_value"] = wait_value
+            out.at[row_index, "position_wait_loss"] = max(0.0, candidate_vorp - wait_value)
+
+    out["position_supply_remaining"] = out["position_supply_remaining"].astype(int)
+    out["position_wait_loss_percentile"] = _percentile(out["position_wait_loss"])
+    curve = pd.to_numeric(
+        out["dynamic_scarcity_score"] if "dynamic_scarcity_score" in out else 0.0,
+        errors="coerce",
+    ).fillna(0.0)
+    out["draft_dynamic_scarcity_score"] = (
+        0.55 * curve + 0.45 * out["position_wait_loss_percentile"]
+    ).clip(0, 1)
+    return out
+
+
 def _draft_reasons(row: pd.Series) -> str:
     reasons: list[str] = []
     if float(row.get("roster_need_score", 0.0)) >= 0.75:
         reasons.append("fills a major roster need")
     if float(row.get("survival_to_next_pick", 1.0)) <= 0.25:
         reasons.append("unlikely to reach your next pick")
+    if float(row.get("position_wait_loss_percentile", 0.0)) >= 0.85:
+        reasons.append("large positional value loss if you wait")
     if float(row.get("tier_cliff_percentile", 0.0)) >= 0.80:
         reasons.append("tier cliff behind him")
     if float(row.get("vorp_percentile", 0.0)) >= 0.85:
@@ -137,10 +209,8 @@ def build_live_draft_board(
 ) -> pd.DataFrame:
     """Rank the best pick *now* for the current league and draft room.
 
-    The board combines model value, league-specific replacement levels, roster construction,
-    tier cliffs and the probability a player survives to the manager's next selection.
-    Drafted players disappear immediately. The function is deterministic and side-effect free,
-    making it safe to call after every live pick from Sleeper or ESPN.
+    The production score remains the interpretable v0.8 blend. v0.9 adds a separately exposed
+    dynamic-scarcity challenger so historical replay can decide whether it deserves promotion.
     """
     if state.teams != config.teams:
         raise ValueError("DraftState.teams must match LeagueConfig.teams")
@@ -191,18 +261,19 @@ def build_live_draft_board(
     available["reach_rounds"] = (
         (available["market_adp"] - state.current_pick) / config.teams
     ).fillna(0.0)
+    available = _add_dynamic_draft_scarcity(available, state)
 
     floor_pct = _percentile(available["floor_vorp"])
     uncertainty_pct = _percentile(available["uncertainty"])
     if config.median_scoring:
-        available["median_format_score"] = (0.75 * floor_pct + 0.25 * (1.0 - uncertainty_pct)).clip(0, 1)
+        available["median_format_score"] = (
+            0.75 * floor_pct + 0.25 * (1.0 - uncertainty_pct)
+        ).clip(0, 1)
         available["median_scoring_boost"] = available["median_format_score"] >= 0.75
     else:
         available["median_format_score"] = 0.5
         available["median_scoring_boost"] = False
 
-    # The blend is deliberately interpretable. Model value stays dominant; the room-state
-    # terms decide close calls rather than replacing projections with draft-market mimicry.
     weights = {
         "base": 0.54,
         "need": 0.15,
@@ -222,10 +293,25 @@ def build_live_draft_board(
         + weights["median"] * available["median_format_score"]
     ) / total_weight
 
-    # Small reach penalty only when the room gives us a strong reason to wait.
     wait_penalty = np.clip((available["reach_rounds"] - 1.0) / 3.0, 0.0, 1.0)
     available["live_draft_score"] -= 4.0 * wait_penalty * available["survival_to_next_pick"]
     available["live_draft_score"] = available["live_draft_score"].clip(0, 100)
+
+    # Challenger keeps the same semantic pieces but swaps static scarcity for the measured
+    # projected loss from waiting. It is deliberately not used for draft_action until promoted.
+    challenger = 100.0 * (
+        0.52 * available["base_draft_percentile"]
+        + 0.14 * need_component
+        + 0.11 * available["market_urgency"]
+        + 0.08 * available["tier_cliff_percentile"]
+        + 0.11 * available["draft_dynamic_scarcity_score"]
+        + (0.04 if config.median_scoring else 0.0) * available["median_format_score"]
+    ) / (1.0 if config.median_scoring else 0.96)
+    available["ranking_challenger_score"] = (challenger - 3.0 * wait_penalty).clip(0, 100)
+    available["ranking_challenger_delta"] = (
+        available["ranking_challenger_score"] - available["live_draft_score"]
+    )
+    available["ranking_challenger_promoted"] = False
 
     available["draft_action"] = np.select(
         [
@@ -248,6 +334,9 @@ def build_live_draft_board(
         kind="mergesort",
     ).reset_index(drop=True)
     available["live_rank"] = np.arange(1, len(available) + 1, dtype=int)
+    available["challenger_rank"] = (
+        available["ranking_challenger_score"].rank(method="first", ascending=False).astype(int)
+    )
     return available
 
 
@@ -276,7 +365,9 @@ def draft_state_from_snapshot(
                     roster_player_ids.append(str(player_id))
         try:
             roster = snapshot.roster(str(resolved_roster_id))
-            roster_player_ids.extend(str(entry.platform_player_id) for entry in roster.players)
+            roster_player_ids.extend(
+                str(entry.canonical_player_id or entry.platform_player_id) for entry in roster.players
+            )
         except (KeyError, AttributeError):
             pass
 
