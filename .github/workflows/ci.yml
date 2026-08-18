@@ -20,7 +20,8 @@ jobs:
             scripts/run_game_simulation_replay.py \
             scripts/weekly_game_intelligence_refresh.py \
             scripts/run_v011_game_benchmark.py \
-            scripts/run_v011_blend_benchmark.py
+            scripts/run_v011_blend_benchmark.py \
+            scripts/run_v012_factorial_benchmark.py
       - name: Compile Python sources and all scripts
         run: python -m compileall -q src scripts tests
       - run: pytest
