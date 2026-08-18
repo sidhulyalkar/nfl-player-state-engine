@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from math import erf, sqrt
-from typing import Iterable
 
 import numpy as np
 import pandas as pd
@@ -260,7 +260,7 @@ def draft_state_from_snapshot(
 ) -> DraftState:
     """Build DraftState from a normalized Sleeper/ESPN LeagueSnapshot-like object."""
     metadata = getattr(snapshot, "metadata", {}) or {}
-    settings = getattr(snapshot, "settings")
+    settings = snapshot.settings
     picks = list(metadata.get("live_draft_picks") or [])
     drafted_ids = tuple(
         str(pick.get("player_id")) for pick in picks if pick.get("player_id") not in {None, ""}
@@ -290,7 +290,7 @@ def draft_state_from_snapshot(
     current_pick = len(picks) + 1
     draft_type = str(getattr(settings, "draft_type", None) or active_draft.get("type") or "snake")
     return DraftState(
-        teams=int(getattr(settings, "teams")),
+        teams=int(settings.teams),
         draft_slot=draft_slot,
         current_pick=current_pick,
         total_rounds=int(total_rounds),
