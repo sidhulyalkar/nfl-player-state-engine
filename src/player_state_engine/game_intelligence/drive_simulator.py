@@ -100,7 +100,7 @@ def simulate_matchup_volume_probe(
 
     With ``drive_volume_model=None`` this mechanically mirrors the v0.12 clock/start-field
     heuristics under standardized component RNG streams while tracking drive diagnostics.
-    Supplying a fitted model changes only drive starts and clock runoff.
+    Supplying a fitted model changes continuing-drive runoff and drive starts only.
     """
     config = config or SimulationConfig()
     game_id = matchup.resolved_game_id
@@ -134,6 +134,7 @@ def simulate_matchup_volume_probe(
     game_rows: list[dict[str, object]] = []
     state_allocation_attempts = 0
     state_allocation_fallbacks = 0
+    modeled_pace_plays = 0
 
     for simulation in range(config.simulations):
         rng_special, rng_play_call, rng_outcome, rng_allocation, rng_tempo = _component_rngs(
@@ -287,7 +288,9 @@ def simulate_matchup_volume_probe(
 
             touchdown = bool(outcome.get("touchdown", 0.0) >= 0.5 or yards >= yardline)
             turnover = bool(outcome.get("turnover", 0.0) >= 0.5)
+            drive_continues = True
             if touchdown:
+                drive_continues = False
                 scores[play_offense] += 7.0
                 if family == "DROPBACK":
                     _record(player_stats, simulation, passer, "passing_tds", 1.0)
@@ -298,6 +301,7 @@ def simulate_matchup_volume_probe(
                     _other_team(play_offense, matchup), 75.0
                 )
             elif turnover:
+                drive_continues = False
                 if outcome.get("fumble_lost", 0.0) >= 0.5:
                     _record(
                         player_stats,
@@ -318,6 +322,7 @@ def simulate_matchup_volume_probe(
                     down += 1
                     distance = float(np.clip(distance - yards, 0.5, 30.0))
                     if down > 4:
+                        drive_continues = False
                         offense, defense, yardline, down, distance = start_possession(
                             _other_team(play_offense, matchup), 75.0
                         )
@@ -326,7 +331,8 @@ def simulate_matchup_volume_probe(
             if not np.isfinite(legacy_runoff) or legacy_runoff <= 0:
                 legacy_runoff = 30.0 if family == "RUSH" else 24.0
             runoff = float(legacy_runoff)
-            if drive_volume_model is not None:
+            if drive_volume_model is not None and drive_continues:
+                modeled_pace_plays += 1
                 runoff = drive_volume_model.sample_seconds(
                     team=play_offense,
                     state=state,
@@ -449,6 +455,9 @@ def simulate_matchup_volume_probe(
             else "v012_legacy_mechanics_standardized_rng"
         ),
         "component_rng_streams": True,
+        "pace_target": "seconds_to_next_play within continuing drive",
+        "pace_model_applies_to_continuing_drives_only": True,
+        "modeled_pace_plays": int(modeled_pace_plays),
         "state_allocation_attempts": int(state_allocation_attempts),
         "state_allocation_fallbacks": int(state_allocation_fallbacks),
         "complete_player_draw_matrix": True,
@@ -461,11 +470,11 @@ def simulate_matchup_volume_probe(
         "production_projection_changed": False,
         "limitations": [
             "legacy cells use v0.12 mechanisms under standardized component RNG streams, not byte-identical v0.12 trajectories",
+            "drive-ending runoff stays on the common legacy mechanism until possession transitions are modeled separately",
             "no overtime state machine",
             "touchdowns use seven points instead of a separate PAT/two-point model",
             "fourth-down decisions remain transparent heuristics pending calibration",
             "drive starts are learned from scrimmage-play drive starts, not special-teams tracking",
-            "drive-volume challenger changes pace and field-position starts only",
         ],
     }
     return PlayByPlaySimulationResult(
