@@ -34,14 +34,14 @@ def _git_sha() -> str:
         return "unknown"
 
 
-def _latest_completed_week(pbp: pd.DataFrame, season: int) -> int:
+def _latest_completed_week(pbp: pd.DataFrame, season: int) -> int | None:
+    if "season" not in pbp or "week" not in pbp:
+        return None
     weeks = pd.to_numeric(
         pbp.loc[pd.to_numeric(pbp["season"], errors="coerce") == int(season), "week"],
         errors="coerce",
     ).dropna()
-    if weeks.empty:
-        raise ValueError(f"No completed PBP found for season {season}")
-    return int(weeks.max())
+    return int(weeks.max()) if not weeks.empty else None
 
 
 def main() -> None:
@@ -69,6 +69,19 @@ def main() -> None:
     players = read_table(args.players) if args.players else None
     player_actuals = read_table(args.player_actuals) if args.player_actuals else None
     completed_week = args.completed_week or _latest_completed_week(pbp, args.season)
+    if completed_week is None or completed_week <= 0:
+        print(
+            json.dumps(
+                {
+                    "status": "no_completed_games",
+                    "season": int(args.season),
+                    "automatic_promotion": False,
+                    "message": "No completed regular-season PBP is available yet; refresh is a clean no-op.",
+                }
+            )
+        )
+        return
+
     next_week = completed_week + 1
     replay_start = max(1, completed_week - max(1, args.replay_weeks) + 1)
 
