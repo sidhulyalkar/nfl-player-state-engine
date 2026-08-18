@@ -52,11 +52,30 @@ def _read_registry(path: Path) -> list[dict[str, object]]:
     return payload if isinstance(payload, list) else []
 
 
+def _latest_benchmark_summary(root: Path) -> tuple[Path, dict[str, object]] | None:
+    direct = root / "summary.json"
+    candidates = [direct] if direct.exists() else []
+    if not candidates and root.exists():
+        candidates = sorted(
+            (path for path in root.glob("**/summary.json") if path.is_file()),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+    if not candidates:
+        return None
+    path = candidates[0]
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return None
+    return path, payload
+
+
 def install_game_intelligence_routes(
     app: FastAPI,
     *,
     artifact_root: str | Path | None = None,
     registry_path: str | Path | None = None,
+    benchmark_root: str | Path | None = None,
 ) -> None:
     root = Path(
         artifact_root
@@ -68,6 +87,10 @@ def install_game_intelligence_routes(
             "PSE_GAME_INTELLIGENCE_REGISTRY",
             "artifacts/models/game_intelligence/registry.json",
         )
+    )
+    benchmark = Path(
+        benchmark_root
+        or os.getenv("PSE_GAME_INTELLIGENCE_BENCHMARK_ROOT", "artifacts/game_intelligence/v011")
     )
 
     @app.get("/v1/research/game-intelligence/sources")
@@ -83,14 +106,42 @@ def install_game_intelligence_routes(
         entries = _read_registry(registry)
         latest = entries[-1] if entries else None
         artifact_dir = _latest_artifact_dir(root) if root.exists() else None
+        benchmark_summary = _latest_benchmark_summary(benchmark)
         return {
-            "model_family": "game_intelligence_v010_research",
+            "model_family": "game_intelligence_v011_research",
             "latest_registry_entry": latest,
             "registry_entries": len(entries),
             "artifact_available": artifact_dir is not None,
             "artifact_dir": str(artifact_dir) if artifact_dir is not None else None,
+            "benchmark_available": benchmark_summary is not None,
+            "benchmark_summary_path": (
+                str(benchmark_summary[0]) if benchmark_summary is not None else None
+            ),
+            "benchmark_protocol": (
+                benchmark_summary[1].get("diagnostics", {}).get("protocol")
+                if benchmark_summary is not None
+                and isinstance(benchmark_summary[1].get("diagnostics"), dict)
+                else None
+            ),
             "production_projection_changed": False,
             "automatic_promotion": False,
+        }
+
+    @app.get("/v1/research/game-intelligence/benchmark")
+    def game_intelligence_benchmark() -> dict[str, object]:
+        summary = _latest_benchmark_summary(benchmark)
+        if summary is None:
+            raise HTTPException(
+                status_code=503,
+                detail=f"No v0.11 game-intelligence benchmark summary available under {benchmark}",
+            )
+        path, payload = summary
+        return {
+            "summary": payload,
+            "summary_path": str(path),
+            "research_only": True,
+            "automatic_promotion": False,
+            "production_projection_changed": False,
         }
 
     @app.post("/v1/research/game-intelligence/simulate")

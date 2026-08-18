@@ -1,0 +1,93 @@
+name: v011-historical-game-benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_seasons:
+        description: "Comma-separated seasons to acquire, including warm-up history"
+        required: true
+        default: "2021,2022,2023,2024,2025"
+      test_seasons:
+        description: "Comma-separated held-out seasons to replay"
+        required: true
+        default: "2023,2024,2025"
+      week_start:
+        description: "First regular-season week"
+        required: true
+        default: "1"
+      week_end:
+        description: "Last regular-season week"
+        required: true
+        default: "18"
+      simulations_per_game:
+        description: "Monte Carlo draws per game"
+        required: true
+        default: "50"
+      max_games_per_week:
+        description: "Optional smoke-test cap; blank runs every game"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install engine
+        run: python -m pip install -e '.[intelligence]'
+      - name: Acquire frozen historical evidence
+        shell: bash
+        run: |
+          IFS=',' read -ra SEASONS <<< "${{ inputs.source_seasons }}"
+          ARGS=()
+          for season in "${SEASONS[@]}"; do
+            season="$(echo "$season" | xargs)"
+            ARGS+=(--season "$season")
+          done
+          python scripts/acquire_game_intelligence_sources.py \
+            "${ARGS[@]}" \
+            --output-dir data/raw/game_intelligence/v011
+      - name: Run expanding weekly replay
+        shell: bash
+        run: |
+          IFS=',' read -ra TEST_SEASONS <<< "${{ inputs.test_seasons }}"
+          TEST_ARGS=()
+          for season in "${TEST_SEASONS[@]}"; do
+            season="$(echo "$season" | xargs)"
+            TEST_ARGS+=(--test-season "$season")
+          done
+          MAX_ARGS=()
+          if [ -n "${{ inputs.max_games_per_week }}" ]; then
+            MAX_ARGS=(--max-games-per-week "${{ inputs.max_games_per_week }}")
+          fi
+          PLAYER_ARGS=()
+          if [ -f data/raw/game_intelligence/v011/players.parquet ]; then
+            PLAYER_ARGS=(--players data/raw/game_intelligence/v011/players.parquet)
+          fi
+          python scripts/run_v011_game_benchmark.py \
+            --pbp data/raw/game_intelligence/v011/play_by_play.parquet \
+            --schedules data/raw/game_intelligence/v011/schedules.parquet \
+            --player-actuals data/raw/game_intelligence/v011/player_stats.parquet \
+            "${PLAYER_ARGS[@]}" \
+            "${TEST_ARGS[@]}" \
+            --week-start "${{ inputs.week_start }}" \
+            --week-end "${{ inputs.week_end }}" \
+            --simulations-per-game "${{ inputs.simulations_per_game }}" \
+            "${MAX_ARGS[@]}" \
+            --output-dir artifacts/game_intelligence/v011
+      - name: Upload frozen benchmark evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: v011-game-benchmark-${{ github.run_id }}
+          path: |
+            artifacts/game_intelligence/v011
+            data/raw/game_intelligence/v011/acquisition_manifest.json
+          if-no-files-found: error
+          retention-days: 30

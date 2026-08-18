@@ -13,7 +13,12 @@ from player_state_engine.api.ranking_routes import install_ranking_routes
 
 def create_app(**kwargs: Any) -> FastAPI:
     """Create the operational Product API plus guarded research challenger surfaces."""
-    operational_only = {"ranking_root", "game_intelligence_root", "game_intelligence_registry"}
+    operational_only = {
+        "ranking_root",
+        "game_intelligence_root",
+        "game_intelligence_registry",
+        "game_intelligence_benchmark_root",
+    }
     base_kwargs = {key: value for key, value in kwargs.items() if key not in operational_only}
     app = create_base_app(**base_kwargs)
     draft_service = install_draft_routes(
@@ -32,11 +37,12 @@ def create_app(**kwargs: Any) -> FastAPI:
         app,
         artifact_root=kwargs.get("game_intelligence_root"),
         registry_path=kwargs.get("game_intelligence_registry"),
+        benchmark_root=kwargs.get("game_intelligence_benchmark_root"),
     )
-    app.version = "0.10.0"
+    app.version = "0.11.0"
     app.description = (
-        f"{app.description} Live Draft War Room, ranking calibration, and guarded game-intelligence "
-        "research surfaces for point-in-time play-call, matchup and play-by-play simulation."
+        f"{app.description} Live Draft War Room, ranking calibration, guarded game-intelligence "
+        "simulation, expanding frozen replay, and state-conditioned opportunity research surfaces."
     )
     return app
 
