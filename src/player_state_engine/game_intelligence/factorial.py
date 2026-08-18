@@ -26,7 +26,10 @@ from player_state_engine.game_intelligence.replay import (
     observed_team_games,
     predicted_player_opportunity_from_draws,
 )
-from player_state_engine.game_intelligence.schema import SimulationConfig, SimulationPromotionDecision
+from player_state_engine.game_intelligence.schema import (
+    SimulationConfig,
+    SimulationPromotionDecision,
+)
 from player_state_engine.game_intelligence.simulator import simulate_matchup
 from player_state_engine.game_intelligence.tendencies import (
     attach_point_in_time_matchup_features,
