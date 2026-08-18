@@ -61,7 +61,9 @@ _TEAM_ALIASES = {
 
 
 def _normalize_name(value: object) -> str:
-    text = unicodedata.normalize("NFKD", str(value or ""))
+    if value is None or (not isinstance(value, str) and pd.isna(value)):
+        return ""
+    text = unicodedata.normalize("NFKD", str(value))
     text = "".join(character for character in text if not unicodedata.combining(character))
     text = text.lower().replace("’", "'")
     text = re.sub(r"\b(jr|sr|ii|iii|iv|v)\.?\b", "", text)
@@ -69,12 +71,16 @@ def _normalize_name(value: object) -> str:
 
 
 def _normalize_team(value: object) -> str:
-    team = str(value or "").strip().upper()
+    if value is None or (not isinstance(value, str) and pd.isna(value)):
+        return ""
+    team = str(value).strip().upper()
     return _TEAM_ALIASES.get(team, team)
 
 
 def _normalize_position(value: object) -> str:
-    return str(value or "").strip().upper().replace("D/ST", "DEF").replace("DST", "DEF")
+    if value is None or (not isinstance(value, str) and pd.isna(value)):
+        return ""
+    return str(value).strip().upper().replace("D/ST", "DEF").replace("DST", "DEF")
 
 
 def qb_format(config: LeagueConfig) -> str:
@@ -148,14 +154,23 @@ def normalize_ranking_frame(
     out["source_weight"] = max(0.0, float(source_weight))
     out["captured_at_utc"] = captured
     out["source_url"] = source_url
-    out["player_name"] = out["player_name"].astype(str).replace("nan", "")
+    out["player_name"] = out["player_name"].map(lambda value: "" if pd.isna(value) else str(value))
     out["position"] = out["position"].map(_normalize_position)
     out["nfl_team"] = out["nfl_team"].map(_normalize_team)
-    for column in ("rank", "position_rank", "rank_min", "rank_max", "rank_std", "expert_count"):
+    for column in (
+        "rank",
+        "position_rank",
+        "rank_min",
+        "rank_max",
+        "rank_std",
+        "expert_count",
+    ):
         out[column] = pd.to_numeric(out[column], errors="coerce")
     out = out.loc[out["rank"].notna()].copy()
     out["rank"] = out["rank"].astype(float)
-    out["source_player_id"] = out["source_player_id"].where(out["source_player_id"].notna(), None)
+    out["source_player_id"] = out["source_player_id"].where(
+        out["source_player_id"].notna(), None
+    )
     out["canonical_player_id"] = out["canonical_player_id"].where(
         out["canonical_player_id"].notna(), None
     )
@@ -174,7 +189,11 @@ def load_ranking_snapshots(root: str | Path) -> pd.DataFrame:
             continue
         if set(_CANONICAL_COLUMNS).issubset(frame.columns):
             frames.append(frame.loc[:, _CANONICAL_COLUMNS].copy())
-    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=_CANONICAL_COLUMNS)
+    return (
+        pd.concat(frames, ignore_index=True)
+        if frames
+        else pd.DataFrame(columns=_CANONICAL_COLUMNS)
+    )
 
 
 def match_rankings_to_players(rankings: pd.DataFrame, players: pd.DataFrame) -> pd.DataFrame:
@@ -204,31 +223,43 @@ def match_rankings_to_players(rankings: pd.DataFrame, players: pd.DataFrame) -> 
     ids = set(pool["_id"])
     exact_name_position_team: dict[tuple[str, str, str], list[str]] = {}
     exact_name_position: dict[tuple[str, str], list[str]] = {}
-    for row in pool.itertuples(index=False):
-        exact_name_position_team.setdefault((row._name, row._position, row._team), []).append(row._id)
-        exact_name_position.setdefault((row._name, row._position), []).append(row._id)
+    for _, row in pool.iterrows():
+        player_id = str(row["_id"])
+        name = str(row["_name"])
+        position = str(row["_position"])
+        team = str(row["_team"])
+        exact_name_position_team.setdefault((name, position, team), []).append(player_id)
+        exact_name_position.setdefault((name, position), []).append(player_id)
 
     matched_ids: list[str | None] = []
     methods: list[str] = []
     confidences: list[float] = []
-    for row in rankings.itertuples(index=False):
-        canonical = getattr(row, "canonical_player_id", None)
-        source_id = getattr(row, "source_player_id", None)
-        candidate = str(canonical) if canonical not in {None, "", np.nan} else None
+    for _, row in rankings.iterrows():
+        canonical = row.get("canonical_player_id")
+        source_id = row.get("source_player_id")
+        candidate = (
+            str(canonical)
+            if canonical is not None and pd.notna(canonical) and str(canonical)
+            else None
+        )
         if candidate and candidate in ids:
             matched_ids.append(candidate)
             methods.append("canonical_id")
             confidences.append(1.0)
             continue
-        candidate = str(source_id) if source_id not in {None, "", np.nan} else None
+        candidate = (
+            str(source_id)
+            if source_id is not None and pd.notna(source_id) and str(source_id)
+            else None
+        )
         if candidate and candidate in ids:
             matched_ids.append(candidate)
             methods.append("source_id_exact")
             confidences.append(0.98)
             continue
-        name = _normalize_name(getattr(row, "player_name", ""))
-        position = _normalize_position(getattr(row, "position", ""))
-        team = _normalize_team(getattr(row, "nfl_team", ""))
+        name = _normalize_name(row.get("player_name", ""))
+        position = _normalize_position(row.get("position", ""))
+        team = _normalize_team(row.get("nfl_team", ""))
         key3 = exact_name_position_team.get((name, position, team), []) if team else []
         if len(key3) == 1:
             matched_ids.append(key3[0])
@@ -279,7 +310,9 @@ def select_format_rankings(rankings: pd.DataFrame, config: LeagueConfig) -> pd.D
         return rankings.copy()
     data = rankings.copy()
     data["format_distance"] = data.apply(lambda row: _format_distance(row, config), axis=1)
-    data["captured_at_utc"] = pd.to_datetime(data["captured_at_utc"], utc=True, errors="coerce")
+    data["captured_at_utc"] = pd.to_datetime(
+        data["captured_at_utc"], utc=True, errors="coerce"
+    )
     keys = ["source", "matched_player_id", "ranking_type"]
     data = data.sort_values(
         [*keys, "format_distance", "captured_at_utc"],
@@ -295,7 +328,9 @@ def _weighted_mean(values: pd.Series, weights: pd.Series) -> float:
     valid = values.notna() & weights.notna() & weights.gt(0)
     if not bool(valid.any()):
         return float("nan")
-    return float(np.average(values.loc[valid].astype(float), weights=weights.loc[valid].astype(float)))
+    return float(
+        np.average(values.loc[valid].astype(float), weights=weights.loc[valid].astype(float))
+    )
 
 
 def attach_external_ranking_context(
@@ -314,11 +349,16 @@ def attach_external_ranking_context(
         out["external_consensus_rank"] = np.nan
         out["external_rank_sd"] = np.nan
         out["external_source_count"] = 0
+        out["market_consensus_adp"] = np.nan
+        out["market_rank_sd"] = np.nan
+        out["market_source_count"] = 0
         out["model_vs_external_rank_delta"] = np.nan
+        out["external_disagreement_score"] = 0.0
         return out, {"available": False, "sources": [], "matched_rows": 0}
 
-    matched = match_rankings_to_players(rankings, out)
-    matched = matched.loc[matched["matched_player_id"].notna()].copy()
+    resolved = match_rankings_to_players(rankings, out)
+    unresolved_count = int(resolved["matched_player_id"].isna().sum())
+    matched = resolved.loc[resolved["matched_player_id"].notna()].copy()
     selected = select_format_rankings(matched, config)
     expert = selected.loc[selected["source_kind"].eq("expert")].copy()
     market = selected.loc[selected["source_kind"].isin(["market", "sharp_market"])].copy()
@@ -328,8 +368,12 @@ def attach_external_ranking_context(
         expert_group = group.loc[group["source_kind"].eq("expert")]
         weights = (
             pd.to_numeric(expert_group["source_weight"], errors="coerce").fillna(1.0)
-            * pd.to_numeric(expert_group["format_match_confidence"], errors="coerce").fillna(0.0)
-            * pd.to_numeric(expert_group["identity_match_confidence"], errors="coerce").fillna(0.0)
+            * pd.to_numeric(
+                expert_group["format_match_confidence"], errors="coerce"
+            ).fillna(0.0)
+            * pd.to_numeric(
+                expert_group["identity_match_confidence"], errors="coerce"
+            ).fillna(0.0)
         )
         ranks = pd.to_numeric(expert_group["rank"], errors="coerce")
         consensus = _weighted_mean(ranks, weights)
@@ -339,20 +383,42 @@ def attach_external_ranking_context(
             {
                 "player_id": str(player_id),
                 "external_consensus_rank": consensus,
-                "external_rank_sd": float(ranks.std(ddof=0)) if ranks.notna().any() else np.nan,
+                "external_rank_sd": (
+                    float(ranks.std(ddof=0)) if ranks.notna().any() else np.nan
+                ),
                 "external_rank_min": float(ranks.min()) if ranks.notna().any() else np.nan,
                 "external_rank_max": float(ranks.max()) if ranks.notna().any() else np.nan,
                 "external_source_count": int(expert_group["source"].nunique()),
-                "market_consensus_adp": float(market_rank.mean()) if market_rank.notna().any() else np.nan,
-                "market_rank_sd": float(market_rank.std(ddof=0)) if market_rank.notna().any() else np.nan,
+                "market_consensus_adp": (
+                    float(market_rank.mean()) if market_rank.notna().any() else np.nan
+                ),
+                "market_rank_sd": (
+                    float(market_rank.std(ddof=0)) if market_rank.notna().any() else np.nan
+                ),
                 "market_source_count": int(market_group["source"].nunique()),
             }
         )
     context = pd.DataFrame(rows)
-    out = out.merge(context, on="player_id", how="left", validate="one_to_one")
+    if not context.empty:
+        out = out.merge(context, on="player_id", how="left", validate="one_to_one")
+    else:
+        out["external_consensus_rank"] = np.nan
+        out["external_rank_sd"] = np.nan
+        out["external_rank_min"] = np.nan
+        out["external_rank_max"] = np.nan
+        out["external_source_count"] = 0
+        out["market_consensus_adp"] = np.nan
+        out["market_rank_sd"] = np.nan
+        out["market_source_count"] = 0
     out["external_source_count"] = out["external_source_count"].fillna(0).astype(int)
     out["market_source_count"] = out["market_source_count"].fillna(0).astype(int)
-    rank_column = "live_rank" if "live_rank" in out else "overall_rank" if "overall_rank" in out else None
+    rank_column = (
+        "live_rank"
+        if "live_rank" in out
+        else "overall_rank"
+        if "overall_rank" in out
+        else None
+    )
     model_rank = (
         pd.to_numeric(out[rank_column], errors="coerce")
         if rank_column
@@ -364,12 +430,12 @@ def attach_external_ranking_context(
         pd.to_numeric(out["external_rank_sd"], errors="coerce").fillna(0.0) / 20.0
     ).clip(0, 1)
     metadata = {
-        "available": True,
+        "available": bool(len(selected)),
         "sources": sorted(selected["source"].dropna().astype(str).unique().tolist()),
         "expert_sources": sorted(expert["source"].dropna().astype(str).unique().tolist()),
         "market_sources": sorted(market["source"].dropna().astype(str).unique().tolist()),
         "matched_rows": int(len(selected)),
-        "unresolved_rows": int((matched["identity_match_confidence"] <= 0).sum()),
+        "unresolved_rows": unresolved_count,
         "format_signature": format_signature(config),
         "external_values_are_audit_only": True,
     }
