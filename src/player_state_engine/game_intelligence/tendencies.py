@@ -4,26 +4,6 @@ import numpy as np
 import pandas as pd
 
 
-_OFFENSE_ACTUALS = (
-    "plays",
-    "pass_rate",
-    "neutral_pass_rate",
-    "early_down_pass_rate",
-    "red_zone_pass_rate",
-    "third_down_pass_rate",
-    "shotgun_rate",
-    "no_huddle_rate",
-    "motion_rate",
-    "play_action_rate",
-    "rpo_rate",
-    "screen_rate",
-    "seconds_between_plays",
-    "epa_per_play",
-    "explosive_rate",
-    "fourth_down_scrimmage_rate",
-)
-
-
 def _rate(group: pd.DataFrame, mask: pd.Series, column: str) -> float:
     subset = group.loc[mask]
     if subset.empty:
@@ -112,8 +92,107 @@ def build_team_tendency_snapshots(play_frame: pd.DataFrame, *, span: int = 6) ->
         raise ValueError(f"Tendency snapshots missing columns: {sorted(missing)}")
     offense = _add_point_in_time_history(_weekly_team_actuals(play_frame), span=span)
     defense = _add_point_in_time_history(_weekly_defense_actuals(play_frame), span=span)
-    merged = offense.merge(defense, on=["season", "week", "team"], how="outer", validate="one_to_one")
+    merged = offense.merge(
+        defense, on=["season", "week", "team"], how="outer", validate="one_to_one"
+    )
     return merged.sort_values(["season", "week", "team"], kind="mergesort").reset_index(drop=True)
+
+
+def attach_point_in_time_matchup_features(
+    play_frame: pd.DataFrame,
+    snapshots: pd.DataFrame,
+) -> pd.DataFrame:
+    """Attach only lagged/expanding team evidence to historical play labels."""
+    if snapshots.empty:
+        raise ValueError("Team tendency snapshots are empty")
+    data = play_frame.copy()
+    offense_columns = [
+        column
+        for column in (
+            "pass_rate_ewm6",
+            "neutral_pass_rate_ewm6",
+            "early_down_pass_rate_ewm6",
+            "red_zone_pass_rate_ewm6",
+            "third_down_pass_rate_ewm6",
+            "seconds_between_plays_ewm6",
+            "epa_per_play_ewm6",
+            "explosive_rate_ewm6",
+        )
+        if column in snapshots
+    ]
+    defense_columns = [
+        column
+        for column in (
+            "defense_pass_rate_faced_ewm6",
+            "defense_epa_allowed_ewm6",
+            "defense_explosive_allowed_ewm6",
+        )
+        if column in snapshots
+    ]
+    offense = snapshots[["season", "week", "team", *offense_columns]].rename(
+        columns={"team": "posteam"}
+    )
+    defense = snapshots[["season", "week", "team", *defense_columns]].rename(
+        columns={"team": "defteam"}
+    )
+    data = data.merge(
+        offense,
+        on=["season", "week", "posteam"],
+        how="left",
+        validate="many_to_one",
+    )
+    data = data.merge(
+        defense,
+        on=["season", "week", "defteam"],
+        how="left",
+        validate="many_to_one",
+    )
+
+    if "pass_rate_ewm6" in data:
+        league_pass = data.groupby(["season", "week"], sort=False)["pass_rate_ewm6"].transform(
+            "mean"
+        )
+    else:
+        league_pass = pd.Series(0.58, index=data.index, dtype=float)
+    league_pass = pd.to_numeric(league_pass, errors="coerce").fillna(0.58)
+    offense_pass = pd.to_numeric(data.get("pass_rate_ewm6"), errors="coerce").fillna(league_pass)
+    defense_pass = pd.to_numeric(
+        data.get("defense_pass_rate_faced_ewm6"), errors="coerce"
+    ).fillna(league_pass)
+    data["pregame_pass_rate"] = (
+        0.62 * offense_pass + 0.28 * defense_pass + 0.10 * league_pass
+    ).clip(0.30, 0.82)
+
+    mappings = {
+        "neutral_pass_rate_ewm6": "neutral_pass_rate",
+        "early_down_pass_rate_ewm6": "early_down_pass_rate",
+        "red_zone_pass_rate_ewm6": "red_zone_pass_rate",
+        "third_down_pass_rate_ewm6": "third_down_pass_rate",
+        "epa_per_play_ewm6": "epa_per_play",
+        "defense_epa_allowed_ewm6": "defense_epa_allowed",
+        "explosive_rate_ewm6": "explosive_rate",
+        "defense_explosive_allowed_ewm6": "defense_explosive_allowed",
+    }
+    for source, target in mappings.items():
+        values = pd.to_numeric(data.get(source), errors="coerce") if source in data else None
+        data[target] = values if values is not None else np.nan
+
+    if "spread_line" in data:
+        spread = pd.to_numeric(data["spread_line"], errors="coerce").fillna(0.0)
+        if "home_team" in data:
+            data["home_spread"] = np.where(
+                data["posteam"].astype(str).eq(data["home_team"].astype(str)), spread, -spread
+            )
+        else:
+            data["home_spread"] = spread
+    else:
+        data["home_spread"] = 0.0
+    data["game_total"] = (
+        pd.to_numeric(data["total_line"], errors="coerce").fillna(44.0)
+        if "total_line" in data
+        else 44.0
+    )
+    return data
 
 
 def build_coaching_matchup_history(
@@ -124,8 +203,8 @@ def build_coaching_matchup_history(
 ) -> pd.DataFrame:
     """Build heavily-shrunk point-in-time play-caller matchup history.
 
-    The table is intentionally low authority because direct coach-vs-coach samples are sparse.
-    ``coach_matchup_weight`` cannot exceed ``max_weight`` and is based only on prior games.
+    Direct coach-vs-coach samples are sparse, so this signal can never dominate team and
+    opponent priors. Every matchup row uses only games that occurred before that row.
     """
     required = {"season", "team", "offensive_play_caller", "defensive_play_caller"}
     missing = required - set(coaches)
@@ -147,13 +226,23 @@ def build_coaching_matchup_history(
         data = data.merge(offense, on=["season", "posteam"], how="left", validate="many_to_one")
         data = data.merge(defense, on=["season", "defteam"], how="left", validate="many_to_one")
     else:
-        data = data.merge(offense, on=["season", "week", "posteam"], how="left", validate="many_to_one")
-        data = data.merge(defense, on=["season", "week", "defteam"], how="left", validate="many_to_one")
+        data = data.merge(
+            offense, on=["season", "week", "posteam"], how="left", validate="many_to_one"
+        )
+        data = data.merge(
+            defense, on=["season", "week", "defteam"], how="left", validate="many_to_one"
+        )
 
     game = (
         data.dropna(subset=["offensive_play_caller_id", "defensive_play_caller_id"])
         .groupby(
-            ["season", "week", "game_id", "offensive_play_caller_id", "defensive_play_caller_id"],
+            [
+                "season",
+                "week",
+                "game_id",
+                "offensive_play_caller_id",
+                "defensive_play_caller_id",
+            ],
             dropna=False,
         )
         .agg(pass_rate=("is_dropback", "mean"), plays=("play_id", "size"))
@@ -165,9 +254,11 @@ def build_coaching_matchup_history(
     pair = ["offensive_play_caller_id", "defensive_play_caller_id"]
     game["coach_matchup_games_prior"] = game.groupby(pair, sort=False).cumcount()
     prior_sum = game.groupby(pair, sort=False)["pass_rate"].cumsum() - game["pass_rate"]
-    game["coach_matchup_pass_rate_prior"] = prior_sum / game["coach_matchup_games_prior"].replace(0, np.nan)
-    game["coach_matchup_weight"] = (
-        game["coach_matchup_games_prior"].astype(float).mul(0.025).clip(upper=float(max_weight))
+    game["coach_matchup_pass_rate_prior"] = prior_sum / game["coach_matchup_games_prior"].replace(
+        0, np.nan
+    )
+    game["coach_matchup_weight"] = game["coach_matchup_games_prior"].astype(float).mul(0.025).clip(
+        upper=float(max_weight)
     )
     return game
 
@@ -211,7 +302,10 @@ def build_matchup_profile(
             return default
         return float(row[column])
 
-    league_pass = float(pd.to_numeric(league.get("pass_rate_ewm6"), errors="coerce").mean())
+    if "pass_rate_ewm6" in league:
+        league_pass = float(pd.to_numeric(league["pass_rate_ewm6"], errors="coerce").mean())
+    else:
+        league_pass = 0.58
     if not np.isfinite(league_pass):
         league_pass = 0.58
     offense_pass = value(offense, "pass_rate_ewm6", league_pass)
@@ -219,8 +313,13 @@ def build_matchup_profile(
     pass_rate = 0.62 * offense_pass + 0.28 * defense_pass + 0.10 * league_pass
     coach_weight = 0.0
     if coach_matchup is not None:
-        coach_rate = pd.to_numeric(coach_matchup.get("coach_matchup_pass_rate_prior"), errors="coerce")
-        coach_weight = float(pd.to_numeric(coach_matchup.get("coach_matchup_weight", 0.0), errors="coerce"))
+        coach_rate = pd.to_numeric(
+            coach_matchup.get("coach_matchup_pass_rate_prior"), errors="coerce"
+        )
+        coach_weight_value = pd.to_numeric(
+            coach_matchup.get("coach_matchup_weight", 0.0), errors="coerce"
+        )
+        coach_weight = 0.0 if pd.isna(coach_weight_value) else float(coach_weight_value)
         if pd.notna(coach_rate) and coach_weight > 0:
             pass_rate = (1.0 - coach_weight) * pass_rate + coach_weight * float(coach_rate)
 
@@ -239,6 +338,8 @@ def build_matchup_profile(
         "epa_per_play": value(offense, "epa_per_play_ewm6", 0.0),
         "defense_epa_allowed": value(defense, "defense_epa_allowed_ewm6", 0.0),
         "explosive_rate": value(offense, "explosive_rate_ewm6", 0.10),
-        "defense_explosive_allowed": value(defense, "defense_explosive_allowed_ewm6", 0.10),
+        "defense_explosive_allowed": value(
+            defense, "defense_explosive_allowed_ewm6", 0.10
+        ),
         "coach_matchup_weight": coach_weight,
     }
