@@ -79,6 +79,45 @@ class SleeperImporter(LeagueImporter):
             for league in leagues
         ]
 
+    @staticmethod
+    def _canonical_player_id(player: dict[str, Any]) -> str | None:
+        value = player.get("gsis_id") or player.get("sportradar_id")
+        return str(value) if value not in {None, ""} else None
+
+    def _normalize_live_draft_picks(
+        self,
+        picks: list[dict[str, Any]],
+        player_map: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Attach canonical identity while preserving the platform draft ID.
+
+        Sleeper draft resources identify players with Sleeper IDs, while nflverse-backed
+        projection artifacts generally use GSIS IDs. Downstream draft logic reads
+        ``player_id`` as the model identity, so prefer a canonical ID when one exists and
+        retain ``platform_player_id`` for platform rendering/debugging.
+        """
+        normalized: list[dict[str, Any]] = []
+        for raw_pick in picks:
+            pick = dict(raw_pick)
+            raw_player_id = pick.get("player_id")
+            if raw_player_id in {None, ""}:
+                normalized.append(pick)
+                continue
+            platform_player_id = str(raw_player_id)
+            player = player_map.get(platform_player_id, {}) if isinstance(player_map, dict) else {}
+            canonical_player_id = self._canonical_player_id(player)
+            fantasy_positions = player.get("fantasy_positions") or []
+            pick["platform_player_id"] = platform_player_id
+            pick["canonical_player_id"] = canonical_player_id
+            pick["player_id"] = canonical_player_id or platform_player_id
+            pick.setdefault("player_name", player.get("full_name") or player.get("first_name"))
+            pick.setdefault(
+                "position", fantasy_positions[0] if fantasy_positions else player.get("position")
+            )
+            pick.setdefault("nfl_team", player.get("team"))
+            normalized.append(pick)
+        return normalized
+
     def import_league(
         self,
         league_id: str,
@@ -129,7 +168,7 @@ class SleeperImporter(LeagueImporter):
                 entries.append(
                     RosterEntry(
                         platform_player_id=player_id,
-                        canonical_player_id=player.get("gsis_id") or player.get("sportradar_id"),
+                        canonical_player_id=self._canonical_player_id(player),
                         player_name=player.get("full_name") or player.get("first_name"),
                         position=(fantasy_positions[0] if fantasy_positions else player.get("position")),
                         nfl_team=player.get("team"),
@@ -178,7 +217,7 @@ class SleeperImporter(LeagueImporter):
                 free_agents.append(
                     RosterEntry(
                         platform_player_id=str(player_id),
-                        canonical_player_id=player.get("gsis_id") or player.get("sportradar_id"),
+                        canonical_player_id=self._canonical_player_id(player),
                         player_name=player.get("full_name") or player.get("first_name"),
                         position=position,
                         nfl_team=player.get("team"),
@@ -219,9 +258,12 @@ class SleeperImporter(LeagueImporter):
         )
         draft_picks_live: list[dict[str, Any]] = []
         if active_draft and active_draft.get("draft_id"):
-            draft_picks_live = (
-                self._optional_get(f"draft/{active_draft['draft_id']}/picks", []) or []
-            )
+            raw_live_picks = self._optional_get(f"draft/{active_draft['draft_id']}/picks", []) or []
+            if raw_live_picks and not player_map:
+                # Identity resolution is required for reliable draft-board filtering even
+                # when the caller does not need the full free-agent payload.
+                player_map = self.get_player_map()
+            draft_picks_live = self._normalize_live_draft_picks(raw_live_picks, player_map)
 
         external_roster_id = None
         if external_user_id:
