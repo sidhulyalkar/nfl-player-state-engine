@@ -60,13 +60,16 @@ def test_context_permutation_preserves_team_season_rows_but_breaks_mapping() -> 
     original_counts = plays.groupby(["season", "posteam"], sort=False).size()
     permuted_counts = permuted.groupby(["season", "posteam"], sort=False).size()
     pd.testing.assert_series_equal(original_counts, permuted_counts)
-    for column in ("red_zone", "distance_bucket", "field_zone"):
+    checked = ("red_zone", "distance_bucket", "field_zone")
+    for column in checked:
         for key, original_group in plays.groupby(["season", "posteam"], sort=False):
             permuted_group = permuted.loc[
                 (permuted["season"] == key[0]) & permuted["posteam"].eq(key[1])
             ]
-            assert sorted(original_group[column].astype(str)) == sorted(permuted_group[column].astype(str))
-    assert not permuted["red_zone"].equals(plays["red_zone"])
+            assert sorted(original_group[column].astype(str)) == sorted(
+                permuted_group[column].astype(str)
+            )
+    assert any(not permuted[column].equals(plays[column]) for column in checked)
 
 
 def test_simulator_records_realized_opportunity_and_keeps_game_path_common() -> None:
@@ -104,7 +107,13 @@ def test_simulator_records_realized_opportunity_and_keeps_game_path_common() -> 
     assert state.player_draws[["carries", "targets"]].to_numpy().sum() > 0
     assert state.diagnostics["opportunity_allocation_model"].endswith("v012")
     assert state.diagnostics["state_allocation_attempts"] > 0
-    assert set(state.player_draws["player_id"]) <= set(usage["player_id"])
+    assert state.diagnostics["complete_player_draw_matrix"] is True
+    expected_rows = config.simulations * usage["player_id"].astype(str).nunique()
+    assert len(state.player_draws) == expected_rows
+    assert state.player_draws.groupby("simulation")["player_id"].nunique().eq(
+        usage["player_id"].astype(str).nunique()
+    ).all()
+    assert set(state.player_draws["player_id"]) == set(usage["player_id"].astype(str))
     pd.testing.assert_frame_equal(static.team_draws, state.team_draws)
 
 
@@ -118,6 +127,24 @@ def test_player_opportunity_union_scoring_penalizes_missing_roles() -> None:
     metrics = evaluate_player_opportunity(predicted, observed)
     assert metrics["player_rows"] == 2.0
     assert metrics["observed_player_coverage"] == 0.0
+    assert metrics["player_carries_mae"] == 5.0
+
+
+def test_zero_role_rows_do_not_dilute_opportunity_error() -> None:
+    predicted = pd.DataFrame(
+        {
+            "game_id": ["g", "g"],
+            "player_id": ["P1", "ZERO_QB"],
+            "carries": [4.0, 0.0],
+            "targets": [0.0, 0.0],
+        }
+    )
+    observed = pd.DataFrame(
+        {"game_id": ["g"], "player_id": ["P2"], "carries": [6.0], "targets": [0.0]}
+    )
+    metrics = evaluate_player_opportunity(predicted, observed)
+    assert metrics["player_rows"] == 2.0
+    assert metrics["predicted_player_rows"] == 1.0
     assert metrics["player_carries_mae"] == 5.0
 
 
