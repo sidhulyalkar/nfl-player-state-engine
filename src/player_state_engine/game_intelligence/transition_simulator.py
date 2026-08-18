@@ -39,8 +39,8 @@ def _component_rngs(
     np.random.Generator,
     np.random.Generator,
 ]:
-    """Independent streams isolate play, allocation, pace, and transition randomness."""
-    sequence = np.random.SeedSequence([int(seed), int(simulation), 14])
+    """Preserve v0.13's first five streams and add one transition-only stream."""
+    sequence = np.random.SeedSequence([int(seed), int(simulation), 13])
     children = sequence.spawn(6)
     return tuple(np.random.default_rng(child) for child in children)
 
@@ -62,10 +62,13 @@ def simulate_matchup_transition_probe(
     league_config: LeagueConfig | None = None,
     config: SimulationConfig | None = None,
 ) -> PlayByPlaySimulationResult:
-    """Research-only v0.14 simulator for possession-transition attribution.
+    """Research-only simulator that adds learned terminal possession transitions.
 
-    The v0.13 research simulator remains frozen. This parallel probe can independently
-    enable learned continuing-drive pace/start priors and learned terminal transitions.
+    The v0.13 simulator remains frozen. The first five component RNG streams intentionally
+    match v0.13; a sixth stream is reserved for transition timing, field position, and
+    empirical field-goal calibration. When a transition model overrides a v0.13 drive-start
+    draw, the corresponding drive-model RNG draw is still consumed and discarded so future
+    continuing-drive pace draws remain aligned across A/B cells.
     """
     config = config or SimulationConfig()
     game_id = matchup.resolved_game_id
@@ -101,6 +104,7 @@ def simulate_matchup_transition_probe(
     modeled_pace_plays = 0
     state_allocation_attempts = 0
     state_allocation_fallbacks = 0
+    aligned_discarded_drive_start_draws = 0
 
     for simulation in range(config.simulations):
         (
@@ -132,9 +136,20 @@ def simulate_matchup_transition_probe(
             transition_type: str | None = None,
             source_yardline_100: float = 75.0,
         ) -> tuple[str, str, float, int, float]:
+            nonlocal aligned_discarded_drive_start_draws
             new_defense = _other_team(new_offense, matchup)
             start_yardline = float(fallback_yardline)
+            drive_start_draw: float | None = None
+            if drive_volume_model is not None:
+                drive_start_draw = drive_volume_model.sample_start_yardline(
+                    team=new_offense,
+                    opponent=new_defense,
+                    rng=rng_tempo,
+                    fallback_yardline_100=float(fallback_yardline),
+                )
             if transition_model is not None and transition_type is not None:
+                if drive_start_draw is not None:
+                    aligned_discarded_drive_start_draws += 1
                 start_yardline = transition_model.sample_next_start_yardline(
                     transition_type=transition_type,
                     next_offense=new_offense,
@@ -142,13 +157,8 @@ def simulate_matchup_transition_probe(
                     rng=rng_transition,
                     fallback_yardline_100=float(fallback_yardline),
                 )
-            elif drive_volume_model is not None:
-                start_yardline = drive_volume_model.sample_start_yardline(
-                    team=new_offense,
-                    opponent=new_defense,
-                    rng=rng_tempo,
-                    fallback_yardline_100=float(fallback_yardline),
-                )
+            elif drive_start_draw is not None:
+                start_yardline = drive_start_draw
             pending_drive.clear()
             pending_drive.update(
                 {"team": str(new_offense), "start_yardline_100": float(start_yardline)}
@@ -188,11 +198,7 @@ def simulate_matchup_transition_probe(
         initial_offense = (
             matchup.home_team if rng_special.random() < 0.5 else matchup.away_team
         )
-        offense, defense, yardline, down, distance = start_possession(
-            initial_offense,
-            75.0,
-            transition_type="HALFTIME" if transition_model is not None else None,
-        )
+        offense, defense, yardline, down, distance = start_possession(initial_offense, 75.0)
         clock = 3600.0
         play_index = 0
 
@@ -224,12 +230,11 @@ def simulate_matchup_transition_probe(
                     if made:
                         scores[play_offense] += 3.0
                         field_goals_made[play_offense] += 1.0
-                    fallback_start = 75.0 if made else float(np.clip(100.0 - source_yardline, 1, 99))
                     if transition_model is None:
                         clock = max(0.0, clock - min(6.0, clock))
                         offense, defense, yardline, down, distance = start_possession(
                             _other_team(play_offense, matchup),
-                            fallback_start,
+                            75.0,
                         )
                     else:
                         (
@@ -243,7 +248,7 @@ def simulate_matchup_transition_probe(
                             previous_offense=play_offense,
                             transition_type=transition_type,
                             source_yardline_100=source_yardline,
-                            fallback_yardline_100=fallback_start,
+                            fallback_yardline_100=75.0,
                             fallback_seconds=6.0,
                             clock_value=clock,
                         )
@@ -382,7 +387,6 @@ def simulate_matchup_transition_probe(
             turnover = bool(outcome.get("turnover", 0.0) >= 0.5)
             drive_continues = True
             terminal_type: str | None = None
-            terminal_fallback_start = 75.0
 
             if touchdown:
                 drive_continues = False
@@ -397,7 +401,6 @@ def simulate_matchup_transition_probe(
                 drive_continues = False
                 terminal_type = "TURNOVER"
                 turnovers[play_offense] += 1.0
-                terminal_fallback_start = float(np.clip(100.0 - yardline, 1.0, 99.0))
                 if outcome.get("fumble_lost", 0.0) >= 0.5:
                     _record(
                         player_stats,
@@ -418,7 +421,6 @@ def simulate_matchup_transition_probe(
                         drive_continues = False
                         terminal_type = "DOWNS"
                         turnovers_on_downs[play_offense] += 1.0
-                        terminal_fallback_start = float(np.clip(100.0 - yardline, 1.0, 99.0))
 
             legacy_runoff = outcome.get("seconds_between_plays", np.nan)
             if not np.isfinite(legacy_runoff) or legacy_runoff <= 0:
@@ -446,39 +448,38 @@ def simulate_matchup_transition_probe(
                 continuing_runoff_sum[play_offense] += runoff
                 continuing_runoff_count[play_offense] += 1
                 clock = max(0.0, clock - runoff)
+            elif transition_model is None:
+                clock = max(
+                    0.0,
+                    clock
+                    - float(
+                        np.clip(
+                            legacy_runoff,
+                            config.minimum_seconds_per_play,
+                            config.maximum_seconds_per_play,
+                        )
+                    ),
+                )
+                offense, defense, yardline, down, distance = start_possession(
+                    _other_team(play_offense, matchup),
+                    75.0,
+                )
             else:
-                if transition_model is None:
-                    clock = max(
-                        0.0,
-                        clock
-                        - float(
-                            np.clip(
-                                legacy_runoff,
-                                config.minimum_seconds_per_play,
-                                config.maximum_seconds_per_play,
-                            )
-                        ),
-                    )
-                    offense, defense, yardline, down, distance = start_possession(
-                        _other_team(play_offense, matchup),
-                        terminal_fallback_start,
-                    )
-                else:
-                    (
-                        offense,
-                        defense,
-                        yardline,
-                        down,
-                        distance,
-                        clock,
-                    ) = terminal_transition(
-                        previous_offense=play_offense,
-                        transition_type=str(terminal_type or "OTHER"),
-                        source_yardline_100=float(state["yardline_100"]),
-                        fallback_yardline_100=terminal_fallback_start,
-                        fallback_seconds=float(legacy_runoff),
-                        clock_value=clock,
-                    )
+                (
+                    offense,
+                    defense,
+                    yardline,
+                    down,
+                    distance,
+                    clock,
+                ) = terminal_transition(
+                    previous_offense=play_offense,
+                    transition_type=str(terminal_type or "OTHER"),
+                    source_yardline_100=float(state["yardline_100"]),
+                    fallback_yardline_100=75.0,
+                    fallback_seconds=float(legacy_runoff),
+                    clock_value=clock,
+                )
 
             if before_clock > 1800 >= clock:
                 halftime_offense = (
@@ -592,7 +593,9 @@ def simulate_matchup_transition_probe(
             transition_model.model_source if transition_model is not None else "v013_transition_heuristics"
         ),
         "component_rng_streams": True,
-        "component_rng_version": 14,
+        "component_rng_base_version": 13,
+        "transition_rng_stream_added": True,
+        "aligned_discarded_drive_start_draws": int(aligned_discarded_drive_start_draws),
         "modeled_transition_events": int(modeled_transition_events),
         "modeled_pace_plays": int(modeled_pace_plays),
         "state_allocation_attempts": int(state_allocation_attempts),
@@ -602,6 +605,7 @@ def simulate_matchup_transition_probe(
         "production_projection_changed": False,
         "limitations": [
             "v0.14 is a parallel research probe; the v0.13 simulator remains frozen",
+            "opening possession is not treated as a halftime transition",
             "transition labels use raw PBP but do not include player-level return modeling",
             "field-goal calibration is distance/team empirical shrinkage without kicker or weather state",
             "halftime receiving team remains sampled rather than derived from coin-toss history",
