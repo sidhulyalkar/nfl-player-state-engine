@@ -7,16 +7,15 @@ from fastapi.testclient import TestClient
 from player_state_engine.api.operational import create_app
 
 
-def test_v011_benchmark_api_is_guarded_and_read_only(tmp_path) -> None:
+def test_benchmark_api_is_guarded_and_read_only(tmp_path) -> None:
     benchmark_root = tmp_path / "benchmark"
     benchmark_root.mkdir(parents=True)
     summary = {
-        "candidate_metrics": {"games": 250.0, "play_call_log_loss": 0.55},
-        "baseline_metrics": {"games": 250.0, "play_call_log_loss": 0.57},
-        "diagnostics": {"protocol": "expanding_weekly_point_in_time_v011"},
+        "aggregate_metrics": {"learned_state": {"games": 250.0}},
+        "diagnostics": {"protocol": "v012_factorial_expanding_weekly_point_in_time"},
         "promotion": {
             "promoted": False,
-            "reasons": ["downstream fantasy pinball evidence incomplete"],
+            "reasons": ["downstream evidence incomplete"],
             "production_projection_changed": False,
         },
     }
@@ -30,15 +29,15 @@ def test_v011_benchmark_api_is_guarded_and_read_only(tmp_path) -> None:
         game_intelligence_registry=tmp_path / "registry.json",
         game_intelligence_benchmark_root=benchmark_root,
     )
-    assert app.version == "0.11.0"
+    assert app.version == "0.12.0"
     client = TestClient(app)
 
     status = client.get("/v1/research/game-intelligence/status")
     assert status.status_code == 200
     status_payload = status.json()
-    assert status_payload["model_family"] == "game_intelligence_v011_research"
+    assert status_payload["model_family"] == "game_intelligence_v012_research"
     assert status_payload["benchmark_available"] is True
-    assert status_payload["benchmark_protocol"] == "expanding_weekly_point_in_time_v011"
+    assert status_payload["benchmark_protocol"] == "v012_factorial_expanding_weekly_point_in_time"
     assert status_payload["automatic_promotion"] is False
 
     response = client.get("/v1/research/game-intelligence/benchmark")
@@ -50,7 +49,7 @@ def test_v011_benchmark_api_is_guarded_and_read_only(tmp_path) -> None:
     assert payload["production_projection_changed"] is False
 
 
-def test_v011_benchmark_api_fails_closed_without_summary(tmp_path) -> None:
+def test_benchmark_api_fails_closed_without_summary(tmp_path) -> None:
     app = create_app(
         store_root=tmp_path / "leagues",
         projections_path=tmp_path / "missing.csv",
