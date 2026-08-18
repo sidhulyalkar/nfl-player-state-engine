@@ -9,7 +9,6 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-
 _DEFAULT_PLAY_CALL_FEATURES = (
     "down",
     "ydstogo",
