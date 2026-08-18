@@ -74,6 +74,10 @@ def test_context_permutation_preserves_team_season_rows_but_breaks_mapping() -> 
 
 def test_simulator_records_realized_opportunity_and_keeps_game_path_common() -> None:
     _, tendencies, usage, play_model, outcome_model, opportunity_model = _research_inputs()
+    unrelated = usage.iloc[[0]].copy()
+    unrelated["team"] = "CCC"
+    unrelated["player_id"] = "CCC_GHOST"
+    usage_with_unrelated = pd.concat([usage, unrelated], ignore_index=True)
     matchup = MatchupSpec(
         season=2026,
         week=2,
@@ -87,7 +91,7 @@ def test_simulator_records_realized_opportunity_and_keeps_game_path_common() -> 
     static = simulate_matchup(
         matchup,
         tendencies=tendencies,
-        usage=usage,
+        usage=usage_with_unrelated,
         outcome_model=outcome_model,
         play_call_model=play_model,
         league_config=LeagueConfig(),
@@ -96,7 +100,7 @@ def test_simulator_records_realized_opportunity_and_keeps_game_path_common() -> 
     state = simulate_matchup(
         matchup,
         tendencies=tendencies,
-        usage=usage,
+        usage=usage_with_unrelated,
         outcome_model=outcome_model,
         play_call_model=play_model,
         opportunity_model=opportunity_model,
@@ -108,12 +112,12 @@ def test_simulator_records_realized_opportunity_and_keeps_game_path_common() -> 
     assert state.diagnostics["opportunity_allocation_model"].endswith("v012")
     assert state.diagnostics["state_allocation_attempts"] > 0
     assert state.diagnostics["complete_player_draw_matrix"] is True
-    expected_rows = config.simulations * usage["player_id"].astype(str).nunique()
+    expected_players = usage.loc[usage["team"].isin(["AAA", "BBB"]), "player_id"].astype(str).nunique()
+    expected_rows = config.simulations * expected_players
     assert len(state.player_draws) == expected_rows
-    assert state.player_draws.groupby("simulation")["player_id"].nunique().eq(
-        usage["player_id"].astype(str).nunique()
-    ).all()
-    assert set(state.player_draws["player_id"]) == set(usage["player_id"].astype(str))
+    assert state.player_draws.groupby("simulation")["player_id"].nunique().eq(expected_players).all()
+    assert "CCC_GHOST" not in set(state.player_draws["player_id"])
+    assert set(state.player_draws["team"]) == {"AAA", "BBB"}
     pd.testing.assert_frame_equal(static.team_draws, state.team_draws)
 
 
