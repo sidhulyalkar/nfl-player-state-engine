@@ -12,12 +12,18 @@ from pydantic import BaseModel, Field
 
 from player_state_engine.data.io import read_table
 from player_state_engine.fantasy.decision_board import DecisionType, build_decision_board
-from player_state_engine.fantasy.draft import DraftState, build_live_draft_board, draft_state_from_snapshot
+from player_state_engine.fantasy.draft import (
+    DraftState,
+    build_live_draft_board,
+    draft_state_from_snapshot,
+)
 from player_state_engine.fantasy.draft_survival import (
     DraftSurvivalArtifact,
     apply_empirical_survival,
-    artifact_metadata as survival_artifact_metadata,
     load_survival_artifact,
+)
+from player_state_engine.fantasy.draft_survival import (
+    artifact_metadata as survival_artifact_metadata,
 )
 from player_state_engine.fantasy.league import LeagueConfig
 from player_state_engine.fantasy.roster_simulator import evaluate_candidate_impacts
