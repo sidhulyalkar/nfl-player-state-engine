@@ -498,7 +498,7 @@ def evaluate_drive_volume_draws(
         "seconds_per_play",
         "mean_start_yardline_100",
     }
-    missing_draws = required | {"simulation"} - set(team_draws)
+    missing_draws = (required | {"simulation"}) - set(team_draws)
     missing_observed = required - set(observed)
     if missing_draws:
         raise ValueError(f"Drive-volume draws missing: {sorted(missing_draws)}")
