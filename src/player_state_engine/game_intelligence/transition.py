@@ -23,6 +23,12 @@ def _numeric(frame: pd.DataFrame, column: str, default: float = 0.0) -> pd.Serie
     return pd.to_numeric(frame[column], errors="coerce").fillna(default)
 
 
+def _nullable_numeric(frame: pd.DataFrame, column: str) -> pd.Series:
+    if column not in frame:
+        return pd.Series(np.nan, index=frame.index, dtype=float)
+    return pd.to_numeric(frame[column], errors="coerce")
+
+
 def _normalize_game_id(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     if "game_id" not in out and "nflverse_game_id" in out:
@@ -46,9 +52,12 @@ def _scrimmage_mask(frame: pd.DataFrame) -> pd.Series:
         + _numeric(frame, "qb_scramble")
     )
     rush_signal = _numeric(frame, "rush_attempt")
-    return (pass_signal + rush_signal).gt(0) & frame.get(
-        "posteam", pd.Series(index=frame.index, dtype=object)
-    ).notna()
+    posteam = (
+        frame["posteam"]
+        if "posteam" in frame
+        else pd.Series(index=frame.index, dtype=object)
+    )
+    return (pass_signal + rush_signal).gt(0) & posteam.notna()
 
 
 def _string(frame: pd.DataFrame, column: str) -> pd.Series:
@@ -71,8 +80,8 @@ def _field_goal_made(frame: pd.DataFrame) -> pd.Series:
     result = _string(frame, "field_goal_result")
     made_text = result.isin({"good", "made", "successful"})
     no_good_text = result.isin({"missed", "blocked", "no good", "failed"})
-    score = _numeric(frame, "field_goal_result_numeric", np.nan)
-    inferred = score.eq(1.0)
+    numeric = _nullable_numeric(frame, "field_goal_result_numeric")
+    inferred = numeric.eq(1.0)
     return made_text | (~no_good_text & inferred)
 
 
@@ -128,13 +137,13 @@ def _weighted_choice(
 
 
 def extract_field_goal_attempts(pbp: pd.DataFrame) -> pd.DataFrame:
-    """Normalize field-goal attempts for point-in-time calibration."""
+    """Normalize raw field-goal attempts for point-in-time calibration."""
     data = _normalize_game_id(pbp)
-    required = {"season", "week", "play_id"}
+    required = {"season", "week", "play_id", "posteam"}
     missing = required - set(data)
     if missing:
         raise ValueError(f"Field-goal extraction missing columns: {sorted(missing)}")
-    attempts = data.loc[_field_goal_mask(data)].copy()
+    attempts = data.loc[_field_goal_mask(data) & data["posteam"].notna()].copy()
     columns = [
         "season",
         "week",
@@ -147,10 +156,11 @@ def extract_field_goal_attempts(pbp: pd.DataFrame) -> pd.DataFrame:
     ]
     if attempts.empty:
         return pd.DataFrame(columns=columns)
-    attempts["team"] = attempts.get("posteam", "").astype(str)
-    kick_distance = pd.to_numeric(attempts.get("kick_distance"), errors="coerce")
-    yardline = pd.to_numeric(attempts.get("yardline_100"), errors="coerce")
+    attempts["team"] = attempts["posteam"].astype(str)
+    kick_distance = _nullable_numeric(attempts, "kick_distance")
+    yardline = _nullable_numeric(attempts, "yardline_100")
     attempts["kick_distance"] = kick_distance.fillna(yardline + 17.0).clip(15.0, 75.0)
+    attempts = attempts.dropna(subset=["kick_distance"])
     attempts["distance_bucket"] = attempts["kick_distance"].map(_distance_bucket)
     attempts["made"] = _field_goal_made(attempts).astype(int)
     return attempts.loc[:, columns].reset_index(drop=True)
@@ -168,11 +178,15 @@ def _classify_transition(window: pd.DataFrame, last_scrimmage: pd.Series) -> str
         return "TURNOVER"
     field_goals = window.loc[_field_goal_mask(window)]
     if not field_goals.empty:
-        return "FIELD_GOAL_GOOD" if bool(_field_goal_made(field_goals).iloc[-1]) else "FIELD_GOAL_MISSED"
+        return (
+            "FIELD_GOAL_GOOD"
+            if bool(_field_goal_made(field_goals).iloc[-1])
+            else "FIELD_GOAL_MISSED"
+        )
     if _punt_mask(window).any():
         return "PUNT"
     qtr = float(last_scrimmage.get("qtr", 0.0) or 0.0)
-    next_qtr = pd.to_numeric(window.get("qtr"), errors="coerce").dropna()
+    next_qtr = _nullable_numeric(window, "qtr").dropna()
     if qtr <= 2 and not next_qtr.empty and float(next_qtr.iloc[-1]) >= 3:
         return "HALFTIME"
     down = float(last_scrimmage.get("down", 0.0) or 0.0)
@@ -195,12 +209,7 @@ def _terminal_row(window: pd.DataFrame, transition_type: str) -> pd.Series:
 
 
 def build_possession_transition_frame(pbp: pd.DataFrame) -> pd.DataFrame:
-    """Build drive-ending transition labels from raw PBP, including special-teams rows.
-
-    A transition starts at the terminal event of one offensive possession and targets the
-    first scrimmage play of the next offensive possession. This prevents punt/field-goal
-    timing and field position from being inferred from the preceding scrimmage play.
-    """
+    """Build terminal-event to next-offensive-scrimmage transition labels from raw PBP."""
     data = _normalize_game_id(pbp)
     required = {"season", "week", "play_id", "posteam", "yardline_100"}
     missing = required - set(data)
@@ -233,6 +242,7 @@ def build_possession_transition_frame(pbp: pd.DataFrame) -> pd.DataFrame:
             ].copy()
             transition_type = _classify_transition(window, last)
             terminal = _terminal_row(window, transition_type)
+
             terminal_clock = pd.to_numeric(
                 pd.Series([terminal.get("game_seconds_remaining", np.nan)]), errors="coerce"
             ).iloc[0]
@@ -240,15 +250,31 @@ def build_possession_transition_frame(pbp: pd.DataFrame) -> pd.DataFrame:
                 pd.Series([first_next.get("game_seconds_remaining", np.nan)]), errors="coerce"
             ).iloc[0]
             seconds = float("nan")
-            if np.isfinite(terminal_clock) and np.isfinite(next_clock):
+            if (
+                transition_type != "HALFTIME"
+                and np.isfinite(terminal_clock)
+                and np.isfinite(next_clock)
+            ):
                 seconds = float(np.clip(terminal_clock - next_clock, 0.0, 90.0))
-            source_yardline = pd.to_numeric(
-                pd.Series([terminal.get("yardline_100", last.get("yardline_100", np.nan))]),
-                errors="coerce",
+
+            terminal_yardline = pd.to_numeric(
+                pd.Series([terminal.get("yardline_100", np.nan)]), errors="coerce"
             ).iloc[0]
+            last_yardline = pd.to_numeric(
+                pd.Series([last.get("yardline_100", np.nan)]), errors="coerce"
+            ).iloc[0]
+            source_yardline = (
+                terminal_yardline
+                if np.isfinite(terminal_yardline)
+                else last_yardline
+                if np.isfinite(last_yardline)
+                else 75.0
+            )
             next_start = pd.to_numeric(
                 pd.Series([first_next.get("yardline_100", np.nan)]), errors="coerce"
             ).iloc[0]
+            if not np.isfinite(next_start):
+                continue
             rows.append(
                 {
                     "season": int(last["season"]),
@@ -428,9 +454,15 @@ class PossessionTransitionModel:
         ]
         if contextual.empty:
             contextual = base.loc[base["source_zone"].astype(str).eq(zone)]
-        evidence = float(
-            pd.to_numeric(contextual.get("recency_weight"), errors="coerce").fillna(0.0).sum()
-        ) if not contextual.empty else 0.0
+        evidence = (
+            float(
+                pd.to_numeric(contextual["recency_weight"], errors="coerce")
+                .fillna(0.0)
+                .sum()
+            )
+            if not contextual.empty
+            else 0.0
+        )
         alpha = evidence / (evidence + max(float(self.prior_strength), 1e-6))
         return base, contextual, float(alpha)
 
@@ -553,9 +585,15 @@ class PossessionTransitionModel:
             bucket_rows = league
         base = _weighted_mean(bucket_rows["made"], bucket_rows["recency_weight"])
         team_rows = bucket_rows.loc[bucket_rows["team"].astype(str).eq(str(team))]
-        evidence = float(
-            pd.to_numeric(team_rows.get("recency_weight"), errors="coerce").fillna(0.0).sum()
-        ) if not team_rows.empty else 0.0
+        evidence = (
+            float(
+                pd.to_numeric(team_rows["recency_weight"], errors="coerce")
+                .fillna(0.0)
+                .sum()
+            )
+            if not team_rows.empty
+            else 0.0
+        )
         if team_rows.empty:
             return float(np.clip(base, 0.02, 0.995))
         team_rate = _weighted_mean(team_rows["made"], team_rows["recency_weight"])
@@ -577,9 +615,14 @@ class PossessionTransitionModel:
                 base_pool["next_start_yardline_100"], base_pool["recency_weight"]
             )
             base_seconds_pool = base_pool.dropna(subset=["transition_seconds"])
-            base_seconds = _weighted_mean(
-                base_seconds_pool["transition_seconds"], base_seconds_pool["recency_weight"]
-            ) if not base_seconds_pool.empty else 8.0
+            base_seconds = (
+                _weighted_mean(
+                    base_seconds_pool["transition_seconds"],
+                    base_seconds_pool["recency_weight"],
+                )
+                if not base_seconds_pool.empty
+                else 8.0
+            )
             rows.append(
                 {
                     **row.to_dict(),
@@ -603,7 +646,11 @@ class PossessionTransitionModel:
         attempts = extract_field_goal_attempts(pbp)
         if attempts.empty:
             return attempts
-        league_rate = _weighted_mean(self.field_goals["made"], self.field_goals["recency_weight"])
+        league_rate = (
+            _weighted_mean(self.field_goals["made"], self.field_goals["recency_weight"])
+            if not self.field_goals.empty
+            else 0.82
+        )
         rows: list[dict[str, object]] = []
         for _, row in attempts.iterrows():
             bucket = str(row["distance_bucket"])
@@ -663,12 +710,16 @@ def evaluate_transition_event_scores(scores: pd.DataFrame) -> dict[str, float]:
             np.abs(actual_start[start_valid] - base_start[start_valid]).mean()
         ),
         "transition_seconds_rows": float(seconds_valid.sum()),
-        "transition_seconds_mae": float(
-            np.abs(actual_seconds[seconds_valid] - pred_seconds[seconds_valid]).mean()
-        ) if seconds_valid.any() else float("nan"),
-        "type_base_transition_seconds_mae": float(
-            np.abs(actual_seconds[seconds_valid] - base_seconds[seconds_valid]).mean()
-        ) if seconds_valid.any() else float("nan"),
+        "transition_seconds_mae": (
+            float(np.abs(actual_seconds[seconds_valid] - pred_seconds[seconds_valid]).mean())
+            if seconds_valid.any()
+            else float("nan")
+        ),
+        "type_base_transition_seconds_mae": (
+            float(np.abs(actual_seconds[seconds_valid] - base_seconds[seconds_valid]).mean())
+            if seconds_valid.any()
+            else float("nan")
+        ),
     }
 
 
@@ -708,8 +759,15 @@ def evaluate_field_goal_scores(scores: pd.DataFrame) -> dict[str, float]:
 
 
 def observed_transition_team_games(pbp: pd.DataFrame) -> pd.DataFrame:
-    """Observed team-game possession-ending counts for full-simulation diagnostics."""
-    transitions = build_possession_transition_frame(pbp)
+    """Count realized terminal events directly from raw PBP, including final possessions."""
+    data = _normalize_game_id(pbp)
+    required = {"game_id", "posteam"}
+    missing = required - set(data)
+    if missing:
+        raise ValueError(f"Observed transition evidence missing columns: {sorted(missing)}")
+    pairs = data.loc[data["posteam"].notna(), ["game_id", "posteam"]].copy()
+    pairs = pairs.rename(columns={"posteam": "team"}).drop_duplicates()
+    pairs["team"] = pairs["team"].astype(str)
     columns = [
         "game_id",
         "team",
@@ -719,22 +777,58 @@ def observed_transition_team_games(pbp: pd.DataFrame) -> pd.DataFrame:
         "turnovers",
         "turnovers_on_downs",
     ]
-    if transitions.empty:
+    if pairs.empty:
         return pd.DataFrame(columns=columns)
-    rows = transitions.copy()
-    rows["team"] = rows["previous_team"].astype(str)
-    rows["punts"] = rows["transition_type"].eq("PUNT").astype(float)
-    rows["field_goal_attempts"] = rows["transition_type"].isin(
-        ["FIELD_GOAL_GOOD", "FIELD_GOAL_MISSED"]
+
+    events = data.loc[data["posteam"].notna(), ["game_id", "posteam"]].copy()
+    events["team"] = events["posteam"].astype(str)
+    events["punts"] = _punt_mask(data.loc[events.index]).astype(float)
+    fg_mask = _field_goal_mask(data.loc[events.index])
+    events["field_goal_attempts"] = fg_mask.astype(float)
+    events["field_goals_made"] = (
+        fg_mask & _field_goal_made(data.loc[events.index])
     ).astype(float)
-    rows["field_goals_made"] = rows["transition_type"].eq("FIELD_GOAL_GOOD").astype(float)
-    rows["turnovers"] = rows["transition_type"].eq("TURNOVER").astype(float)
-    rows["turnovers_on_downs"] = rows["transition_type"].eq("DOWNS").astype(float)
-    return (
-        rows.groupby(["game_id", "team"], dropna=False)[columns[2:]]
+    scrimmage = _scrimmage_mask(data.loc[events.index])
+    events["turnovers"] = (
+        scrimmage
+        & (
+            _numeric(data.loc[events.index], "interception").gt(0)
+            | _numeric(data.loc[events.index], "fumble_lost").gt(0)
+        )
+    ).astype(float)
+    if "turnover_on_downs" in data:
+        events["turnovers_on_downs"] = (
+            scrimmage & _numeric(data.loc[events.index], "turnover_on_downs").gt(0)
+        ).astype(float)
+    else:
+        events["turnovers_on_downs"] = 0.0
+
+    counts = (
+        events.groupby(["game_id", "team"], dropna=False)[columns[2:]]
         .sum()
         .reset_index()
     )
+    if "turnover_on_downs" not in data:
+        transitions = build_possession_transition_frame(data)
+        downs = transitions.loc[transitions["transition_type"].eq("DOWNS")].copy()
+        if not downs.empty:
+            downs["team"] = downs["previous_team"].astype(str)
+            downs_counts = (
+                downs.groupby(["game_id", "team"], dropna=False)
+                .size()
+                .rename("derived_turnovers_on_downs")
+                .reset_index()
+            )
+            counts = counts.merge(downs_counts, on=["game_id", "team"], how="left")
+            counts["turnovers_on_downs"] = pd.to_numeric(
+                counts["derived_turnovers_on_downs"], errors="coerce"
+            ).fillna(counts["turnovers_on_downs"])
+            counts = counts.drop(columns="derived_turnovers_on_downs")
+
+    result = pairs.merge(counts, on=["game_id", "team"], how="left")
+    for column in columns[2:]:
+        result[column] = pd.to_numeric(result[column], errors="coerce").fillna(0.0)
+    return result.loc[:, columns]
 
 
 def evaluate_transition_team_draws(
