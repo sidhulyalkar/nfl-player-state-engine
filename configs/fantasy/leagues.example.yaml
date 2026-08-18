@@ -3,12 +3,16 @@ snapshot_root: data/product/live_leagues
 
 # Fill in league IDs after platform setup. Sleeper can also discover every league
 # for a username when league_id is omitted.
+#
+# Profiles are pre-draft fallbacks. When Sleeper/ESPN returns live roster positions
+# and scoring settings, league_config_from_snapshot() treats the platform snapshot
+# as authoritative and overrides the profile's roster slots.
 leagues:
   - key: league_12_half_ppr_median
     platform: sleeper
     username: YOUR_SLEEPER_USERNAME
     # league_id: "OPTIONAL_IF_DISCOVERING_BY_USERNAME"
-    profile: configs/fantasy/12_team_half_ppr_median.yaml
+    profile: configs/fantasy/12_team_half_ppr_median_2qb.yaml
 
   - key: league_8_ppr_a
     platform: sleeper
