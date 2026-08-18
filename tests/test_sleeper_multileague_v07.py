@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 
+from player_state_engine.fantasy.draft import draft_state_from_snapshot
 from player_state_engine.integrations.sleeper import SleeperImporter
 
 
@@ -27,12 +28,14 @@ class FakeClient:
                     "full_name": "Player One",
                     "fantasy_positions": ["RB"],
                     "team": "SF",
+                    "gsis_id": "g1",
                 },
                 "p2": {
                     "active": True,
                     "full_name": "Player Two",
                     "fantasy_positions": ["WR"],
                     "team": "DET",
+                    "gsis_id": "g2",
                 },
             }
         if path.startswith("league/") and path.count("/") == 1:
@@ -62,7 +65,11 @@ class FakeClient:
             return []
         if "/matchups/" in path:
             return []
-        if path.endswith("/drafts"):
+        if path == "league/L1/drafts":
+            return [{"draft_id": "D1", "status": "drafting", "type": "snake", "settings": {}}]
+        if path == "draft/D1/picks":
+            return [{"player_id": "p2", "roster_id": 1, "pick_no": 1}]
+        if path == "league/L2/drafts":
             return []
         raise AssertionError(path)
 
@@ -74,3 +81,18 @@ def test_username_sync_imports_all_leagues_and_reuses_player_map() -> None:
     assert [snapshot.identity.league_id for snapshot in snapshots] == ["L1", "L2"]
     assert client.calls["players/nfl"] == 1
     assert all(snapshot.metadata["external_roster_id"] == "1" for snapshot in snapshots)
+
+
+def test_live_draft_pick_keeps_platform_id_and_uses_canonical_model_id() -> None:
+    client = FakeClient()
+    snapshot = SleeperImporter(client=client).import_league("L1", external_user_id="u1")
+    pick = snapshot.metadata["live_draft_picks"][0]
+    assert pick["platform_player_id"] == "p2"
+    assert pick["canonical_player_id"] == "g2"
+    assert pick["player_id"] == "g2"
+    assert pick["player_name"] == "Player Two"
+    assert pick["position"] == "WR"
+
+    state = draft_state_from_snapshot(snapshot, draft_slot=1, total_rounds=10)
+    assert state.drafted_player_ids == ("g2",)
+    assert "g2" in state.roster_player_ids

@@ -1,0 +1,18 @@
+# Pre-draft fallback profile for the 12-team league.
+# Live Sleeper/ESPN roster settings override these slots when a league snapshot is available.
+teams: 12
+scoring: half_ppr
+median_scoring: true
+median_game_weight: 1.0
+risk_preference: 0.45
+replacement_buffer: 1
+bench_value_weight: 0.20
+roster_slots:
+  QB: 2
+  RB: 2
+  WR: 2
+  TE: 1
+  FLEX: 1
+  DEF: 1
+  K: 1
+  BENCH: 6
