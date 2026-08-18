@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -24,6 +24,12 @@ def _chronology(frame: pd.DataFrame) -> pd.Series:
 
 
 def _context_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Attach deterministic play-state context without overwriting explicit controls.
+
+    Respecting already-materialized context columns is important for v0.12 ablations and
+    negative controls, where a context label may intentionally be removed or permuted while the
+    underlying raw play state remains unchanged.
+    """
     data = frame.copy()
     down = pd.to_numeric(data.get("down"), errors="coerce")
     score = pd.to_numeric(data.get("score_differential"), errors="coerce").fillna(0.0)
@@ -33,14 +39,18 @@ def _context_frame(frame: pd.DataFrame) -> pd.DataFrame:
 
     if "red_zone" not in data:
         data["red_zone"] = (yardline <= 20).astype(float)
-    data["third_down"] = down.eq(3).astype(float)
-    data["early_down"] = down.le(2).astype(float)
-    data["late_game"] = clock.le(900).astype(float)
-    data["score_state"] = np.select(
-        [score <= -8, score >= 8],
-        ["trailing", "leading"],
-        default="neutral",
-    )
+    if "third_down" not in data:
+        data["third_down"] = down.eq(3).astype(float)
+    if "early_down" not in data:
+        data["early_down"] = down.le(2).astype(float)
+    if "late_game" not in data:
+        data["late_game"] = clock.le(900).astype(float)
+    if "score_state" not in data:
+        data["score_state"] = np.select(
+            [score <= -8, score >= 8],
+            ["trailing", "leading"],
+            default="neutral",
+        )
     if "distance_bucket" not in data:
         data["distance_bucket"] = np.select(
             [ydstogo <= 2, ydstogo <= 6, ydstogo <= 10],
@@ -86,18 +96,51 @@ def _normalize(weights: pd.Series) -> pd.Series:
     return values / total
 
 
+def permute_context_within_team_season(
+    play_frame: pd.DataFrame,
+    *,
+    seed: int = 42,
+    context_columns: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    """Create a leakage-safe negative control by permuting context labels within team-season.
+
+    Base player opportunity counts, team identity, chronology, and realized opportunity identity
+    stay fixed. Only the mapping from play state to context label is broken. A useful context model
+    should not receive the same benefit from this control as from the real context labels.
+    """
+    data = _context_frame(play_frame)
+    required = {"season", "posteam"}
+    missing = required - set(data)
+    if missing:
+        raise ValueError(f"Context permutation missing columns: {sorted(missing)}")
+    columns = tuple(context_columns or _CONTEXT_COLUMNS)
+    rng = np.random.default_rng(seed)
+    grouped = data.groupby(["season", "posteam"], sort=False, dropna=False).groups
+    for indices in grouped.values():
+        index = list(indices)
+        if len(index) < 2:
+            continue
+        for column in columns:
+            if column not in data:
+                continue
+            values = data.loc[index, column].to_numpy(copy=True)
+            data.loc[index, column] = rng.permutation(values)
+    return data
+
+
 @dataclass(slots=True)
 class StateConditionedOpportunityModel:
     """Hierarchical empirical carry/target allocator with point-in-time recency weighting.
 
     The model keeps player identity explicit and shrinks every situational distribution toward
-    the team's recent base allocation. It is intentionally transparent and is evaluated as an
-    isolated challenger before it is allowed to alter Monte Carlo game paths.
+    the team's recent base allocation. v0.12 allows the same model to operate on simulated play
+    states, but it remains a research challenger until full pregame replay clears promotion gates.
     """
 
     prior_strength: float = 12.0
     half_life_weeks: float = 4.0
     context_columns: tuple[str, ...] = _CONTEXT_COLUMNS
+    model_source: str = "hierarchical_state_conditioned_allocator_v012"
     fitted: bool = False
     train_max_season: int | None = None
     train_max_week: int | None = None
@@ -172,14 +215,26 @@ class StateConditionedOpportunityModel:
         opportunity_type: str,
         state: pd.Series | dict[str, object] | None = None,
         use_context: bool = True,
+        eligible_player_ids: Iterable[str] | None = None,
     ) -> pd.DataFrame:
-        """Return a normalized player allocation distribution for one play state."""
+        """Return a normalized player allocation distribution for one play state.
+
+        ``eligible_player_ids`` is the bridge from historical role evidence to a current simulated
+        game. It prevents stale historical players from receiving opportunities simply because
+        they remain in the allocator's training history.
+        """
         base = self._base_distribution(team, opportunity_type)
+        if eligible_player_ids is not None and not base.empty:
+            allowed = {str(value) for value in eligible_player_ids}
+            base = base.loc[base["player_id"].astype(str).isin(allowed)].copy()
+            if not base.empty:
+                base["base_probability"] = _normalize(base["base_probability"])
+                base["probability"] = base["base_probability"]
         if base.empty or not use_context or state is None:
             result = base.copy()
             if not result.empty:
                 result["context_evidence"] = 0.0
-            return result
+            return result.reset_index(drop=True)
 
         if isinstance(state, pd.Series):
             state_dict = state.to_dict()
