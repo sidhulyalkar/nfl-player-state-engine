@@ -43,11 +43,7 @@ def evaluate_team_simulation_draws(
         raise ValueError(f"Observed teams missing: {sorted(required_observed - set(observed))}")
     medians = (
         team_draws.groupby(["game_id", "team"], dropna=False)
-        .agg(
-            plays=("plays", "median"),
-            pass_rate=("pass_rate", "median"),
-            points=("points", "median"),
-        )
+        .agg(plays=("plays", "median"), pass_rate=("pass_rate", "median"), points=("points", "median"))
         .reset_index()
     )
     joined = observed.merge(medians, on=["game_id", "team"], suffixes=("_actual", "_pred"))
@@ -55,15 +51,11 @@ def evaluate_team_simulation_draws(
         raise ValueError("No overlapping simulated and observed team rows")
     return {
         "games": float(joined["game_id"].nunique()),
-        "team_plays_mae": float(
-            mean_absolute_error(joined["plays_actual"], joined["plays_pred"])
-        ),
+        "team_plays_mae": float(mean_absolute_error(joined["plays_actual"], joined["plays_pred"])),
         "team_pass_rate_mae": float(
             mean_absolute_error(joined["pass_rate_actual"], joined["pass_rate_pred"])
         ),
-        "team_points_mae": float(
-            mean_absolute_error(joined["points_actual"], joined["points_pred"])
-        ),
+        "team_points_mae": float(mean_absolute_error(joined["points_actual"], joined["points_pred"])),
     }
 
 
@@ -71,12 +63,7 @@ def evaluate_player_opportunity(
     predicted: pd.DataFrame,
     observed: pd.DataFrame,
 ) -> dict[str, float]:
-    """Evaluate carry/target opportunity without dropping missed or spurious players.
-
-    Earlier replay used an inner join. That understated error whenever the simulator completely
-    missed a player who received real work, or invented opportunity for a player absent from the
-    observed box score. v0.12 evaluates the union and treats the missing side as zero.
-    """
+    """Evaluate carry/target opportunity without hiding role misses or diluting with zero roles."""
     required = {"game_id", "player_id", "carries", "targets"}
     if required - set(predicted):
         raise ValueError(f"Predicted player opportunity missing: {sorted(required - set(predicted))}")
@@ -86,6 +73,15 @@ def evaluate_player_opportunity(
     observed_rows = observed[["game_id", "player_id", "carries", "targets"]].copy()
     predicted_rows["player_id"] = predicted_rows["player_id"].astype(str)
     observed_rows["player_id"] = observed_rows["player_id"].astype(str)
+    for frame in (predicted_rows, observed_rows):
+        for column in ("carries", "targets"):
+            frame[column] = pd.to_numeric(frame[column], errors="coerce").fillna(0.0)
+    predicted_rows = predicted_rows.loc[
+        predicted_rows[["carries", "targets"]].abs().sum(axis=1).gt(1e-12)
+    ].copy()
+    observed_rows = observed_rows.loc[
+        observed_rows[["carries", "targets"]].abs().sum(axis=1).gt(1e-12)
+    ].copy()
     joined = observed_rows.merge(
         predicted_rows,
         on=["game_id", "player_id"],
