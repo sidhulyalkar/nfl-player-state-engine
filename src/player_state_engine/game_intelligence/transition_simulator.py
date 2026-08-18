@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 
 import numpy as np
 import pandas as pd
@@ -27,6 +28,9 @@ from player_state_engine.game_intelligence.simulator import (
 from player_state_engine.game_intelligence.tendencies import build_matchup_profile
 from player_state_engine.game_intelligence.transition import PossessionTransitionModel
 
+_PossessionStarter = Callable[..., tuple[str, str, float, int, float]]
+_TerminalTransition = Callable[..., tuple[str, str, float, int, float, float]]
+
 
 def _component_rngs(
     seed: int,
@@ -47,6 +51,85 @@ def _component_rngs(
 
 def _other_team(team: str, matchup: MatchupSpec) -> str:
     return matchup.away_team if team == matchup.home_team else matchup.home_team
+
+
+def _make_transition_helpers(
+    *,
+    matchup: MatchupSpec,
+    drive_volume_model: DriveVolumeModel | None,
+    transition_model: PossessionTransitionModel | None,
+    rng_tempo: np.random.Generator,
+    rng_transition: np.random.Generator,
+    pending_drive: dict[str, object],
+    diagnostic_counts: dict[str, int],
+) -> tuple[_PossessionStarter, _TerminalTransition]:
+    """Bind one simulation's possession state without closing over the Monte Carlo loop."""
+
+    def start_possession(
+        new_offense: str,
+        fallback_yardline: float,
+        *,
+        transition_type: str | None = None,
+        source_yardline_100: float = 75.0,
+    ) -> tuple[str, str, float, int, float]:
+        new_defense = _other_team(new_offense, matchup)
+        start_yardline = float(fallback_yardline)
+        drive_start_draw: float | None = None
+        if drive_volume_model is not None:
+            drive_start_draw = drive_volume_model.sample_start_yardline(
+                team=new_offense,
+                opponent=new_defense,
+                rng=rng_tempo,
+                fallback_yardline_100=float(fallback_yardline),
+            )
+        if transition_model is not None and transition_type is not None:
+            if drive_start_draw is not None:
+                diagnostic_counts["aligned_discarded_drive_start_draws"] += 1
+            start_yardline = transition_model.sample_next_start_yardline(
+                transition_type=transition_type,
+                next_offense=new_offense,
+                source_yardline_100=float(source_yardline_100),
+                rng=rng_transition,
+                fallback_yardline_100=float(fallback_yardline),
+            )
+        elif drive_start_draw is not None:
+            start_yardline = drive_start_draw
+        pending_drive.clear()
+        pending_drive.update(
+            {"team": str(new_offense), "start_yardline_100": float(start_yardline)}
+        )
+        return new_offense, new_defense, start_yardline, 1, min(10.0, start_yardline)
+
+    def terminal_transition(
+        *,
+        previous_offense: str,
+        transition_type: str,
+        source_yardline_100: float,
+        fallback_yardline_100: float,
+        fallback_seconds: float,
+        clock_value: float,
+    ) -> tuple[str, str, float, int, float, float]:
+        next_offense = _other_team(previous_offense, matchup)
+        seconds = float(fallback_seconds)
+        if transition_model is not None:
+            diagnostic_counts["modeled_transition_events"] += 1
+            seconds = transition_model.sample_transition_seconds(
+                transition_type=transition_type,
+                next_offense=next_offense,
+                source_yardline_100=float(source_yardline_100),
+                rng=rng_transition,
+                fallback_seconds=float(fallback_seconds),
+            )
+        remaining = max(0.0, float(clock_value) - max(0.0, seconds))
+        state = start_possession(
+            next_offense,
+            fallback_yardline_100,
+            transition_type=transition_type,
+            source_yardline_100=source_yardline_100,
+        )
+        return (*state, remaining)
+
+    return start_possession, terminal_transition
 
 
 def simulate_matchup_transition_probe(
@@ -100,11 +183,13 @@ def simulate_matchup_transition_probe(
     )
     team_rows: list[dict[str, object]] = []
     game_rows: list[dict[str, object]] = []
-    modeled_transition_events = 0
+    diagnostic_counts = {
+        "modeled_transition_events": 0,
+        "aligned_discarded_drive_start_draws": 0,
+    }
     modeled_pace_plays = 0
     state_allocation_attempts = 0
     state_allocation_fallbacks = 0
-    aligned_discarded_drive_start_draws = 0
 
     for simulation in range(config.simulations):
         (
@@ -128,72 +213,15 @@ def simulate_matchup_transition_probe(
         turnovers = {matchup.home_team: 0.0, matchup.away_team: 0.0}
         turnovers_on_downs = {matchup.home_team: 0.0, matchup.away_team: 0.0}
         pending_drive: dict[str, object] = {}
-
-        def start_possession(
-            new_offense: str,
-            fallback_yardline: float,
-            *,
-            transition_type: str | None = None,
-            source_yardline_100: float = 75.0,
-        ) -> tuple[str, str, float, int, float]:
-            nonlocal aligned_discarded_drive_start_draws
-            new_defense = _other_team(new_offense, matchup)
-            start_yardline = float(fallback_yardline)
-            drive_start_draw: float | None = None
-            if drive_volume_model is not None:
-                drive_start_draw = drive_volume_model.sample_start_yardline(
-                    team=new_offense,
-                    opponent=new_defense,
-                    rng=rng_tempo,
-                    fallback_yardline_100=float(fallback_yardline),
-                )
-            if transition_model is not None and transition_type is not None:
-                if drive_start_draw is not None:
-                    aligned_discarded_drive_start_draws += 1
-                start_yardline = transition_model.sample_next_start_yardline(
-                    transition_type=transition_type,
-                    next_offense=new_offense,
-                    source_yardline_100=float(source_yardline_100),
-                    rng=rng_transition,
-                    fallback_yardline_100=float(fallback_yardline),
-                )
-            elif drive_start_draw is not None:
-                start_yardline = drive_start_draw
-            pending_drive.clear()
-            pending_drive.update(
-                {"team": str(new_offense), "start_yardline_100": float(start_yardline)}
-            )
-            return new_offense, new_defense, start_yardline, 1, min(10.0, start_yardline)
-
-        def terminal_transition(
-            *,
-            previous_offense: str,
-            transition_type: str,
-            source_yardline_100: float,
-            fallback_yardline_100: float,
-            fallback_seconds: float,
-            clock_value: float,
-        ) -> tuple[str, str, float, int, float, float]:
-            nonlocal modeled_transition_events
-            next_offense = _other_team(previous_offense, matchup)
-            seconds = float(fallback_seconds)
-            if transition_model is not None:
-                modeled_transition_events += 1
-                seconds = transition_model.sample_transition_seconds(
-                    transition_type=transition_type,
-                    next_offense=next_offense,
-                    source_yardline_100=float(source_yardline_100),
-                    rng=rng_transition,
-                    fallback_seconds=float(fallback_seconds),
-                )
-            remaining = max(0.0, float(clock_value) - max(0.0, seconds))
-            state = start_possession(
-                next_offense,
-                fallback_yardline_100,
-                transition_type=transition_type,
-                source_yardline_100=source_yardline_100,
-            )
-            return (*state, remaining)
+        start_possession, terminal_transition = _make_transition_helpers(
+            matchup=matchup,
+            drive_volume_model=drive_volume_model,
+            transition_model=transition_model,
+            rng_tempo=rng_tempo,
+            rng_transition=rng_transition,
+            pending_drive=pending_drive,
+            diagnostic_counts=diagnostic_counts,
+        )
 
         initial_offense = (
             matchup.home_team if rng_special.random() < 0.5 else matchup.away_team
@@ -595,8 +623,10 @@ def simulate_matchup_transition_probe(
         "component_rng_streams": True,
         "component_rng_base_version": 13,
         "transition_rng_stream_added": True,
-        "aligned_discarded_drive_start_draws": int(aligned_discarded_drive_start_draws),
-        "modeled_transition_events": int(modeled_transition_events),
+        "aligned_discarded_drive_start_draws": int(
+            diagnostic_counts["aligned_discarded_drive_start_draws"]
+        ),
+        "modeled_transition_events": int(diagnostic_counts["modeled_transition_events"]),
         "modeled_pace_plays": int(modeled_pace_plays),
         "state_allocation_attempts": int(state_allocation_attempts),
         "state_allocation_fallbacks": int(state_allocation_fallbacks),
