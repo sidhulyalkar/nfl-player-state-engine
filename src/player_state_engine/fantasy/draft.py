@@ -143,7 +143,6 @@ def _add_dynamic_draft_scarcity(available: pd.DataFrame, state: DraftState) -> p
         out.loc[group.index, "expected_position_drafted_before_next"] = expected_taken
         out.loc[group.index, "expected_position_supply_next_pick"] = expected_remaining
 
-        current_vorp = pd.to_numeric(ordered["vorp"], errors="coerce").fillna(0.0)
         for row_index, row in ordered.iterrows():
             candidate_vorp = max(0.0, float(row.get("vorp", 0.0)))
             other = positive.loc[positive.index != row_index].copy()
