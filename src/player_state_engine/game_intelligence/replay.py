@@ -25,6 +25,7 @@ from player_state_engine.game_intelligence.tendencies import (
 )
 from player_state_engine.game_intelligence.usage import build_player_usage_profiles
 
+
 @dataclass(slots=True)
 class GameReplayResult:
     candidate_metrics: dict[str, float]
