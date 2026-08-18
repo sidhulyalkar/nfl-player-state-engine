@@ -11,7 +11,16 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -e '.[dev,intelligence,api]'
-      - run: ruff check src tests
+      - name: Lint package, tests, and v0.10 operational scripts
+        run: |
+          ruff check src tests \
+            scripts/acquire_game_intelligence_sources.py \
+            scripts/build_game_intelligence.py \
+            scripts/run_play_call_benchmark.py \
+            scripts/run_game_simulation_replay.py \
+            scripts/weekly_game_intelligence_refresh.py
+      - name: Compile Python sources and all scripts
+        run: python -m compileall -q src scripts tests
       - run: pytest
 
   frontend:

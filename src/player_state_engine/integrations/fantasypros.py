@@ -32,9 +32,9 @@ def _position_rank_number(value: object) -> float | None:
 class FantasyProsClient:
     """Thin client for FantasyPros' documented public v2 API.
 
-    Raw responses are never treated as model truth. Ranking calls normalize into the repository's
-    timestamped external-ranking schema so they can be used for consensus audits, format-delta
-    validation and market-survival features without contaminating football projections.
+    The endpoint supports scoring/ranking filters, but the response does not itself certify a
+    league team count or 2QB/superflex construction. Those dimensions therefore remain unknown in
+    source metadata even when the caller supplies a target league for later comparison.
     """
 
     def __init__(
@@ -94,34 +94,12 @@ class FantasyProsClient:
         players = payload.get("players") or []
         if not isinstance(players, list):
             raise ValueError("FantasyPros consensus response did not contain a players list.")
-        raw = pd.DataFrame(players)
-        if raw.empty:
-            normalized = normalize_ranking_frame(
-                raw,
-                source="fantasypros_ecr",
-                source_kind="expert",
-                ranking_type=(ranking_type or str(payload.get("type") or "draft")),
-                scoring=scoring.lower(),
-                teams=teams,
-                qb_format_name=qb_format_name,
-                captured_at_utc=datetime.now(UTC),
-                source_url=f"{_BASE_URL}/nfl/{int(season)}/consensus-rankings",
-            )
-            return normalized, {"count": 0, "total_experts": 0}
 
-        prepared = pd.DataFrame(index=raw.index)
-        prepared["source_player_id"] = raw.get("player_id")
-        prepared["player_name"] = raw.get("player_name")
-        prepared["position"] = raw.get("player_position_id", raw.get("player_positions"))
-        prepared["nfl_team"] = raw.get("player_team_id")
-        prepared["rank"] = raw.get("rank_ecr")
-        prepared["position_rank"] = (
-            raw.get("pos_rank", pd.Series(index=raw.index, dtype=object)).map(_position_rank_number)
-        )
-        prepared["rank_min"] = raw.get("rank_min")
-        prepared["rank_max"] = raw.get("rank_max")
-        prepared["rank_std"] = raw.get("rank_std")
-        prepared["expert_count"] = payload.get("total_experts")
+        # These are comparison-target hints only. The generic consensus API response does not
+        # certify either dimension, so source rows must not inherit the requested league format.
+        source_teams: int | None = None
+        source_qb_format = "unknown"
+        raw = pd.DataFrame(players)
         resolved_type = str(ranking_type or payload.get("type") or "draft").lower()
         source = "fantasypros_adp" if resolved_type == "adp" else "fantasypros_ecr"
         source_kind = "market" if resolved_type == "adp" else "expert"
@@ -131,18 +109,47 @@ class FantasyProsClient:
                 captured = datetime.fromtimestamp(float(payload["last_updated_ts"]), tz=UTC)
             except (TypeError, ValueError, OSError):
                 pass
-        normalized = normalize_ranking_frame(
-            prepared,
-            source=source,
-            source_kind=source_kind,
-            ranking_type=resolved_type,
-            scoring=scoring.lower(),
-            teams=teams,
-            qb_format_name=qb_format_name,
-            source_weight=source_weight,
-            captured_at_utc=captured,
-            source_url=f"{_BASE_URL}/nfl/{int(season)}/consensus-rankings",
-        )
+
+        if raw.empty:
+            normalized = normalize_ranking_frame(
+                raw,
+                source=source,
+                source_kind=source_kind,
+                ranking_type=resolved_type,
+                scoring=scoring.lower(),
+                teams=source_teams,
+                qb_format_name=source_qb_format,
+                source_weight=source_weight,
+                captured_at_utc=captured,
+                source_url=f"{_BASE_URL}/nfl/{int(season)}/consensus-rankings",
+            )
+        else:
+            prepared = pd.DataFrame(index=raw.index)
+            prepared["source_player_id"] = raw.get("player_id")
+            prepared["player_name"] = raw.get("player_name")
+            prepared["position"] = raw.get("player_position_id", raw.get("player_positions"))
+            prepared["nfl_team"] = raw.get("player_team_id")
+            prepared["rank"] = raw.get("rank_ecr")
+            prepared["position_rank"] = raw.get(
+                "pos_rank", pd.Series(index=raw.index, dtype=object)
+            ).map(_position_rank_number)
+            prepared["rank_min"] = raw.get("rank_min")
+            prepared["rank_max"] = raw.get("rank_max")
+            prepared["rank_std"] = raw.get("rank_std")
+            prepared["expert_count"] = payload.get("total_experts")
+            normalized = normalize_ranking_frame(
+                prepared,
+                source=source,
+                source_kind=source_kind,
+                ranking_type=resolved_type,
+                scoring=scoring.lower(),
+                teams=source_teams,
+                qb_format_name=source_qb_format,
+                source_weight=source_weight,
+                captured_at_utc=captured,
+                source_url=f"{_BASE_URL}/nfl/{int(season)}/consensus-rankings",
+            )
+
         metadata = {
             "count": int(payload.get("count") or len(normalized)),
             "total_experts": int(payload.get("total_experts") or 0),
@@ -153,6 +160,11 @@ class FantasyProsClient:
             "scoring": scoring.upper(),
             "ranking_type": resolved_type,
             "expert_publication_times": payload.get("expert_pub") or {},
+            "teams": source_teams,
+            "qb_format": source_qb_format,
+            "requested_teams": teams,
+            "requested_qb_format": qb_format_name,
+            "format_metadata_source": "api_response_not_format_certified",
         }
         return normalized, metadata
 
