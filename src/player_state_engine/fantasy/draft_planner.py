@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
-from typing import Iterable
 
 import numpy as np
 import pandas as pd
@@ -102,7 +102,11 @@ def plan_two_turn_draft(
         masked_values = np.where(survive, values[None, :], -np.inf)
         best_indexes = np.argmax(masked_values, axis=1)
         has_survivor = survive.any(axis=1)
-        next_values = np.where(has_survivor, masked_values[np.arange(simulations), best_indexes], 0.0)
+        next_values = np.where(
+            has_survivor,
+            masked_values[np.arange(simulations), best_indexes],
+            0.0,
+        )
         two_pick_values = current_value + next_values
 
         target_counts: dict[int, int] = {}
