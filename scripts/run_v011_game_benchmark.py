@@ -116,7 +116,7 @@ def main() -> None:
     schedules = _read_table(args.schedules)
     players = _read_table(args.players) if args.players else None
     player_actuals = _read_table(args.player_actuals) if args.player_actuals else None
-    league_config = LeagueConfig.from_yaml(args.league_config) if args.league_config else None
+    league_config = LeagueConfig.from_yaml(args.league_config) if args.league_config else LeagueConfig()
 
     benchmark = run_expanding_game_benchmark(
         pbp,
