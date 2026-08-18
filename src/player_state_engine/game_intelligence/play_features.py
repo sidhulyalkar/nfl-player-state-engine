@@ -137,8 +137,11 @@ def build_play_intelligence_frame(
 
     drive = data["drive"] if "drive" in data else pd.Series(0, index=data.index)
     groups = [data["game_id"], drive, data["posteam"]]
-    previous_clock = data.groupby(groups, sort=False)["game_seconds_remaining"].shift(1)
+    grouped_clock = data.groupby(groups, sort=False)["game_seconds_remaining"]
+    previous_clock = grouped_clock.shift(1)
+    next_clock = grouped_clock.shift(-1)
     data["seconds_between_plays"] = (previous_clock - data["game_seconds_remaining"]).clip(0, 90)
+    data["seconds_to_next_play"] = (data["game_seconds_remaining"] - next_clock).clip(0, 90)
 
     data["passer_player_id"] = _coalesce(
         data, ("passer_player_id", "passer_id", "passer_player_id_charting")
