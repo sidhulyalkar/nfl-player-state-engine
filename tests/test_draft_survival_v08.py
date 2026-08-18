@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import pandas as pd
 
-from player_state_engine.fantasy.draft_survival import apply_empirical_survival, train_survival_model
+from player_state_engine.fantasy.draft_survival import (
+    apply_empirical_survival,
+    train_survival_model,
+)
 from player_state_engine.fantasy.league import LeagueConfig
 
 
