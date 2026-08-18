@@ -43,11 +43,7 @@ def evaluate_team_simulation_draws(
         raise ValueError(f"Observed teams missing: {sorted(required_observed - set(observed))}")
     medians = (
         team_draws.groupby(["game_id", "team"], dropna=False)
-        .agg(
-            plays=("plays", "median"),
-            pass_rate=("pass_rate", "median"),
-            points=("points", "median"),
-        )
+        .agg(plays=("plays", "median"), pass_rate=("pass_rate", "median"), points=("points", "median"))
         .reset_index()
     )
     joined = observed.merge(medians, on=["game_id", "team"], suffixes=("_actual", "_pred"))
@@ -55,15 +51,11 @@ def evaluate_team_simulation_draws(
         raise ValueError("No overlapping simulated and observed team rows")
     return {
         "games": float(joined["game_id"].nunique()),
-        "team_plays_mae": float(
-            mean_absolute_error(joined["plays_actual"], joined["plays_pred"])
-        ),
+        "team_plays_mae": float(mean_absolute_error(joined["plays_actual"], joined["plays_pred"])),
         "team_pass_rate_mae": float(
             mean_absolute_error(joined["pass_rate_actual"], joined["pass_rate_pred"])
         ),
-        "team_points_mae": float(
-            mean_absolute_error(joined["points_actual"], joined["points_pred"])
-        ),
+        "team_points_mae": float(mean_absolute_error(joined["points_actual"], joined["points_pred"])),
     }
 
 
@@ -71,24 +63,45 @@ def evaluate_player_opportunity(
     predicted: pd.DataFrame,
     observed: pd.DataFrame,
 ) -> dict[str, float]:
-    """Evaluate predicted carry/target opportunity before conversion noise."""
+    """Evaluate carry/target opportunity without hiding role misses or diluting with zero roles."""
     required = {"game_id", "player_id", "carries", "targets"}
     if required - set(predicted):
         raise ValueError(f"Predicted player opportunity missing: {sorted(required - set(predicted))}")
     if required - set(observed):
         raise ValueError(f"Observed player opportunity missing: {sorted(required - set(observed))}")
-    joined = observed.merge(
-        predicted,
+    predicted_rows = predicted[["game_id", "player_id", "carries", "targets"]].copy()
+    observed_rows = observed[["game_id", "player_id", "carries", "targets"]].copy()
+    predicted_rows["player_id"] = predicted_rows["player_id"].astype(str)
+    observed_rows["player_id"] = observed_rows["player_id"].astype(str)
+    for frame in (predicted_rows, observed_rows):
+        for column in ("carries", "targets"):
+            frame[column] = pd.to_numeric(frame[column], errors="coerce").fillna(0.0)
+    predicted_rows = predicted_rows.loc[
+        predicted_rows[["carries", "targets"]].abs().sum(axis=1).gt(1e-12)
+    ].copy()
+    observed_rows = observed_rows.loc[
+        observed_rows[["carries", "targets"]].abs().sum(axis=1).gt(1e-12)
+    ].copy()
+    joined = observed_rows.merge(
+        predicted_rows,
         on=["game_id", "player_id"],
         suffixes=("_actual", "_pred"),
-        how="inner",
+        how="outer",
+        indicator=True,
     )
     if joined.empty:
-        raise ValueError("No overlapping player opportunity rows")
+        raise ValueError("No player opportunity rows")
+    for column in ("carries_actual", "targets_actual", "carries_pred", "targets_pred"):
+        joined[column] = pd.to_numeric(joined[column], errors="coerce").fillna(0.0)
     carry_error = np.abs(joined["carries_actual"] - joined["carries_pred"])
     target_error = np.abs(joined["targets_actual"] - joined["targets_pred"])
+    observed_count = float(len(observed_rows))
+    covered_observed = float(joined["_merge"].eq("both").sum())
     return {
         "player_rows": float(len(joined)),
+        "predicted_player_rows": float(len(predicted_rows)),
+        "observed_player_rows": observed_count,
+        "observed_player_coverage": covered_observed / max(observed_count, 1.0),
         "player_carries_mae": float(carry_error.mean()),
         "player_targets_mae": float(target_error.mean()),
         "player_opportunity_mae": float((carry_error + target_error).mean() / 2.0),

@@ -9,6 +9,7 @@ import pandas as pd
 from player_state_engine.fantasy.league import LeagueConfig
 from player_state_engine.fantasy.scoring import score_simulation_draws
 from player_state_engine.game_intelligence.models import EmpiricalPlayOutcomeModel, PlayCallModel
+from player_state_engine.game_intelligence.opportunity import StateConditionedOpportunityModel
 from player_state_engine.game_intelligence.schema import MatchupSpec, SimulationConfig
 from player_state_engine.game_intelligence.tendencies import build_matchup_profile
 
@@ -16,6 +17,8 @@ _RAW_STATS = (
     "passing_yards",
     "passing_tds",
     "interceptions",
+    "carries",
+    "targets",
     "rushing_yards",
     "rushing_tds",
     "receptions",
@@ -81,13 +84,51 @@ def _select_player(
     return str(pool.iloc[int(rng.choice(np.arange(len(pool)), p=probability))]["player_id"])
 
 
-def _player_position(usage: pd.DataFrame, player_id: str | None) -> str:
-    if player_id is None:
-        return "UNK"
-    rows = usage.loc[usage["player_id"].astype(str).eq(str(player_id))]
-    if rows.empty or "position" not in rows:
-        return "UNK"
-    return str(rows.iloc[0]["position"]).upper()
+def _eligible_player_ids(usage: pd.DataFrame, team: str, opportunity_type: str) -> list[str]:
+    pool = usage.loc[usage["team"].astype(str).eq(str(team))].copy()
+    if pool.empty:
+        return []
+    columns = (
+        ("target_share", "red_zone_target_share")
+        if opportunity_type == "target"
+        else ("carry_share", "red_zone_carry_share")
+    )
+    evidence = pd.Series(0.0, index=pool.index, dtype=float)
+    for column in columns:
+        evidence = evidence.add(_numeric_weights(pool, column), fill_value=0.0)
+    positive = pool.loc[evidence.gt(0)]
+    if positive.empty:
+        positive = pool.loc[_numeric_weights(pool, "usage_evidence_weight").gt(0)]
+    return positive["player_id"].astype(str).drop_duplicates().tolist()
+
+
+def _select_state_conditioned_player(
+    opportunity_model: StateConditionedOpportunityModel,
+    usage: pd.DataFrame,
+    team: str,
+    opportunity_type: str,
+    state: dict[str, float],
+    rng: np.random.Generator,
+) -> str | None:
+    eligible = _eligible_player_ids(usage, team, opportunity_type)
+    if not eligible:
+        return None
+    distribution = opportunity_model.distribution(
+        team=team,
+        opportunity_type=opportunity_type,
+        state=state,
+        use_context=True,
+        eligible_player_ids=eligible,
+    )
+    if distribution.empty:
+        return None
+    weights = pd.to_numeric(distribution["probability"], errors="coerce").fillna(0.0).clip(lower=0.0)
+    if float(weights.sum()) <= 0:
+        return None
+    probability = (weights / weights.sum()).to_numpy(dtype=float)
+    return str(
+        distribution.iloc[int(rng.choice(np.arange(len(distribution)), p=probability))]["player_id"]
+    )
 
 
 def _pass_probability(
@@ -187,6 +228,36 @@ def _summarize(frame: pd.DataFrame, group: list[str], value: str) -> pd.DataFram
     ).reset_index()
 
 
+def _complete_player_draw_matrix(
+    player_stats: defaultdict[tuple[int, str], dict[str, float]],
+    usage: pd.DataFrame,
+    *,
+    simulations: int,
+    game_id: str,
+) -> pd.DataFrame:
+    """Materialize explicit zero-stat rows for each matchup player in every simulation."""
+    if usage.empty:
+        return pd.DataFrame()
+    player_state = usage[["player_id", "team", "position"]].copy()
+    player_state["player_id"] = player_state["player_id"].astype(str)
+    player_state = player_state.drop_duplicates("player_id", keep="first")
+    rows: list[dict[str, object]] = []
+    for simulation in range(int(simulations)):
+        for _, player in player_state.iterrows():
+            player_id = str(player["player_id"])
+            values = player_stats.get((simulation, player_id), {})
+            row: dict[str, object] = {
+                "game_id": game_id,
+                "simulation": simulation,
+                "player_id": player_id,
+                "team": str(player["team"]),
+                "position": str(player["position"]).upper(),
+            }
+            row.update({stat: float(values.get(stat, 0.0)) for stat in _RAW_STATS})
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def simulate_matchup(
     matchup: MatchupSpec,
     *,
@@ -194,12 +265,18 @@ def simulate_matchup(
     usage: pd.DataFrame,
     outcome_model: EmpiricalPlayOutcomeModel,
     play_call_model: PlayCallModel | None = None,
+    opportunity_model: StateConditionedOpportunityModel | None = None,
     league_config: LeagueConfig | None = None,
     config: SimulationConfig | None = None,
 ) -> PlayByPlaySimulationResult:
     """Generate correlated game and player draws from an inspectable football state machine."""
     config = config or SimulationConfig()
     game_id = matchup.resolved_game_id
+    game_usage = usage.loc[
+        usage["team"].astype(str).isin([str(matchup.home_team), str(matchup.away_team)])
+    ].copy()
+    if game_usage.empty:
+        raise ValueError("Simulation requires point-in-time usage for at least one matchup team")
     profiles = {
         matchup.home_team: build_matchup_profile(
             tendencies,
@@ -222,6 +299,8 @@ def simulate_matchup(
     )
     team_rows: list[dict[str, object]] = []
     game_rows: list[dict[str, object]] = []
+    state_allocation_attempts = 0
+    state_allocation_fallbacks = 0
 
     for simulation in range(config.simulations):
         scores = {matchup.home_team: 0.0, matchup.away_team: 0.0}
@@ -261,9 +340,7 @@ def simulate_matchup(
                 "game_seconds_remaining": float(clock),
                 "score_differential": float(scores[offense] - scores[defense]),
             }
-            offense_spread = (
-                matchup.home_spread if offense == matchup.home_team else -matchup.home_spread
-            )
+            offense_spread = matchup.home_spread if offense == matchup.home_team else -matchup.home_spread
             pass_probability = _pass_probability(
                 state,
                 profiles[offense],
@@ -286,15 +363,24 @@ def simulate_matchup(
             passer = target = rusher = None
 
             if family == "DROPBACK":
-                passer = _select_player(usage, offense, "dropback_share", rng, position="QB")
-                target = _select_player(
-                    usage,
-                    offense,
-                    "target_share",
-                    rng,
-                    red_zone_column="red_zone_target_share",
-                    red_zone=red_zone,
-                )
+                passer = _select_player(game_usage, offense, "dropback_share", rng, position="QB")
+                if opportunity_model is not None:
+                    state_allocation_attempts += 1
+                    target = _select_state_conditioned_player(
+                        opportunity_model, game_usage, offense, "target", state, rng
+                    )
+                    if target is None:
+                        state_allocation_fallbacks += 1
+                if target is None:
+                    target = _select_player(
+                        game_usage,
+                        offense,
+                        "target_share",
+                        rng,
+                        red_zone_column="red_zone_target_share",
+                        red_zone=red_zone,
+                    )
+                _record(player_stats, simulation, target, "targets", 1.0)
                 if outcome.get("interception", 0.0) >= 0.5:
                     _record(player_stats, simulation, passer, "interceptions", 1.0)
                 if outcome.get("complete_pass", 0.0) >= 0.5 and target is not None:
@@ -303,14 +389,23 @@ def simulate_matchup(
                     _record(player_stats, simulation, target, "receiving_yards", receiving_yards)
                     _record(player_stats, simulation, passer, "passing_yards", receiving_yards)
             else:
-                rusher = _select_player(
-                    usage,
-                    offense,
-                    "carry_share",
-                    rng,
-                    red_zone_column="red_zone_carry_share",
-                    red_zone=red_zone,
-                )
+                if opportunity_model is not None:
+                    state_allocation_attempts += 1
+                    rusher = _select_state_conditioned_player(
+                        opportunity_model, game_usage, offense, "carry", state, rng
+                    )
+                    if rusher is None:
+                        state_allocation_fallbacks += 1
+                if rusher is None:
+                    rusher = _select_player(
+                        game_usage,
+                        offense,
+                        "carry_share",
+                        rng,
+                        red_zone_column="red_zone_carry_share",
+                        red_zone=red_zone,
+                    )
+                _record(player_stats, simulation, rusher, "carries", 1.0)
                 _record(player_stats, simulation, rusher, "rushing_yards", yards)
 
             touchdown = bool(outcome.get("touchdown", 0.0) >= 0.5 or yards >= yardline)
@@ -395,21 +490,12 @@ def simulate_matchup(
             }
         )
 
-    usage_lookup = usage.drop_duplicates("player_id").set_index("player_id") if not usage.empty else None
-    player_rows: list[dict[str, object]] = []
-    for (simulation, player_id), values in player_stats.items():
-        row: dict[str, object] = {
-            "game_id": game_id,
-            "simulation": simulation,
-            "player_id": player_id,
-            "position": _player_position(usage, player_id),
-        }
-        row.update({stat: float(values.get(stat, 0.0)) for stat in _RAW_STATS})
-        if usage_lookup is not None and player_id in usage_lookup.index:
-            row["team"] = str(usage_lookup.loc[player_id, "team"])
-        player_rows.append(row)
-    player_draws = pd.DataFrame(player_rows)
-
+    player_draws = _complete_player_draw_matrix(
+        player_stats,
+        game_usage,
+        simulations=config.simulations,
+        game_id=game_id,
+    )
     scoring_config = league_config or LeagueConfig(scoring="ppr")
     player_value = "league_fantasy_points"
     if not player_draws.empty:
@@ -438,11 +524,7 @@ def simulate_matchup(
     )
     player_summary = _summarize(
         player_draws,
-        [
-            column
-            for column in ("game_id", "player_id", "team", "position")
-            if column in player_draws
-        ],
+        [column for column in ("game_id", "player_id", "team", "position") if column in player_draws],
         player_value,
     )
     diagnostics = {
@@ -452,16 +534,20 @@ def simulate_matchup(
         "simulations": config.simulations,
         "home_profile": profiles[matchup.home_team],
         "away_profile": profiles[matchup.away_team],
-        "play_call_model": (
-            play_call_model.model_source if play_call_model is not None else "profile_baseline"
-        ),
+        "play_call_model": play_call_model.model_source if play_call_model is not None else "profile_baseline",
         "outcome_model": outcome_model.model_source,
+        "opportunity_allocation_model": opportunity_model.model_source if opportunity_model is not None else "static_usage_share",
+        "state_allocation_attempts": int(state_allocation_attempts),
+        "state_allocation_fallbacks": int(state_allocation_fallbacks),
+        "complete_player_draw_matrix": True,
+        "matchup_player_rows": int(game_usage["player_id"].astype(str).nunique()),
         "player_value_column": player_value,
         "simulation_scoring_source": "exact_league" if league_config is not None else "ppr_proxy",
         "limitations": [
             "no overtime state machine",
             "touchdowns use seven points instead of a separate PAT/two-point model",
             "fourth-down decisions remain transparent heuristics pending calibration",
+            "state-conditioned allocation can only select players present in point-in-time usage state",
         ],
     }
     return PlayByPlaySimulationResult(

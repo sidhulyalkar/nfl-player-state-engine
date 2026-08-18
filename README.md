@@ -1,6 +1,6 @@
-# NFL Player State Engine v0.11
+# NFL Player State Engine v0.12
 
-**Fourth Down Lab** is a leakage-safe, probabilistic NFL player-state and fantasy decision system. The project now combines a direct player projection engine with a guarded generative game simulator, then forces both through frozen historical replay before new complexity can affect production decisions.
+**Fourth Down Lab** is a leakage-safe, probabilistic NFL player-state and fantasy decision system. The project combines a direct player projection engine with a guarded generative game simulator, then forces new complexity through frozen historical replay before it can affect production decisions.
 
 > Research and entertainment only. The project does not place wagers or promise profit. Predictive, fantasy, and market results should remain timestamped, auditable, and evaluated out of sample.
 
@@ -27,11 +27,12 @@
                        ▼
               FROZEN REPLAY LAB
                        │
-          ┌────────────┼────────────┐
-          ▼            ▼            ▼
-      CALIBRATION   OPPORTUNITY   BLEND TESTS
-          │            │            │
-          └────────────┴────────────┘
+        ┌──────────────┼──────────────┐
+        ▼              ▼              ▼
+   CALIBRATION     FACTORIAL      BLEND TESTS
+                  ATTRIBUTION
+        │              │              │
+        └──────────────┴──────────────┘
                        ▼
                  PROMOTION GATE
                        │
@@ -49,28 +50,62 @@ The repository deliberately separates four questions:
 3. **Acquisition timing**: when is a player likely to disappear in a draft or waiver market?
 4. **External evidence**: what can rankings, injuries, depth charts, coaching changes, practice observations, and markets tell us without becoming truth by default?
 
-## What v0.11 adds
+## What v0.12 adds
 
-### 1. Expanding weekly frozen replay
+### 1. State-conditioned opportunity inside simulated game states
 
-The canonical game benchmark now retrains at every historical week boundary:
+The carry/target allocator can now run on the simulator's own evolving down, distance, field position, clock, red-zone and score state. It remains opt-in and research-only.
+
+Historical player identities are filtered through the current point-in-time usage pool before a simulated opportunity is allocated, so stale players cannot receive work merely because they remain in training history.
+
+### 2. Four-cell factorial replay
+
+Every frozen weekly fold can compare:
+
+| Variant | Play calling | Opportunity allocation |
+|---|---|---|
+| `profile_static` | team/opponent profile | static recent share |
+| `learned_static` | learned run/dropback head | static recent share |
+| `profile_state` | team/opponent profile | state-conditioned allocator |
+| `learned_state` | learned run/dropback head | state-conditioned allocator |
+
+The four variants share the same point-in-time evidence, empirical outcome model, matchup, usage state and simulation seed. This lets replay estimate the marginal value of play calling, allocation, and their combination instead of changing several mechanisms at once.
+
+### 3. Opportunity evaluation from the actual Monte Carlo draws
+
+The simulator now records `carries` and `targets` in each player draw. Replay scores those realized simulated opportunities directly.
+
+Player opportunity evaluation also uses the union of predicted and observed players. Completely missing a real role, or inventing a material role that did not occur, is now penalized rather than disappearing through an inner join. Reports expose observed-player coverage alongside carry, target and combined opportunity MAE.
+
+### 4. Context ablations and a negative control
+
+The opportunity lab compares static share, red-zone-only context, full context, leave-one-context-out variants, and a within-team-season context permutation.
+
+The permutation preserves chronology, team/player identities and base opportunity counts while breaking the relationship between play state and context. A context model must beat that control before it deserves more authority.
+
+### 5. Evidence-routed next development
+
+The v0.12 report does not merely output scores. It classifies the likely next bottleneck:
 
 ```text
-Week N model = every permitted observation strictly before Week N
+allocation wins + fantasy improves -> richer route / alignment / role evidence
+oracle context wins but full simulation loses -> pace and drive-state realism
+play-call improves but team volume does not -> pace / drive volume
+opportunity improves but scoring does not -> decomposed play outcomes
+context fails permutation control -> reject / redesign context model
+unstable by season -> evidence maturity / regime segmentation
 ```
 
-A Week 8 replay may learn from Weeks 1-7. It may never learn from Week 8 itself.
+This router is comparative research triage, not an automatic architecture selector.
 
-This is the evaluation protocol the live continual-learning system is supposed to emulate.
-
-Run it with:
+Run the full experiment with:
 
 ```bash
-python scripts/run_v011_game_benchmark.py \
-  --pbp data/raw/game_intelligence/v011/play_by_play.parquet \
-  --schedules data/raw/game_intelligence/v011/schedules.parquet \
-  --players data/raw/game_intelligence/v011/players.parquet \
-  --player-actuals data/raw/game_intelligence/v011/player_stats.parquet \
+python scripts/run_v012_factorial_benchmark.py \
+  --pbp data/raw/game_intelligence/v012/play_by_play.parquet \
+  --schedules data/raw/game_intelligence/v012/schedules.parquet \
+  --players data/raw/game_intelligence/v012/players.parquet \
+  --player-actuals data/raw/game_intelligence/v012/player_stats.parquet \
   --test-season 2023 \
   --test-season 2024 \
   --test-season 2025
@@ -79,71 +114,32 @@ python scripts/run_v011_game_benchmark.py \
 Or use the manual workflow:
 
 ```text
-.github/workflows/v011_historical_game_benchmark.yml
+.github/workflows/v012_factorial_game_benchmark.yml
 ```
 
-### 2. State-conditioned opportunity challenger
+No factorial result can alter production automatically.
 
-The new `StateConditionedOpportunityModel` asks a narrow question before it is allowed into Monte Carlo:
+## v0.11 frozen replay and blend foundation
 
-> Given the team and play state, who is most likely to receive this carry or target?
+v0.11 established expanding weekly point-in-time replay:
 
-It starts from recency-weighted player share and adds shrunk situational evidence for:
+```text
+Week N model = every permitted observation strictly before Week N
+```
 
-- red zone;
-- third down;
-- early downs;
-- late game;
-- leading / neutral / trailing score state;
-- distance bucket;
-- field zone.
+It also introduced the oracle-state `StateConditionedOpportunityModel`, historical direct-vs-generative quantile blending, and stricter multi-season promotion gates. The oracle-state benchmark deliberately isolated player allocation from team-volume/run-pass error before v0.12 moved the allocator into simulated states.
 
-Sparse context is regularized back toward the base role rather than being treated as a new truth.
-
-The first benchmark is deliberately **oracle-state**: realized team play states are held fixed so allocation can be evaluated independently from team-volume and run/pass errors. An oracle-state win does not authorize production usage.
-
-### 3. Direct vs generative quantile blend laboratory
-
-Archived direct-model and game-simulator predictions can now be tested for complementary signal.
+Archived direct-model and game-simulator predictions can be tested with:
 
 ```text
 Q_blend = w * Q_direct + (1 - w) * Q_generative
 ```
 
-`QuantileBlendCalibrator` learns `w` only from earlier archived predictions. It can learn position-specific weights when there is enough data and otherwise falls back to a global weight.
-
-The benchmark reports whether the blend beats:
-
-- the direct model;
-- the generative model;
-- the better of the two components on each weekly fold.
-
-No blend is promoted automatically.
-
-### 4. Stronger research promotion gate
-
-v0.11 requires robustness across time, not one attractive aggregate score.
-
-Default evidence includes:
-
-- multiple held-out seasons;
-- hundreds of replayed games;
-- play-call calibration;
-- team plays, pass rate, and scoring;
-- player carries/targets;
-- state-conditioned allocation likelihood;
-- fantasy quantile pinball loss;
-- q10-q90 interval coverage;
-- weekly fold win rates;
-- manual champion review.
-
-Missing downstream evidence is a failed gate.
+Blend weights are learned only from earlier archived predictions. Position-specific weights require sufficient evidence and otherwise fall back to a global weight.
 
 ## v0.10 game intelligence foundation
 
-v0.10 introduced the point-in-time generative football engine that v0.11 now evaluates more rigorously.
-
-It includes:
+v0.10 introduced the point-in-time generative football engine:
 
 - normalized nflverse play-by-play state;
 - leakage-safe offense and defense tendency snapshots;
@@ -158,7 +154,7 @@ It includes:
 - exact league rescoring;
 - weekly research refresh and immutable evidence registry.
 
-The simulator remains research-only until frozen replay earns a promotion.
+The simulator remains research-only until frozen replay earns promotion.
 
 ## v0.9 league and ranking foundation
 
@@ -197,6 +193,8 @@ production_projection_changed = false
 automatic_promotion = false
 ```
 
+The live research simulation endpoint intentionally remains on the established static-allocation artifact path. The v0.12 allocator must clear factorial historical replay before being packaged into the weekly live research champion.
+
 ## Why the project decomposes errors
 
 A fantasy miss can come from several different mechanisms:
@@ -213,9 +211,7 @@ wrong completion / rushing / touchdown efficiency
 wrong fantasy uncertainty
 ```
 
-v0.11 is designed to tell these apart.
-
-If team play volume is already good, adding a larger pace model is unlikely to be the best use of effort. If target allocation is the failure, route/formation evidence has a clearer hypothesis. If all football layers are good but q10-q90 coverage is poor, uncertainty modeling is the actual problem.
+v0.12 makes the middle layers more independently measurable. If contextual player allocation is useful only when the real state path is known, the next problem is state/volume simulation rather than another allocation formula. If opportunity improves but fantasy scoring does not, the outcome model becomes the clearer target.
 
 ## Evidence roadmap
 
@@ -233,7 +229,7 @@ Interesting future evidence families include:
 - official crews and penalty environment;
 - market disagreement as an external diagnostic sensor.
 
-These are **experiment families**, not trusted model inputs. Every one needs timestamp provenance, an isolated frozen ablation, and a negative control.
+These are **experiment families**, not trusted model inputs. Every one needs timestamp provenance, an isolated frozen ablation, a negative control, and full downstream replay.
 
 ## Installation
 
@@ -257,7 +253,8 @@ ruff check src tests \
   scripts/run_game_simulation_replay.py \
   scripts/weekly_game_intelligence_refresh.py \
   scripts/run_v011_game_benchmark.py \
-  scripts/run_v011_blend_benchmark.py
+  scripts/run_v011_blend_benchmark.py \
+  scripts/run_v012_factorial_benchmark.py
 ```
 
 Run the operational API:
@@ -271,8 +268,9 @@ uvicorn player_state_engine.api.operational:app --reload
 ```text
 src/player_state_engine/
   game_intelligence/
-    benchmark.py       expanding frozen replay + v0.11 gate
+    benchmark.py       expanding v0.11 frozen replay
     blend.py           direct/generative quantile calibration
+    factorial.py       v0.12 four-cell attribution + evidence router
     opportunity.py     state-conditioned carry/target challenger
     replay.py          frozen game replay primitives
     simulator.py       research play-by-play state machine
@@ -285,10 +283,12 @@ src/player_state_engine/
 scripts/
   run_v011_game_benchmark.py
   run_v011_blend_benchmark.py
+  run_v012_factorial_benchmark.py
   weekly_game_intelligence_refresh.py
 .github/workflows/
   weekly_game_intelligence.yml
   v011_historical_game_benchmark.yml
+  v012_factorial_game_benchmark.yml
 ```
 
 ## Modeling rules
@@ -300,8 +300,9 @@ scripts/
 5. External consensus is a challenger or sensor, not ground truth.
 6. Every complex model must beat a simpler baseline on frozen evidence.
 7. Calibration and interval coverage matter alongside point accuracy.
-8. No automatic production promotion from a scheduled workflow.
-9. No automatic real-money wagering.
-10. When an experiment loses, keep the result and change the hypothesis rather than the scoreboard.
+8. Negative controls are required for contextual feature families.
+9. No automatic production promotion from a scheduled workflow.
+10. No automatic real-money wagering.
+11. When an experiment loses, keep the result and change the hypothesis rather than the scoreboard.
 
-See `docs/modeling/game_intelligence_v011.md` and `docs/releases/v0.11.md` for the current research contract.
+See `docs/releases/v0.12.md` and `docs/modeling/v012_next_development.md` for the current research contract and evidence-routed development plan.

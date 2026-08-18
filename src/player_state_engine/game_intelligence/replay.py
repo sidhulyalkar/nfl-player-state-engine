@@ -13,6 +13,7 @@ from player_state_engine.game_intelligence.evaluation import (
     interval_coverage,
 )
 from player_state_engine.game_intelligence.models import EmpiricalPlayOutcomeModel, PlayCallModel
+from player_state_engine.game_intelligence.opportunity import StateConditionedOpportunityModel
 from player_state_engine.game_intelligence.play_features import build_play_intelligence_frame
 from player_state_engine.game_intelligence.schema import MatchupSpec, SimulationConfig
 from player_state_engine.game_intelligence.simulator import (
@@ -139,6 +140,7 @@ def predicted_player_opportunity(
     team_draws: pd.DataFrame,
     usage_by_game: pd.DataFrame,
 ) -> pd.DataFrame:
+    """Legacy expectation from team volume and static usage share."""
     teams = (
         team_draws.groupby(["game_id", "team"], dropna=False)
         .agg(plays=("plays", "median"), pass_rate=("pass_rate", "median"))
@@ -154,6 +156,24 @@ def predicted_player_opportunity(
     ).fillna(0)
     joined["carries"] = rushes * pd.to_numeric(joined["carry_share"], errors="coerce").fillna(0)
     return joined[["game_id", "player_id", "carries", "targets"]].copy()
+
+
+def predicted_player_opportunity_from_draws(player_draws: pd.DataFrame) -> pd.DataFrame:
+    required = {"game_id", "simulation", "player_id", "carries", "targets"}
+    missing = required - set(player_draws)
+    if missing:
+        raise ValueError(f"Player draws missing opportunity columns: {sorted(missing)}")
+    if player_draws.empty:
+        return pd.DataFrame(columns=["game_id", "player_id", "carries", "targets"])
+    frame = player_draws.copy()
+    frame["player_id"] = frame["player_id"].astype(str)
+    for column in ("carries", "targets"):
+        frame[column] = pd.to_numeric(frame[column], errors="coerce").fillna(0.0)
+    return (
+        frame.groupby(["game_id", "player_id"], dropna=False)[["carries", "targets"]]
+        .median()
+        .reset_index()
+    )
 
 
 def _fantasy_metrics(
@@ -247,13 +267,15 @@ def frozen_game_replay(
     simulations_per_game: int = 250,
     max_games: int | None = None,
     seed: int = 42,
+    candidate_use_play_call_model: bool = True,
+    baseline_use_play_call_model: bool = False,
+    candidate_use_state_opportunity: bool = False,
+    baseline_use_state_opportunity: bool = False,
+    opportunity_prior_strength: float = 12.0,
+    opportunity_half_life_weeks: float = 4.0,
+    opportunity_context_columns: tuple[str, ...] | None = None,
 ) -> GameReplayResult:
-    """Run a frozen, point-in-time game replay against a transparent profile baseline.
-
-    Models are trained only on plays before ``test_week_start``. Each test game's player usage
-    is reconstructed from earlier weeks. Team tendency rows are pre-shifted, so test-game outcomes
-    never enter their own prediction-time feature vector.
-    """
+    """Run a frozen point-in-time comparison between two simulator variants."""
     play_frame = build_play_intelligence_frame(pbp)
     tendencies = build_team_tendency_snapshots(play_frame)
     enriched = attach_point_in_time_matchup_features(play_frame, tendencies)
@@ -264,6 +286,15 @@ def frozen_game_replay(
         raise ValueError("Frozen game replay needs at least 50 pre-cutoff training plays")
     play_call_model = PlayCallModel().fit(train)
     outcome_model = EmpiricalPlayOutcomeModel().fit(train)
+    opportunity_model: StateConditionedOpportunityModel | None = None
+    if candidate_use_state_opportunity or baseline_use_state_opportunity:
+        opportunity_kwargs: dict[str, object] = {
+            "prior_strength": float(opportunity_prior_strength),
+            "half_life_weeks": float(opportunity_half_life_weeks),
+        }
+        if opportunity_context_columns is not None:
+            opportunity_kwargs["context_columns"] = tuple(opportunity_context_columns)
+        opportunity_model = StateConditionedOpportunityModel(**opportunity_kwargs).fit(train)
 
     test_schedule = schedules.loc[
         (pd.to_numeric(schedules["season"], errors="coerce") == int(test_season))
@@ -279,6 +310,8 @@ def frozen_game_replay(
 
     candidate_team_draws: list[pd.DataFrame] = []
     baseline_team_draws: list[pd.DataFrame] = []
+    candidate_player_draws: list[pd.DataFrame] = []
+    baseline_player_draws: list[pd.DataFrame] = []
     candidate_players: list[pd.DataFrame] = []
     baseline_players: list[pd.DataFrame] = []
     usage_rows: list[pd.DataFrame] = []
@@ -305,7 +338,8 @@ def frozen_game_replay(
             tendencies=tendencies,
             usage=usage,
             outcome_model=outcome_model,
-            play_call_model=play_call_model,
+            play_call_model=play_call_model if candidate_use_play_call_model else None,
+            opportunity_model=opportunity_model if candidate_use_state_opportunity else None,
             league_config=league_config,
             config=config,
         )
@@ -314,12 +348,15 @@ def frozen_game_replay(
             tendencies=tendencies,
             usage=usage,
             outcome_model=outcome_model,
-            play_call_model=None,
+            play_call_model=play_call_model if baseline_use_play_call_model else None,
+            opportunity_model=opportunity_model if baseline_use_state_opportunity else None,
             league_config=league_config,
             config=config,
         )
         candidate_team_draws.append(candidate.team_draws)
         baseline_team_draws.append(baseline.team_draws)
+        candidate_player_draws.append(candidate.player_draws)
+        baseline_player_draws.append(baseline.player_draws)
         for result, destination in (
             (candidate, candidate_players),
             (baseline, baseline_players),
@@ -333,6 +370,8 @@ def frozen_game_replay(
         raise ValueError("No replay games had sufficient point-in-time player usage")
     candidate_team = pd.concat(candidate_team_draws, ignore_index=True)
     baseline_team = pd.concat(baseline_team_draws, ignore_index=True)
+    candidate_player_draw = pd.concat(candidate_player_draws, ignore_index=True)
+    baseline_player_draw = pd.concat(baseline_player_draws, ignore_index=True)
     candidate_player = pd.concat(candidate_players, ignore_index=True)
     baseline_player = pd.concat(baseline_players, ignore_index=True)
     usage_by_game = pd.concat(usage_rows, ignore_index=True)
@@ -349,11 +388,23 @@ def frozen_game_replay(
 
     candidate_team_metrics = evaluate_team_simulation_draws(candidate_team, observed_teams)
     baseline_team_metrics = evaluate_team_simulation_draws(baseline_team, observed_teams)
+    if {"carries", "targets"} <= set(candidate_player_draw):
+        candidate_opportunity_prediction = predicted_player_opportunity_from_draws(
+            candidate_player_draw
+        )
+    else:
+        candidate_opportunity_prediction = predicted_player_opportunity(candidate_team, usage_by_game)
+    if {"carries", "targets"} <= set(baseline_player_draw):
+        baseline_opportunity_prediction = predicted_player_opportunity_from_draws(
+            baseline_player_draw
+        )
+    else:
+        baseline_opportunity_prediction = predicted_player_opportunity(baseline_team, usage_by_game)
     candidate_opportunity = evaluate_player_opportunity(
-        predicted_player_opportunity(candidate_team, usage_by_game), observed_opportunity
+        candidate_opportunity_prediction, observed_opportunity
     )
     baseline_opportunity = evaluate_player_opportunity(
-        predicted_player_opportunity(baseline_team, usage_by_game), observed_opportunity
+        baseline_opportunity_prediction, observed_opportunity
     )
 
     test_plays = enriched.loc[
@@ -363,10 +414,16 @@ def frozen_game_replay(
         )
         & enriched["game_id"].astype(str).isin(test_game_ids)
     ].copy()
-    candidate_probability = play_call_model.predict_pass_probability(test_plays)
-    baseline_probability = pd.to_numeric(
+    profile_probability = pd.to_numeric(
         test_plays["pregame_pass_rate"], errors="coerce"
     ).fillna(float(train["is_dropback"].mean()))
+    learned_probability = play_call_model.predict_pass_probability(test_plays)
+    candidate_probability = (
+        learned_probability if candidate_use_play_call_model else profile_probability
+    )
+    baseline_probability = (
+        learned_probability if baseline_use_play_call_model else profile_probability
+    )
     candidate_play_call = evaluate_play_call_probabilities(
         test_plays["is_dropback"], candidate_probability
     )
@@ -382,6 +439,13 @@ def frozen_game_replay(
     baseline_metrics = _combine_metrics(
         baseline_play_call, baseline_team_metrics, baseline_opportunity, baseline_fantasy
     )
+
+    def variant_label(use_play_call: bool, use_state_opportunity: bool) -> str:
+        return (
+            f"{'learned_play_call' if use_play_call else 'profile_play_call'}+"
+            f"{'state_opportunity' if use_state_opportunity else 'static_opportunity'}"
+        )
+
     diagnostics = {
         "test_season": int(test_season),
         "test_week_start": int(test_week_start),
@@ -389,9 +453,16 @@ def frozen_game_replay(
         "games_replayed": int(candidate_team["game_id"].nunique()),
         "training_plays": int(len(train)),
         "simulations_per_game": int(simulations_per_game),
-        "candidate_model": play_call_model.model_source,
-        "baseline_model": "point_in_time_matchup_profile",
+        "candidate_model": variant_label(
+            candidate_use_play_call_model, candidate_use_state_opportunity
+        ),
+        "baseline_model": variant_label(
+            baseline_use_play_call_model, baseline_use_state_opportunity
+        ),
+        "play_call_model": play_call_model.model_source,
+        "opportunity_model": opportunity_model.model_source if opportunity_model is not None else None,
         "outcome_model": outcome_model.model_source,
+        "opportunity_metric_source": "simulated_player_draws",
         "research_only": True,
     }
     return GameReplayResult(
