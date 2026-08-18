@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -44,6 +44,7 @@ class PlayCallModel:
     fitted: bool = False
     train_max_season: int | None = None
     train_max_week: int | None = None
+    pipeline: Pipeline = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.pipeline = Pipeline(
@@ -72,9 +73,13 @@ class PlayCallModel:
             raise ValueError("PlayCallModel requires at least 50 labeled run/dropback plays")
         self.pipeline.fit(self._features(frame.loc[valid]), target.loc[valid].astype(int))
         if "season" in frame:
-            self.train_max_season = int(pd.to_numeric(frame.loc[valid, "season"], errors="coerce").max())
+            self.train_max_season = int(
+                pd.to_numeric(frame.loc[valid, "season"], errors="coerce").max()
+            )
         if "week" in frame:
-            self.train_max_week = int(pd.to_numeric(frame.loc[valid, "week"], errors="coerce").max())
+            self.train_max_week = int(
+                pd.to_numeric(frame.loc[valid, "week"], errors="coerce").max()
+            )
         self.fitted = True
         return self
 
@@ -127,7 +132,9 @@ class EmpiricalPlayOutcomeModel:
                 ["down", "distance_bucket", "field_zone"], sort=False
             ):
                 if len(group) >= self.min_stratum_plays:
-                    self.strata[(str(family), *tuple(key))] = group.loc[:, columns].reset_index(drop=True)
+                    self.strata[(str(family), *tuple(key))] = group.loc[:, columns].reset_index(
+                        drop=True
+                    )
         self.fitted = True
         return self
 
@@ -148,4 +155,8 @@ class EmpiricalPlayOutcomeModel:
         if pool is None or pool.empty:
             raise ValueError(f"No outcome samples available for {play_family}")
         row = pool.iloc[int(rng.integers(0, len(pool)))]
-        return {column: float(pd.to_numeric(row[column], errors="coerce") or 0.0) for column in pool}
+        sampled: dict[str, float] = {}
+        for column in pool.columns:
+            value = pd.to_numeric(row[column], errors="coerce")
+            sampled[column] = 0.0 if pd.isna(value) else float(value)
+        return sampled
