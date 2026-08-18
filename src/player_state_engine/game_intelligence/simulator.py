@@ -237,6 +237,36 @@ def _summarize(frame: pd.DataFrame, group: list[str], value: str) -> pd.DataFram
     ).reset_index()
 
 
+def _complete_player_draw_matrix(
+    player_stats: defaultdict[tuple[int, str], dict[str, float]],
+    usage: pd.DataFrame,
+    *,
+    simulations: int,
+    game_id: str,
+) -> pd.DataFrame:
+    """Materialize explicit zero-stat rows for every current player in every simulation."""
+    if usage.empty:
+        return pd.DataFrame()
+    player_state = usage[["player_id", "team", "position"]].copy()
+    player_state["player_id"] = player_state["player_id"].astype(str)
+    player_state = player_state.drop_duplicates("player_id", keep="first")
+    rows: list[dict[str, object]] = []
+    for simulation in range(int(simulations)):
+        for _, player in player_state.iterrows():
+            player_id = str(player["player_id"])
+            values = player_stats.get((simulation, player_id), {})
+            row: dict[str, object] = {
+                "game_id": game_id,
+                "simulation": simulation,
+                "player_id": player_id,
+                "team": str(player["team"]),
+                "position": str(player["position"]).upper(),
+            }
+            row.update({stat: float(values.get(stat, 0.0)) for stat in _RAW_STATS})
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def simulate_matchup(
     matchup: MatchupSpec,
     *,
@@ -248,13 +278,7 @@ def simulate_matchup(
     league_config: LeagueConfig | None = None,
     config: SimulationConfig | None = None,
 ) -> PlayByPlaySimulationResult:
-    """Generate correlated game and player draws from an inspectable football state machine.
-
-    ``opportunity_model`` is opt-in and research-only. When supplied, target and carry recipients
-    are sampled from the state-conditioned allocator using the simulator's own evolving down,
-    distance, field position, clock and score state. Passing ownership remains on the point-in-time
-    QB usage profile.
-    """
+    """Generate correlated game and player draws from an inspectable football state machine."""
     config = config or SimulationConfig()
     game_id = matchup.resolved_game_id
     profiles = {
@@ -320,9 +344,7 @@ def simulate_matchup(
                 "game_seconds_remaining": float(clock),
                 "score_differential": float(scores[offense] - scores[defense]),
             }
-            offense_spread = (
-                matchup.home_spread if offense == matchup.home_team else -matchup.home_spread
-            )
+            offense_spread = matchup.home_spread if offense == matchup.home_team else -matchup.home_spread
             pass_probability = _pass_probability(
                 state,
                 profiles[offense],
@@ -472,21 +494,12 @@ def simulate_matchup(
             }
         )
 
-    usage_lookup = usage.drop_duplicates("player_id").set_index("player_id") if not usage.empty else None
-    player_rows: list[dict[str, object]] = []
-    for (simulation, player_id), values in player_stats.items():
-        row: dict[str, object] = {
-            "game_id": game_id,
-            "simulation": simulation,
-            "player_id": player_id,
-            "position": _player_position(usage, player_id),
-        }
-        row.update({stat: float(values.get(stat, 0.0)) for stat in _RAW_STATS})
-        if usage_lookup is not None and player_id in usage_lookup.index:
-            row["team"] = str(usage_lookup.loc[player_id, "team"])
-        player_rows.append(row)
-    player_draws = pd.DataFrame(player_rows)
-
+    player_draws = _complete_player_draw_matrix(
+        player_stats,
+        usage,
+        simulations=config.simulations,
+        game_id=game_id,
+    )
     scoring_config = league_config or LeagueConfig(scoring="ppr")
     player_value = "league_fantasy_points"
     if not player_draws.empty:
@@ -515,11 +528,7 @@ def simulate_matchup(
     )
     player_summary = _summarize(
         player_draws,
-        [
-            column
-            for column in ("game_id", "player_id", "team", "position")
-            if column in player_draws
-        ],
+        [column for column in ("game_id", "player_id", "team", "position") if column in player_draws],
         player_value,
     )
     diagnostics = {
@@ -529,15 +538,12 @@ def simulate_matchup(
         "simulations": config.simulations,
         "home_profile": profiles[matchup.home_team],
         "away_profile": profiles[matchup.away_team],
-        "play_call_model": (
-            play_call_model.model_source if play_call_model is not None else "profile_baseline"
-        ),
+        "play_call_model": play_call_model.model_source if play_call_model is not None else "profile_baseline",
         "outcome_model": outcome_model.model_source,
-        "opportunity_allocation_model": (
-            opportunity_model.model_source if opportunity_model is not None else "static_usage_share"
-        ),
+        "opportunity_allocation_model": opportunity_model.model_source if opportunity_model is not None else "static_usage_share",
         "state_allocation_attempts": int(state_allocation_attempts),
         "state_allocation_fallbacks": int(state_allocation_fallbacks),
+        "complete_player_draw_matrix": True,
         "player_value_column": player_value,
         "simulation_scoring_source": "exact_league" if league_config is not None else "ppr_proxy",
         "limitations": [
