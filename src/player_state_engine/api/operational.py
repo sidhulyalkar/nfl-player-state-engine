@@ -12,7 +12,8 @@ from player_state_engine.api.ranking_routes import install_ranking_routes
 
 def create_app(**kwargs: Any) -> FastAPI:
     """Create the product API with live draft and ranking-calibration surfaces installed."""
-    app = create_base_app(**kwargs)
+    base_kwargs = {key: value for key, value in kwargs.items() if key != "ranking_root"}
+    app = create_base_app(**base_kwargs)
     draft_service = install_draft_routes(
         app,
         store_root=kwargs.get("store_root"),
