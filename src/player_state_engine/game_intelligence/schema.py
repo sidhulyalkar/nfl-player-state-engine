@@ -17,12 +17,17 @@ class MatchupSpec:
     week: int
     home_team: str
     away_team: str
+    game_id: str | None = None
     home_spread: float = 0.0
     game_total: float = 44.0
     roof: str | None = None
     surface: str | None = None
     temperature: float | None = None
     wind: float | None = None
+
+    @property
+    def resolved_game_id(self) -> str:
+        return self.game_id or f"{self.season}_{self.week:02d}_{self.away_team}_{self.home_team}"
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
