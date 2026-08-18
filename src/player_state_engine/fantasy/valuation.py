@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from player_state_engine.fantasy.league import LeagueConfig
+from player_state_engine.fantasy.scoring import prepare_league_scoring_quantiles
 
 CORE_POSITIONS = ("QB", "RB", "WR", "TE", "K", "DEF", "DST")
 
@@ -28,7 +29,9 @@ def starter_allocation(
 
     values: dict[str, list[float]] = {}
     for position, group in projections.groupby(projections["position"].astype(str).str.upper()):
-        ranked = pd.to_numeric(group[value_column], errors="coerce").dropna().sort_values(ascending=False)
+        ranked = (
+            pd.to_numeric(group[value_column], errors="coerce").dropna().sort_values(ascending=False)
+        )
         values[str(position)] = ranked.astype(float).tolist()
 
     allocation: defaultdict[str, int] = defaultdict(int)
@@ -72,16 +75,16 @@ def replacement_ranks(
             ranks[position] = 1
             continue
         buffer = ceil(
-            config.replacement_buffer
-            * config.teams
-            * config.replacement_buffer_fraction
+            config.replacement_buffer * config.teams * config.replacement_buffer_fraction
         )
         ranks[position] = max(1, starters + buffer)
     return ranks
 
 
 def calculate_replacement_levels(
-    projections: pd.DataFrame, config: LeagueConfig, value_column: str = "season_points_q50"
+    projections: pd.DataFrame,
+    config: LeagueConfig,
+    value_column: str = "season_points_q50",
 ) -> dict[str, float]:
     levels: dict[str, float] = {}
     ranks = replacement_ranks(projections, config, value_column=value_column)
@@ -100,8 +103,55 @@ def calculate_replacement_levels(
     return levels
 
 
+def _percentile(series: pd.Series) -> pd.Series:
+    if len(series) <= 1:
+        return pd.Series(0.5, index=series.index, dtype=float)
+    return series.rank(method="average", pct=True).fillna(0.5)
+
+
+def _add_position_curve_features(data: pd.DataFrame) -> pd.DataFrame:
+    """Describe the actual league-specific value curve instead of a position percentile alone."""
+    out = data.copy()
+    out["projection_position_rank"] = 0
+    out["players_above_replacement"] = 0
+    out["replacement_slope"] = 0.0
+    out["next_player_vorp_drop"] = 0.0
+
+    for _, group in out.groupby("position", sort=False):
+        ordered = group.sort_values("valuation_points_q50", ascending=False)
+        ranks = np.arange(1, len(ordered) + 1, dtype=int)
+        out.loc[ordered.index, "projection_position_rank"] = ranks
+        positive = int((ordered["vorp"] > 0).sum())
+        out.loc[ordered.index, "players_above_replacement"] = positive
+
+        replacement_rank = max(1, int(ordered["replacement_rank"].iloc[0]))
+        distance = np.maximum(replacement_rank - ranks, 1)
+        slope = ordered["vorp"].clip(lower=0.0).to_numpy(float) / distance
+        out.loc[ordered.index, "replacement_slope"] = slope
+
+        values = ordered["vorp"].to_numpy(float)
+        next_values = np.roll(values, -1)
+        if len(values):
+            next_values[-1] = values[-1]
+        out.loc[ordered.index, "next_player_vorp_drop"] = np.maximum(0.0, values - next_values)
+
+    out["projection_position_rank"] = out["projection_position_rank"].astype(int)
+    out["players_above_replacement"] = out["players_above_replacement"].astype(int)
+    slope_pct = _percentile(out["replacement_slope"].clip(lower=0.0))
+    supply = out["players_above_replacement"].astype(float)
+    inverse_supply_pct = 1.0 - _percentile(supply)
+    out["dynamic_scarcity_score"] = (0.70 * slope_pct + 0.30 * inverse_supply_pct).clip(0, 1)
+    return out
+
+
 def value_players(projections: pd.DataFrame, config: LeagueConfig) -> pd.DataFrame:
-    """Produce league-specific value, floor, upside, scarcity and risk scores."""
+    """Produce league-specific value, floor, upside, scarcity and risk scores.
+
+    League scoring is applied *before* replacement levels are calculated whenever component
+    projections are available. Generic season-points inputs remain supported, but the output
+    marks those rows as ``generic_points_fallback`` so downstream product surfaces and model
+    gates can distinguish structural league awareness from scoring-exact valuation.
+    """
     data = projections.copy()
     required = {
         "player_id",
@@ -116,16 +166,21 @@ def value_players(projections: pd.DataFrame, config: LeagueConfig) -> pd.DataFra
         raise ValueError(f"Valuation projections missing: {sorted(missing)}")
 
     data["position"] = data["position"].astype(str).str.upper()
-    replacements = calculate_replacement_levels(data, config)
-    ranks = replacement_ranks(data, config)
-    starter_counts = starter_allocation(data, config)
+    data = prepare_league_scoring_quantiles(data, config)
+    q10_col = "valuation_points_q10"
+    q50_col = "valuation_points_q50"
+    q90_col = "valuation_points_q90"
+
+    replacements = calculate_replacement_levels(data, config, value_column=q50_col)
+    ranks = replacement_ranks(data, config, value_column=q50_col)
+    starter_counts = starter_allocation(data, config, value_column=q50_col)
     data["replacement_points"] = data["position"].map(replacements).fillna(0.0)
     data["replacement_rank"] = data["position"].map(ranks).fillna(1).astype(int)
     data["league_starter_demand"] = data["position"].map(starter_counts).fillna(0).astype(int)
-    data["vorp"] = data["season_points_q50"] - data["replacement_points"]
-    data["floor_vorp"] = data["season_points_q10"] - data["replacement_points"]
-    data["upside_vorp"] = data["season_points_q90"] - data["replacement_points"]
-    data["uncertainty"] = data["season_points_q90"] - data["season_points_q10"]
+    data["vorp"] = data[q50_col] - data["replacement_points"]
+    data["floor_vorp"] = data[q10_col] - data["replacement_points"]
+    data["upside_vorp"] = data[q90_col] - data["replacement_points"]
+    data["uncertainty"] = data[q90_col] - data[q10_col]
     data["availability_probability"] = (
         pd.to_numeric(
             data["availability_probability"]
@@ -153,7 +208,9 @@ def value_players(projections: pd.DataFrame, config: LeagueConfig) -> pd.DataFra
         errors="coerce",
     ).fillna(0.0)
     data["schedule_score"] = pd.to_numeric(
-        data["schedule_score"] if "schedule_score" in data else pd.Series(0.0, index=data.index),
+        data["schedule_score"]
+        if "schedule_score" in data
+        else pd.Series(0.0, index=data.index),
         errors="coerce",
     ).fillna(0.0)
 
@@ -173,11 +230,14 @@ def value_players(projections: pd.DataFrame, config: LeagueConfig) -> pd.DataFra
         + median_bonus
     )
 
-    # Scarcity is now based on distance above the league-specific replacement line rather
-    # than a within-position percentile that ignores roster depth.
+    # Backwards-compatible relative VORP remains available for existing product surfaces.
+    # ``dynamic_scarcity_score`` below is the better representation of the positional curve.
     positive_vorp = data["vorp"].clip(lower=0.0)
     scale = positive_vorp.groupby(data["position"]).transform("max").replace(0.0, np.nan)
-    data["scarcity_score"] = (positive_vorp / scale).fillna(0.0).clip(0, 1)
+    data["relative_vorp_score"] = (positive_vorp / scale).fillna(0.0).clip(0, 1)
+    data["scarcity_score"] = data["relative_vorp_score"]
+    data = _add_position_curve_features(data)
+
     data["trade_value"] = 100 * data["decision_value"].rank(pct=True)
     data["draft_value"] = data["decision_value"]
     return data.sort_values("decision_value", ascending=False).reset_index(drop=True)
