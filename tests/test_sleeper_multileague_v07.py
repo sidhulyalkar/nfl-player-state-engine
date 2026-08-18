@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 
+from player_state_engine.fantasy.draft import draft_state_from_snapshot
 from player_state_engine.integrations.sleeper import SleeperImporter
 
 
@@ -91,3 +92,7 @@ def test_live_draft_pick_keeps_platform_id_and_uses_canonical_model_id() -> None
     assert pick["player_id"] == "g2"
     assert pick["player_name"] == "Player Two"
     assert pick["position"] == "WR"
+
+    state = draft_state_from_snapshot(snapshot, draft_slot=1, total_rounds=10)
+    assert state.drafted_player_ids == ("g2",)
+    assert "g2" in state.roster_player_ids
