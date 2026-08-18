@@ -175,6 +175,9 @@ def main() -> None:
         drive_prior_strength=args.drive_prior_strength,
         drive_half_life_weeks=args.drive_half_life_weeks,
     )
+    benchmark.diagnostics["pace_negative_control"] = (
+        "seconds_to_next_play permuted within team-season"
+    )
     decision = v013_drive_volume_promotion_gate(benchmark)
     recommendation = recommend_v014_development(benchmark)
 
