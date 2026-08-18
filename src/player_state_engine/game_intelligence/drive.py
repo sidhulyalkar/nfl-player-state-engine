@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 _DRIVE_CONTEXT_COLUMNS = ("score_state", "late_game", "play_family", "red_zone")
+_PACE_TARGET = "seconds_to_next_play"
 
 
 def _chronology(frame: pd.DataFrame) -> pd.Series:
@@ -18,9 +19,7 @@ def _weighted_mean(values: np.ndarray, weights: np.ndarray) -> float:
     valid = np.isfinite(values) & np.isfinite(weights) & (weights > 0)
     if not valid.any():
         return float("nan")
-    values = values[valid].astype(float)
-    weights = weights[valid].astype(float)
-    return float(np.average(values, weights=weights))
+    return float(np.average(values[valid].astype(float), weights=weights[valid].astype(float)))
 
 
 def _weighted_choice(
@@ -47,6 +46,41 @@ def _score_state(value: float) -> str:
     return "neutral"
 
 
+def _derive_drive_id(frame: pd.DataFrame) -> pd.Series:
+    data = frame.sort_values(["season", "week", "game_id", "play_id"], kind="mergesort")
+    fallback = (
+        data.groupby("game_id", sort=False)["posteam"]
+        .transform(lambda values: values.ne(values.shift()).cumsum())
+        .astype(float)
+    )
+    if "drive" in data:
+        drive = pd.to_numeric(data["drive"], errors="coerce")
+        if drive.notna().any():
+            return drive.fillna(fallback).reindex(frame.index)
+    return fallback.reindex(frame.index)
+
+
+def _aligned_pace_target(frame: pd.DataFrame) -> pd.Series:
+    """Return game-clock runoff after the current play, aligned within drive/offense."""
+    if _PACE_TARGET in frame:
+        return pd.to_numeric(frame[_PACE_TARGET], errors="coerce")
+    required = {"game_id", "posteam", "game_seconds_remaining", "play_id"}
+    missing = required - set(frame)
+    if missing:
+        raise ValueError(f"Aligned pace target missing columns: {sorted(missing)}")
+    data = frame.copy()
+    data["_drive_id"] = _derive_drive_id(data)
+    data = data.sort_values(
+        ["season", "week", "game_id", "_drive_id", "play_id"], kind="mergesort"
+    )
+    grouped = data.groupby(
+        ["game_id", "_drive_id", "posteam"], sort=False
+    )["game_seconds_remaining"]
+    current = pd.to_numeric(data["game_seconds_remaining"], errors="coerce")
+    target = (current - pd.to_numeric(grouped.shift(-1), errors="coerce")).clip(0, 90)
+    return target.reindex(frame.index)
+
+
 def _with_drive_context(frame: pd.DataFrame) -> pd.DataFrame:
     data = frame.copy()
     score = pd.to_numeric(data.get("score_differential"), errors="coerce").fillna(0.0)
@@ -62,26 +96,8 @@ def _with_drive_context(frame: pd.DataFrame) -> pd.DataFrame:
     if "play_family" not in data:
         data["play_family"] = "UNKNOWN"
     data["play_family"] = data["play_family"].astype(str)
+    data[_PACE_TARGET] = _aligned_pace_target(data)
     return data
-
-
-def _derive_drive_id(frame: pd.DataFrame) -> pd.Series:
-    data = frame.sort_values(["season", "week", "game_id", "play_id"], kind="mergesort")
-    if "drive" in data:
-        drive = pd.to_numeric(data["drive"], errors="coerce")
-        if drive.notna().any():
-            fallback = (
-                data.groupby("game_id", sort=False)["posteam"]
-                .transform(lambda values: values.ne(values.shift()).cumsum())
-                .astype(float)
-            )
-            return drive.fillna(fallback).reindex(frame.index)
-    fallback = (
-        data.groupby("game_id", sort=False)["posteam"]
-        .transform(lambda values: values.ne(values.shift()).cumsum())
-        .astype(float)
-    )
-    return fallback.reindex(frame.index)
 
 
 def extract_drive_frame(play_frame: pd.DataFrame) -> pd.DataFrame:
@@ -113,12 +129,10 @@ def extract_drive_frame(play_frame: pd.DataFrame) -> pd.DataFrame:
         if group.empty:
             continue
         first = group.iloc[0]
-        start_clock = float(
-            pd.to_numeric(group["game_seconds_remaining"], errors="coerce").max()
-        )
-        end_clock = float(
-            pd.to_numeric(group["game_seconds_remaining"], errors="coerce").min()
-        )
+        clocks = pd.to_numeric(group["game_seconds_remaining"], errors="coerce")
+        start_clock = float(clocks.max())
+        end_clock = float(clocks.min())
+        start_yardline = pd.to_numeric(first["yardline_100"], errors="coerce")
         rows.append(
             {
                 "season": int(season),
@@ -127,9 +141,7 @@ def extract_drive_frame(play_frame: pd.DataFrame) -> pd.DataFrame:
                 "drive_id": str(drive_id),
                 "team": str(team),
                 "opponent": str(first["defteam"]),
-                "start_yardline_100": float(
-                    pd.to_numeric(first["yardline_100"], errors="coerce")
-                ),
+                "start_yardline_100": float(start_yardline),
                 "plays": float(len(group)),
                 "drive_seconds_proxy": max(0.0, start_clock - end_clock),
             }
@@ -138,19 +150,19 @@ def extract_drive_frame(play_frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def observed_drive_volume(play_frame: pd.DataFrame) -> pd.DataFrame:
-    """Observed per-team game volume diagnostics on the same scrimmage-play basis as simulation."""
-    drives = extract_drive_frame(play_frame)
+    """Observed per-team game volume on the same scrimmage-play basis as simulation."""
+    data = _with_drive_context(play_frame)
+    drives = extract_drive_frame(data)
+    columns = [
+        "game_id",
+        "team",
+        "drives",
+        "plays_per_drive",
+        "seconds_per_play",
+        "mean_start_yardline_100",
+    ]
     if drives.empty:
-        return pd.DataFrame(
-            columns=[
-                "game_id",
-                "team",
-                "drives",
-                "plays_per_drive",
-                "seconds_per_play",
-                "mean_start_yardline_100",
-            ]
-        )
+        return pd.DataFrame(columns=columns)
     drive_summary = (
         drives.groupby(["game_id", "team"], dropna=False)
         .agg(
@@ -163,13 +175,11 @@ def observed_drive_volume(play_frame: pd.DataFrame) -> pd.DataFrame:
     drive_summary["plays_per_drive"] = (
         drive_summary["plays"] / drive_summary["drives"].clip(lower=1)
     )
-    pace = play_frame[["game_id", "posteam", "seconds_between_plays"]].copy()
-    pace["seconds_between_plays"] = pd.to_numeric(
-        pace["seconds_between_plays"], errors="coerce"
-    )
-    pace = pace.loc[pace["seconds_between_plays"].between(1.0, 90.0)]
+    pace = data[["game_id", "posteam", _PACE_TARGET]].copy()
+    pace[_PACE_TARGET] = pd.to_numeric(pace[_PACE_TARGET], errors="coerce")
+    pace = pace.loc[pace[_PACE_TARGET].between(1.0, 90.0)]
     pace_summary = (
-        pace.groupby(["game_id", "posteam"], dropna=False)["seconds_between_plays"]
+        pace.groupby(["game_id", "posteam"], dropna=False)[_PACE_TARGET]
         .mean()
         .rename("seconds_per_play")
         .reset_index()
@@ -180,16 +190,7 @@ def observed_drive_volume(play_frame: pd.DataFrame) -> pd.DataFrame:
         on=["game_id", "team"],
         how="left",
         validate="one_to_one",
-    )[
-        [
-            "game_id",
-            "team",
-            "drives",
-            "plays_per_drive",
-            "seconds_per_play",
-            "mean_start_yardline_100",
-        ]
-    ]
+    )[columns]
 
 
 def permute_pace_targets_within_team_season(
@@ -197,18 +198,16 @@ def permute_pace_targets_within_team_season(
     *,
     seed: int = 42,
 ) -> pd.DataFrame:
-    """Negative control that preserves each team-season pace distribution but breaks state mapping."""
-    data = play_frame.copy()
-    if "seconds_between_plays" not in data:
-        return data
+    """Preserve each team-season pace distribution while breaking its state mapping."""
+    data = _with_drive_context(play_frame)
     rng = np.random.default_rng(seed)
-    result = data["seconds_between_plays"].copy()
+    result = data[_PACE_TARGET].copy()
     for _, index in data.groupby(["season", "posteam"], sort=False).groups.items():
-        positions = np.asarray(list(index))
-        values = data.loc[positions, "seconds_between_plays"].to_numpy(copy=True)
+        labels = list(index)
+        values = data.loc[labels, _PACE_TARGET].to_numpy(copy=True)
         rng.shuffle(values)
-        result.loc[positions] = values
-    data["seconds_between_plays"] = result
+        result.loc[labels] = values
+    data[_PACE_TARGET] = result
     return data
 
 
@@ -216,9 +215,9 @@ def permute_pace_targets_within_team_season(
 class DriveVolumeModel:
     """Hierarchical point-in-time pace and drive-start sampler.
 
-    The model intentionally owns only two mechanisms that the v0.12 outcome sampler mixed
-    with play efficiency: clock runoff and starting field position. It can therefore be
-    enabled or disabled independently in frozen replay.
+    The model owns only mechanisms that v0.12 mixed into broader outcome/state logic:
+    forward-aligned clock runoff and starting field position. Sparse pace context shrinks
+    toward the offense's recent base distribution.
     """
 
     prior_strength: float = 24.0
@@ -239,7 +238,6 @@ class DriveVolumeModel:
             "play_id",
             "posteam",
             "defteam",
-            "seconds_between_plays",
             "play_family",
             "game_seconds_remaining",
             "score_differential",
@@ -255,16 +253,14 @@ class DriveVolumeModel:
                 "week",
                 "posteam",
                 "defteam",
-                "seconds_between_plays",
+                _PACE_TARGET,
                 *self.context_columns,
             ]
         ].copy()
-        pace["seconds_between_plays"] = pd.to_numeric(
-            pace["seconds_between_plays"], errors="coerce"
-        )
-        pace = pace.loc[pace["seconds_between_plays"].between(1.0, 90.0)].copy()
+        pace[_PACE_TARGET] = pd.to_numeric(pace[_PACE_TARGET], errors="coerce")
+        pace = pace.loc[pace[_PACE_TARGET].between(1.0, 90.0)].copy()
         if len(pace) < 50:
-            raise ValueError("DriveVolumeModel requires at least 50 valid pace observations")
+            raise ValueError("DriveVolumeModel requires at least 50 aligned pace observations")
 
         latest = int(_chronology(pace).max())
         age = (latest - _chronology(pace)).clip(lower=0)
@@ -279,8 +275,7 @@ class DriveVolumeModel:
         starts = extract_drive_frame(data)
         if starts.empty:
             raise ValueError("DriveVolumeModel requires observed drive starts")
-        start_latest = int(_chronology(starts).max())
-        start_age = (start_latest - _chronology(starts)).clip(lower=0)
+        start_age = (int(_chronology(starts).max()) - _chronology(starts)).clip(lower=0)
         starts["recency_weight"] = np.power(
             0.5,
             start_age / max(float(self.half_life_weeks), 0.25),
@@ -320,25 +315,21 @@ class DriveVolumeModel:
             return base, pd.DataFrame(), 0.0
 
         state_dict = state.to_dict() if isinstance(state, pd.Series) else dict(state)
-        score_value = float(state_dict.get("score_differential", 0.0))
-        clock = float(state_dict.get("game_seconds_remaining", 3600.0))
-        yardline = float(state_dict.get("yardline_100", 75.0))
         context = {
-            "score_state": _score_state(score_value),
-            "late_game": int(clock <= 900),
+            "score_state": _score_state(float(state_dict.get("score_differential", 0.0))),
+            "late_game": int(float(state_dict.get("game_seconds_remaining", 3600.0)) <= 900),
             "play_family": str(play_family),
-            "red_zone": int(yardline <= 20),
+            "red_zone": int(float(state_dict.get("yardline_100", 75.0)) <= 20),
         }
         contextual = base
         for column in self.context_columns:
-            if column not in contextual or column not in context:
-                continue
-            contextual = contextual.loc[
-                contextual[column].astype(str).eq(str(context[column]))
-            ]
+            if column in contextual and column in context:
+                contextual = contextual.loc[
+                    contextual[column].astype(str).eq(str(context[column]))
+                ]
         evidence = (
             float(
-                pd.to_numeric(contextual.get("recency_weight"), errors="coerce")
+                pd.to_numeric(contextual["recency_weight"], errors="coerce")
                 .fillna(0.0)
                 .sum()
             )
@@ -347,6 +338,12 @@ class DriveVolumeModel:
         )
         alpha = evidence / (evidence + max(float(self.prior_strength), 1e-6))
         return base, contextual, float(alpha)
+
+    @staticmethod
+    def _pace_arrays(frame: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+        values = pd.to_numeric(frame[_PACE_TARGET], errors="coerce").to_numpy(dtype=float)
+        weights = pd.to_numeric(frame["recency_weight"], errors="coerce").to_numpy(dtype=float)
+        return values, weights
 
     def expected_seconds(
         self,
@@ -362,20 +359,12 @@ class DriveVolumeModel:
             play_family=play_family,
             use_context=use_context,
         )
-        base_mean = _weighted_mean(
-            pd.to_numeric(base["seconds_between_plays"], errors="coerce").to_numpy(dtype=float),
-            pd.to_numeric(base["recency_weight"], errors="coerce").to_numpy(dtype=float),
-        )
+        base_mean = _weighted_mean(*self._pace_arrays(base))
         if not np.isfinite(base_mean):
             base_mean = 28.0
         if contextual.empty or alpha <= 0:
             return float(np.clip(base_mean, 8.0, 45.0))
-        context_mean = _weighted_mean(
-            pd.to_numeric(
-                contextual["seconds_between_plays"], errors="coerce"
-            ).to_numpy(dtype=float),
-            pd.to_numeric(contextual["recency_weight"], errors="coerce").to_numpy(dtype=float),
-        )
+        context_mean = _weighted_mean(*self._pace_arrays(contextual))
         if not np.isfinite(context_mean):
             return float(np.clip(base_mean, 8.0, 45.0))
         return float(np.clip((1.0 - alpha) * base_mean + alpha * context_mean, 8.0, 45.0))
@@ -398,8 +387,7 @@ class DriveVolumeModel:
         )
         pool = contextual if not contextual.empty and rng.random() < alpha else base
         value = _weighted_choice(
-            pd.to_numeric(pool["seconds_between_plays"], errors="coerce").to_numpy(dtype=float),
-            pd.to_numeric(pool["recency_weight"], errors="coerce").to_numpy(dtype=float),
+            *self._pace_arrays(pool),
             rng,
             default=float(fallback_seconds),
         )
@@ -443,7 +431,7 @@ class DriveVolumeModel:
         data = _with_drive_context(play_frame)
         rows: list[dict[str, object]] = []
         for _, row in data.iterrows():
-            actual = pd.to_numeric(row.get("seconds_between_plays"), errors="coerce")
+            actual = pd.to_numeric(row.get(_PACE_TARGET), errors="coerce")
             if pd.isna(actual) or not 1.0 <= float(actual) <= 90.0:
                 continue
             state = {
@@ -486,15 +474,15 @@ def evaluate_pace_event_scores(scores: pd.DataFrame) -> dict[str, float]:
     valid = actual.notna() & candidate.notna() & baseline.notna()
     if not valid.any():
         raise ValueError("No valid pace score rows")
-    actual = actual.loc[valid].to_numpy(dtype=float)
-    candidate = candidate.loc[valid].to_numpy(dtype=float)
-    baseline = baseline.loc[valid].to_numpy(dtype=float)
+    actual_values = actual.loc[valid].to_numpy(dtype=float)
+    candidate_values = candidate.loc[valid].to_numpy(dtype=float)
+    baseline_values = baseline.loc[valid].to_numpy(dtype=float)
     return {
-        "pace_rows": float(len(actual)),
-        "state_pace_mae": float(np.mean(np.abs(actual - candidate))),
-        "team_base_pace_mae": float(np.mean(np.abs(actual - baseline))),
-        "state_pace_bias": float(np.mean(candidate - actual)),
-        "team_base_pace_bias": float(np.mean(baseline - actual)),
+        "pace_rows": float(len(actual_values)),
+        "state_pace_mae": float(np.mean(np.abs(actual_values - candidate_values))),
+        "team_base_pace_mae": float(np.mean(np.abs(actual_values - baseline_values))),
+        "state_pace_bias": float(np.mean(candidate_values - actual_values)),
+        "team_base_pace_bias": float(np.mean(baseline_values - actual_values)),
     }
 
 
@@ -502,16 +490,7 @@ def evaluate_drive_volume_draws(
     team_draws: pd.DataFrame,
     observed: pd.DataFrame,
 ) -> dict[str, float]:
-    required_draws = {
-        "game_id",
-        "simulation",
-        "team",
-        "drives",
-        "plays_per_drive",
-        "seconds_per_play",
-        "mean_start_yardline_100",
-    }
-    required_observed = {
+    required = {
         "game_id",
         "team",
         "drives",
@@ -519,8 +498,8 @@ def evaluate_drive_volume_draws(
         "seconds_per_play",
         "mean_start_yardline_100",
     }
-    missing_draws = required_draws - set(team_draws)
-    missing_observed = required_observed - set(observed)
+    missing_draws = required | {"simulation"} - set(team_draws)
+    missing_observed = required - set(observed)
     if missing_draws:
         raise ValueError(f"Drive-volume draws missing: {sorted(missing_draws)}")
     if missing_observed:
@@ -543,42 +522,17 @@ def evaluate_drive_volume_draws(
     )
     if joined.empty:
         raise ValueError("No overlapping drive-volume rows")
+
+    def mae(column: str, *, nan_safe: bool = False) -> float:
+        actual = pd.to_numeric(joined[f"{column}_actual"], errors="coerce")
+        predicted = pd.to_numeric(joined[f"{column}_pred"], errors="coerce")
+        values = np.abs(actual - predicted).to_numpy(dtype=float)
+        return float(np.nanmean(values) if nan_safe else np.mean(values))
+
     return {
         "drive_team_rows": float(len(joined)),
-        "team_drives_mae": float(
-            np.mean(
-                np.abs(
-                    pd.to_numeric(joined["drives_actual"], errors="coerce")
-                    - pd.to_numeric(joined["drives_pred"], errors="coerce")
-                )
-            )
-        ),
-        "team_plays_per_drive_mae": float(
-            np.mean(
-                np.abs(
-                    pd.to_numeric(joined["plays_per_drive_actual"], errors="coerce")
-                    - pd.to_numeric(joined["plays_per_drive_pred"], errors="coerce")
-                )
-            )
-        ),
-        "team_seconds_per_play_mae": float(
-            np.nanmean(
-                np.abs(
-                    pd.to_numeric(joined["seconds_per_play_actual"], errors="coerce")
-                    - pd.to_numeric(joined["seconds_per_play_pred"], errors="coerce")
-                )
-            )
-        ),
-        "team_start_yardline_mae": float(
-            np.mean(
-                np.abs(
-                    pd.to_numeric(
-                        joined["mean_start_yardline_100_actual"], errors="coerce"
-                    )
-                    - pd.to_numeric(
-                        joined["mean_start_yardline_100_pred"], errors="coerce"
-                    )
-                )
-            )
-        ),
+        "team_drives_mae": mae("drives"),
+        "team_plays_per_drive_mae": mae("plays_per_drive"),
+        "team_seconds_per_play_mae": mae("seconds_per_play", nan_safe=True),
+        "team_start_yardline_mae": mae("mean_start_yardline_100"),
     }
