@@ -71,24 +71,41 @@ def evaluate_player_opportunity(
     predicted: pd.DataFrame,
     observed: pd.DataFrame,
 ) -> dict[str, float]:
-    """Evaluate predicted carry/target opportunity before conversion noise."""
+    """Evaluate carry/target opportunity without dropping missed or spurious players.
+
+    Earlier replay used an inner join. That understated error whenever the simulator completely
+    missed a player who received real work, or invented opportunity for a player absent from the
+    observed box score. v0.12 evaluates the union and treats the missing side as zero.
+    """
     required = {"game_id", "player_id", "carries", "targets"}
     if required - set(predicted):
         raise ValueError(f"Predicted player opportunity missing: {sorted(required - set(predicted))}")
     if required - set(observed):
         raise ValueError(f"Observed player opportunity missing: {sorted(required - set(observed))}")
-    joined = observed.merge(
-        predicted,
+    predicted_rows = predicted[["game_id", "player_id", "carries", "targets"]].copy()
+    observed_rows = observed[["game_id", "player_id", "carries", "targets"]].copy()
+    predicted_rows["player_id"] = predicted_rows["player_id"].astype(str)
+    observed_rows["player_id"] = observed_rows["player_id"].astype(str)
+    joined = observed_rows.merge(
+        predicted_rows,
         on=["game_id", "player_id"],
         suffixes=("_actual", "_pred"),
-        how="inner",
+        how="outer",
+        indicator=True,
     )
     if joined.empty:
-        raise ValueError("No overlapping player opportunity rows")
+        raise ValueError("No player opportunity rows")
+    for column in ("carries_actual", "targets_actual", "carries_pred", "targets_pred"):
+        joined[column] = pd.to_numeric(joined[column], errors="coerce").fillna(0.0)
     carry_error = np.abs(joined["carries_actual"] - joined["carries_pred"])
     target_error = np.abs(joined["targets_actual"] - joined["targets_pred"])
+    observed_count = float(len(observed_rows))
+    covered_observed = float(joined["_merge"].eq("both").sum())
     return {
         "player_rows": float(len(joined)),
+        "predicted_player_rows": float(len(predicted_rows)),
+        "observed_player_rows": observed_count,
+        "observed_player_coverage": covered_observed / max(observed_count, 1.0),
         "player_carries_mae": float(carry_error.mean()),
         "player_targets_mae": float(target_error.mean()),
         "player_opportunity_mae": float((carry_error + target_error).mean() / 2.0),
