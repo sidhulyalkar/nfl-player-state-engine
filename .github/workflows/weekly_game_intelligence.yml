@@ -49,15 +49,20 @@ jobs:
         shell: bash
         run: |
           WEEK_ARGS=()
+          PLAYER_ARGS=()
           if [ -n "${{ github.event.inputs.completed_week }}" ]; then
             WEEK_ARGS=(--completed-week "${{ github.event.inputs.completed_week }}")
+          fi
+          if [ -f data/raw/game_intelligence/players.parquet ]; then
+            PLAYER_ARGS=(--players data/raw/game_intelligence/players.parquet)
           fi
           python scripts/weekly_game_intelligence_refresh.py \
             --pbp data/raw/game_intelligence/play_by_play.parquet \
             --schedules data/raw/game_intelligence/schedules.parquet \
-            --players data/raw/game_intelligence/players.parquet \
+            --player-actuals data/raw/game_intelligence/player_stats.parquet \
             --season "${{ steps.season.outputs.value }}" \
             --simulations-per-game 100 \
+            "${PLAYER_ARGS[@]}" \
             "${WEEK_ARGS[@]}"
       - name: Upload research evidence
         uses: actions/upload-artifact@v4
