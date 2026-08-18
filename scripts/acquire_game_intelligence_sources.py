@@ -36,6 +36,7 @@ def main() -> None:
     required = {
         "play_by_play": lambda: nfl.load_pbp(seasons),
         "schedules": lambda: nfl.load_schedules(seasons),
+        "player_stats": lambda: nfl.load_player_stats(seasons, summary_level="week"),
     }
     fail_soft = {
         "players": lambda: nfl.load_players(),
@@ -71,6 +72,7 @@ def main() -> None:
         "failures": failures,
         "include_retrospective": bool(args.include_retrospective),
         "evidence_catalog": game_evidence_catalog(),
+        "completed_outcomes": ["play_by_play", "schedules", "player_stats"],
         "warning": (
             "Retrospective participation data must never be injected into a historical weekly "
             "prediction unless it was genuinely available before that prediction cutoff."
