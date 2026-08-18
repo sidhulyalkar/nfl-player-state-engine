@@ -48,11 +48,25 @@ def _timestamp(value: object) -> datetime:
     return parsed.to_pydatetime()
 
 
+def _canonical_player_id(row: pd.Series) -> tuple[str | None, str | None]:
+    """Prefer model-facing GSIS/nflverse IDs and record any fallback namespace."""
+    for column, namespace in (
+        ("gsis_id", "gsis"),
+        ("nflverse_id", "nflverse"),
+        ("player_id", "generic"),
+        ("pfr_player_id", "pfr"),
+    ):
+        value = _first(row, (column,))
+        if value is not None:
+            return str(value), namespace
+    return None, None
+
+
 def injuries_to_role_events(frame: pd.DataFrame) -> list[StructuredRoleEvent]:
     """Turn nflverse injury/practice rows into typed availability evidence."""
     events: list[StructuredRoleEvent] = []
     for _, row in frame.iterrows():
-        player_id = _first(row, ("gsis_id", "player_id", "nflverse_id"))
+        player_id, namespace = _canonical_player_id(row)
         if player_id is None:
             continue
         occurred = _timestamp(
@@ -69,10 +83,11 @@ def injuries_to_role_events(frame: pd.DataFrame) -> list[StructuredRoleEvent]:
             for key in ("season", "week", "team", "full_name", "primary_injury")
             if key in row and pd.notna(row[key])
         }
+        metadata["player_id_namespace"] = namespace
         if "out" in status or "inactive" in status:
             events.append(
                 StructuredRoleEvent(
-                    player_id=str(player_id),
+                    player_id=player_id,
                     event_type="injury_out",
                     latent_state="availability",
                     direction=-1.0,
@@ -86,7 +101,7 @@ def injuries_to_role_events(frame: pd.DataFrame) -> list[StructuredRoleEvent]:
         elif "question" in status or "doubt" in status:
             events.append(
                 StructuredRoleEvent(
-                    player_id=str(player_id),
+                    player_id=player_id,
                     event_type="injury_questionable",
                     latent_state="availability",
                     direction=-0.45,
@@ -107,7 +122,7 @@ def injuries_to_role_events(frame: pd.DataFrame) -> list[StructuredRoleEvent]:
             continue
         events.append(
             StructuredRoleEvent(
-                player_id=str(player_id),
+                player_id=player_id,
                 event_type=event_type,
                 latent_state="availability",
                 direction=direction,
@@ -125,7 +140,7 @@ def depth_charts_to_role_events(frame: pd.DataFrame) -> list[StructuredRoleEvent
     """Translate current depth-chart order into role-security evidence."""
     events: list[StructuredRoleEvent] = []
     for _, row in frame.iterrows():
-        player_id = _first(row, ("gsis_id", "player_id", "nflverse_id"))
+        player_id, namespace = _canonical_player_id(row)
         if player_id is None:
             continue
         raw_rank = _first(row, ("depth_team", "depth_position", "depth_rank", "order"))
@@ -133,14 +148,25 @@ def depth_charts_to_role_events(frame: pd.DataFrame) -> list[StructuredRoleEvent
             rank = int(float(raw_rank))
         except (TypeError, ValueError):
             text = str(raw_rank or "").lower()
-            rank = 1 if text in {"starter", "first", "1st"} else 2 if text in {"backup", "second", "2nd"} else 0
+            if text in {"starter", "first", "1st"}:
+                rank = 1
+            elif text in {"backup", "second", "2nd"}:
+                rank = 2
+            else:
+                rank = 0
         if rank not in {1, 2}:
             continue
         occurred = _timestamp(_first(row, ("dt", "date", "updated_at", "season")))
         starter = rank == 1
+        metadata = {
+            key: row[key]
+            for key in ("club_code", "team", "position", "full_name", "formation")
+            if key in row and pd.notna(row[key])
+        }
+        metadata["player_id_namespace"] = namespace
         events.append(
             StructuredRoleEvent(
-                player_id=str(player_id),
+                player_id=player_id,
                 event_type="depth_starter" if starter else "depth_backup",
                 latent_state="starter_security",
                 direction=0.75 if starter else -0.25,
@@ -150,21 +176,17 @@ def depth_charts_to_role_events(frame: pd.DataFrame) -> list[StructuredRoleEvent
                 evidence_class="REPORTED",
                 source_reliability=0.85,
                 half_life_days=10.0,
-                metadata={
-                    key: row[key]
-                    for key in ("club_code", "team", "position", "full_name", "formation")
-                    if key in row and pd.notna(row[key])
-                },
+                metadata=metadata,
             )
         )
     return events
 
 
 def snap_counts_to_role_events(frame: pd.DataFrame) -> list[StructuredRoleEvent]:
-    """Use observed offensive snap share as direct role evidence, never as a news sentiment proxy."""
+    """Use observed offensive snap share as direct role evidence, never as sentiment."""
     events: list[StructuredRoleEvent] = []
     for _, row in frame.iterrows():
-        player_id = _first(row, ("pfr_player_id", "gsis_id", "player_id", "nflverse_id"))
+        player_id, namespace = _canonical_player_id(row)
         if player_id is None:
             continue
         share = _first(
@@ -193,7 +215,7 @@ def snap_counts_to_role_events(frame: pd.DataFrame) -> list[StructuredRoleEvent]
         occurred = _timestamp(_first(row, ("game_date", "date", "week", "season")))
         events.append(
             StructuredRoleEvent(
-                player_id=str(player_id),
+                player_id=player_id,
                 event_type="snap_share",
                 latent_state="snap_share",
                 direction=2.0 * numeric - 1.0,
@@ -203,7 +225,10 @@ def snap_counts_to_role_events(frame: pd.DataFrame) -> list[StructuredRoleEvent]
                 evidence_class="DIRECT_OBSERVATION",
                 source_reliability=0.98,
                 half_life_days=14.0,
-                metadata={"snap_share": numeric},
+                metadata={
+                    "snap_share": numeric,
+                    "player_id_namespace": namespace,
+                },
             )
         )
     return events
