@@ -45,7 +45,8 @@ def test_play_by_play_simulation_is_seeded_and_exactly_rescored() -> None:
         home_spread=-3.0,
         game_total=47.5,
     )
-    config = SimulationConfig(simulations=25, max_plays=100, seed=19)
+    # Unit tests need diverse state transitions, not production Monte Carlo volume.
+    config = SimulationConfig(simulations=6, max_plays=60, seed=19)
     league = LeagueConfig(scoring="ppr")
     first = simulate_matchup(
         matchup,
