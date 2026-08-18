@@ -7,12 +7,14 @@ from fastapi import FastAPI
 from player_state_engine.api.app import create_app as create_base_app
 from player_state_engine.api.draft_planner_routes import install_draft_planner_routes
 from player_state_engine.api.draft_routes import install_draft_routes
+from player_state_engine.api.game_intelligence_routes import install_game_intelligence_routes
 from player_state_engine.api.ranking_routes import install_ranking_routes
 
 
 def create_app(**kwargs: Any) -> FastAPI:
-    """Create the product API with live draft and ranking-calibration surfaces installed."""
-    base_kwargs = {key: value for key, value in kwargs.items() if key != "ranking_root"}
+    """Create the operational Product API plus guarded research challenger surfaces."""
+    operational_only = {"ranking_root", "game_intelligence_root", "game_intelligence_registry"}
+    base_kwargs = {key: value for key, value in kwargs.items() if key not in operational_only}
     app = create_base_app(**base_kwargs)
     draft_service = install_draft_routes(
         app,
@@ -26,11 +28,15 @@ def create_app(**kwargs: Any) -> FastAPI:
         projections_path=kwargs.get("projections_path"),
         ranking_root=kwargs.get("ranking_root"),
     )
-    app.version = "0.9.0"
+    install_game_intelligence_routes(
+        app,
+        artifact_root=kwargs.get("game_intelligence_root"),
+        registry_path=kwargs.get("game_intelligence_registry"),
+    )
+    app.version = "0.10.0"
     app.description = (
-        f"{app.description} Live Draft War Room, empirical market timing, roster "
-        "counterfactuals, league-scoring provenance, external ranking calibration, "
-        "and research two-turn lookahead."
+        f"{app.description} Live Draft War Room, ranking calibration, and guarded game-intelligence "
+        "research surfaces for point-in-time play-call, matchup and play-by-play simulation."
     )
     return app
 
