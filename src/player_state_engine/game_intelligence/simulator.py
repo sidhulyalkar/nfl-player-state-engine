@@ -31,6 +31,8 @@ class PlayByPlaySimulationResult:
     game_summary: pd.DataFrame
     team_summary: pd.DataFrame
     player_summary: pd.DataFrame
+    game_draws: pd.DataFrame
+    team_draws: pd.DataFrame
     player_draws: pd.DataFrame
     diagnostics: dict[str, object]
 
@@ -67,6 +69,12 @@ def _quarter(clock: float) -> int:
     return 4
 
 
+def _weights(pool: pd.DataFrame, column: str) -> pd.Series:
+    if column not in pool:
+        return pd.Series(0.0, index=pool.index, dtype=float)
+    return pd.to_numeric(pool[column], errors="coerce").fillna(0.0).clip(lower=0.0)
+
+
 def _select_player(
     usage: pd.DataFrame,
     team: str,
@@ -85,13 +93,13 @@ def _select_player(
     if pool.empty:
         return None
     weight_column = red_zone_column if red_zone and red_zone_column in pool else column
-    weights = pd.to_numeric(pool.get(weight_column), errors="coerce").fillna(0.0).clip(lower=0.0)
+    weights = _weights(pool, str(weight_column))
     if float(weights.sum()) <= 0:
-        weights = pd.to_numeric(pool.get("usage_evidence_weight"), errors="coerce").fillna(0.0)
+        weights = _weights(pool, "usage_evidence_weight")
     if float(weights.sum()) <= 0:
-        weights = pd.Series(1.0, index=pool.index)
-    probabilities = (weights / weights.sum()).to_numpy(dtype=float)
-    index = int(rng.choice(np.arange(len(pool)), p=probabilities))
+        weights = pd.Series(1.0, index=pool.index, dtype=float)
+    probability = (weights / weights.sum()).to_numpy(dtype=float)
+    index = int(rng.choice(np.arange(len(pool)), p=probability))
     return str(pool.iloc[index]["player_id"])
 
 
@@ -198,6 +206,21 @@ def _record_stat(
     stats[(simulation, player_id)][column] += float(value)
 
 
+def _summarize_draws(frame: pd.DataFrame, group: list[str], value: str) -> pd.DataFrame:
+    if frame.empty:
+        return pd.DataFrame(columns=[*group, "mean", "q10", "q50", "q90"])
+    grouped = frame.groupby(group, dropna=False)[value]
+    return pd.concat(
+        [
+            grouped.mean().rename("mean"),
+            grouped.quantile(0.10).rename("q10"),
+            grouped.quantile(0.50).rename("q50"),
+            grouped.quantile(0.90).rename("q90"),
+        ],
+        axis=1,
+    ).reset_index()
+
+
 def simulate_matchup(
     matchup: MatchupSpec,
     *,
@@ -206,9 +229,16 @@ def simulate_matchup(
     outcome_model: EmpiricalPlayOutcomeModel,
     play_call_model: PlayCallModel | None = None,
     league_config: LeagueConfig | None = None,
-    config: SimulationConfig = SimulationConfig(),
+    config: SimulationConfig | None = None,
 ) -> PlayByPlaySimulationResult:
-    """Simulate a matchup play-by-play and preserve correlated raw football outcomes."""
+    """Simulate a matchup play-by-play and preserve correlated raw football outcomes.
+
+    v0.10 is a research challenger. The state machine is intentionally inspectable and is not
+    allowed to replace production player projections until frozen historical replay clears the
+    game-simulation promotion gate.
+    """
+    config = config or SimulationConfig()
+    game_id = matchup.resolved_game_id
     home_profile = build_matchup_profile(
         tendencies,
         season=matchup.season,
@@ -277,12 +307,14 @@ def simulate_matchup(
                 "game_seconds_remaining": float(clock),
                 "score_differential": float(score_diff),
             }
-            home_spread = matchup.home_spread if offense == matchup.home_team else -matchup.home_spread
+            offense_spread = (
+                matchup.home_spread if offense == matchup.home_team else -matchup.home_spread
+            )
             p_pass = _pass_probability(
                 state,
                 profiles[offense],
                 play_call_model,
-                home_spread=home_spread,
+                home_spread=offense_spread,
                 game_total=matchup.game_total,
             )
             play_family = "DROPBACK" if rng.random() < p_pass else "RUSH"
@@ -302,9 +334,7 @@ def simulate_matchup(
             rusher: str | None = None
 
             if play_family == "DROPBACK":
-                passer = _select_player(
-                    usage, offense, "dropback_share", rng, position="QB"
-                )
+                passer = _select_player(usage, offense, "dropback_share", rng, position="QB")
                 target = _select_player(
                     usage,
                     offense,
@@ -321,9 +351,7 @@ def simulate_matchup(
                     _record_stat(
                         player_stats, simulation, target, "receiving_yards", receiving_yards
                     )
-                    _record_stat(
-                        player_stats, simulation, passer, "passing_yards", receiving_yards
-                    )
+                    _record_stat(player_stats, simulation, passer, "passing_yards", receiving_yards)
             else:
                 rusher = _select_player(
                     usage,
@@ -383,6 +411,7 @@ def simulate_matchup(
         for team in (matchup.home_team, matchup.away_team):
             team_rows.append(
                 {
+                    "game_id": game_id,
                     "simulation": simulation,
                     "team": team,
                     "opponent": matchup.away_team if team == matchup.home_team else matchup.home_team,
@@ -394,6 +423,7 @@ def simulate_matchup(
             )
         game_rows.append(
             {
+                "game_id": game_id,
                 "simulation": simulation,
                 "home_team": matchup.home_team,
                 "away_team": matchup.away_team,
@@ -404,38 +434,39 @@ def simulate_matchup(
             }
         )
 
-    usage_lookup = usage.drop_duplicates("player_id").set_index("player_id") if not usage.empty else None
+    usage_lookup = (
+        usage.drop_duplicates("player_id").set_index("player_id") if not usage.empty else None
+    )
     draw_rows: list[dict[str, object]] = []
     for (simulation, player_id), values in player_stats.items():
-        row: dict[str, object] = {"simulation": simulation, "player_id": player_id}
+        row: dict[str, object] = {
+            "game_id": game_id,
+            "simulation": simulation,
+            "player_id": player_id,
+        }
         row.update({stat: float(values.get(stat, 0.0)) for stat in _RAW_STATS})
         row["position"] = _player_position(usage, player_id)
         if usage_lookup is not None and player_id in usage_lookup.index:
             row["team"] = str(usage_lookup.loc[player_id, "team"])
         draw_rows.append(row)
     player_draws = pd.DataFrame(draw_rows)
-    if not player_draws.empty and league_config is not None:
-        player_draws = score_simulation_draws(player_draws, league_config)
 
-    def summary(frame: pd.DataFrame, group: list[str], value: str) -> pd.DataFrame:
-        if frame.empty:
-            return pd.DataFrame(columns=[*group, "mean", "q10", "q50", "q90"])
-        grouped = frame.groupby(group, dropna=False)[value]
-        return pd.concat(
-            [
-                grouped.mean().rename("mean"),
-                grouped.quantile(0.10).rename("q10"),
-                grouped.quantile(0.50).rename("q50"),
-                grouped.quantile(0.90).rename("q90"),
-            ],
-            axis=1,
-        ).reset_index()
+    scoring_config = league_config or LeagueConfig(scoring="ppr")
+    player_value = "league_fantasy_points"
+    if not player_draws.empty:
+        player_draws = score_simulation_draws(player_draws, scoring_config)
+        if league_config is None:
+            player_draws = player_draws.rename(
+                columns={"league_fantasy_points": "fantasy_points_ppr_proxy"}
+            )
+            player_value = "fantasy_points_ppr_proxy"
 
     team_draws = pd.DataFrame(team_rows)
     game_draws = pd.DataFrame(game_rows)
-    team_summary = summary(team_draws, ["team", "opponent"], "points")
+    team_summary = _summarize_draws(team_draws, ["game_id", "team", "opponent"], "points")
     game_summary = pd.DataFrame(
         {
+            "game_id": [game_id],
             "home_team": [matchup.home_team],
             "away_team": [matchup.away_team],
             "home_points_mean": [float(game_draws["home_points"].mean())],
@@ -446,26 +477,40 @@ def simulate_matchup(
             "home_win_probability": [float((game_draws["home_margin"] > 0).mean())],
         }
     )
-    player_value = "league_fantasy_points" if "league_fantasy_points" in player_draws else "rushing_yards"
-    player_summary = summary(
+    player_summary = _summarize_draws(
         player_draws,
-        [column for column in ("player_id", "team", "position") if column in player_draws],
+        [
+            column
+            for column in ("game_id", "player_id", "team", "position")
+            if column in player_draws
+        ],
         player_value,
     )
     diagnostics = {
+        "game_id": game_id,
         "model_source": config.model_source,
         "promoted": config.promoted,
         "simulations": config.simulations,
         "home_profile": home_profile,
         "away_profile": away_profile,
-        "play_call_model": play_call_model.model_source if play_call_model is not None else "profile_baseline",
+        "play_call_model": (
+            play_call_model.model_source if play_call_model is not None else "profile_baseline"
+        ),
         "outcome_model": outcome_model.model_source,
         "player_value_column": player_value,
+        "simulation_scoring_source": "exact_league" if league_config is not None else "ppr_proxy",
+        "limitations": [
+            "no overtime state machine",
+            "touchdowns are scored as seven points rather than separately simulating PAT/two-point tries",
+            "fourth-down decisions are transparent heuristics pending historical calibration",
+        ],
     }
     return PlayByPlaySimulationResult(
         game_summary=game_summary,
         team_summary=team_summary,
         player_summary=player_summary,
+        game_draws=game_draws,
+        team_draws=team_draws,
         player_draws=player_draws,
         diagnostics=diagnostics,
     )
