@@ -4,6 +4,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from player_state_engine.game_intelligence.coaching import (
+    resolve_coach_matchup_prior,
+    resolve_game_coach_priors,
+    resolve_team_play_callers,
+)
 from player_state_engine.game_intelligence.evaluation import game_simulation_promotion_gate
 from player_state_engine.game_intelligence.models import EmpiricalPlayOutcomeModel, PlayCallModel
 from player_state_engine.game_intelligence.play_features import build_play_intelligence_frame
@@ -145,6 +150,52 @@ def test_play_call_and_outcome_models_fit_only_pre_cutoff_rows() -> None:
     )
     assert "yards_gained" in sampled
     assert np.isfinite(sampled["yards_gained"])
+
+
+def test_play_caller_matchups_use_only_prior_verified_meetings() -> None:
+    coaches = pd.DataFrame(
+        {
+            "season": [2025, 2025, 2026, 2026],
+            "week": [1, 1, 1, 1],
+            "team": ["AAA", "BBB", "AAA", "BBB"],
+            "offensive_play_caller": ["OC_A", "OC_B", "OC_A", "OC_B"],
+            "defensive_play_caller": ["DC_A", "DC_B", "DC_A", "DC_B"],
+        }
+    )
+    history = pd.DataFrame(
+        {
+            "season": [2025, 2025, 2026],
+            "week": [5, 12, 2],
+            "game_id": ["g1", "g2", "future_target"],
+            "offensive_play_caller_id": ["OC_A", "OC_A", "OC_A"],
+            "defensive_play_caller_id": ["DC_B", "DC_B", "DC_B"],
+            "pass_rate": [0.60, 0.70, 0.99],
+        }
+    )
+    callers = resolve_team_play_callers(coaches, season=2026, week=2, team="AAA")
+    assert callers["offensive_play_caller"] == "OC_A"
+    prior = resolve_coach_matchup_prior(
+        history,
+        offensive_play_caller="OC_A",
+        defensive_play_caller="DC_B",
+        season=2026,
+        week=2,
+    )
+    assert prior is not None
+    assert prior["coach_matchup_games_prior"] == 2
+    assert prior["coach_matchup_pass_rate_prior"] == pytest.approx(0.65)
+    assert prior["coach_matchup_weight"] == pytest.approx(0.05)
+
+    game_priors = resolve_game_coach_priors(
+        coaches,
+        history,
+        season=2026,
+        week=2,
+        home_team="AAA",
+        away_team="BBB",
+    )
+    assert game_priors["AAA"] is not None
+    assert game_priors["BBB"] is None
 
 
 def test_retrospective_participation_is_never_cataloged_as_live() -> None:
