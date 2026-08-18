@@ -2,6 +2,8 @@ import type {
   DraftBoardResponse,
   DraftCompareResponse,
   DraftLeagueSummary,
+  DraftPlanResponse,
+  RankingAuditResponse,
 } from '../../shared/draft-types';
 
 export class DraftApiError extends Error {
@@ -80,6 +82,29 @@ export const draftApi = {
     signal?: AbortSignal,
   ) => request<DraftCompareResponse>(
     `/v1/leagues/${encodeURIComponent(leagueId)}/draft/compare`,
+    { method: 'POST', body: JSON.stringify(payload), signal },
+  ),
+
+  rankingAudit: (leagueId: string, signal?: AbortSignal) =>
+    request<RankingAuditResponse>(
+      `/v1/leagues/${encodeURIComponent(leagueId)}/rankings/audit?limit=500`,
+      { signal },
+    ),
+
+  plan: (
+    leagueId: string,
+    payload: {
+      roster_id: string;
+      player_ids: string[];
+      draft_slot?: number;
+      total_rounds?: number;
+      refresh?: boolean;
+      force_refresh?: boolean;
+      simulations?: number;
+    },
+    signal?: AbortSignal,
+  ) => request<DraftPlanResponse>(
+    `/v1/leagues/${encodeURIComponent(leagueId)}/draft/plan`,
     { method: 'POST', body: JSON.stringify(payload), signal },
   ),
 };
