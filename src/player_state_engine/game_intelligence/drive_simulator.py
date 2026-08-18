@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 
 import numpy as np
 import pandas as pd
@@ -26,6 +27,8 @@ from player_state_engine.game_intelligence.simulator import (
 )
 from player_state_engine.game_intelligence.tendencies import build_matchup_profile
 
+_PossessionStarter = Callable[[str, float], tuple[str, str, float, int, float]]
+
 
 def _component_rngs(
     seed: int,
@@ -46,6 +49,41 @@ def _component_rngs(
     )
 
 
+def _make_possession_starter(
+    matchup: MatchupSpec,
+    drive_volume_model: DriveVolumeModel | None,
+    rng_tempo: np.random.Generator,
+    drives: dict[str, int],
+    start_yardline_sum: dict[str, float],
+) -> _PossessionStarter:
+    """Bind one simulation's possession accounting without closing over the outer loop."""
+
+    def start_possession(
+        new_offense: str,
+        fallback_yardline: float,
+    ) -> tuple[str, str, float, int, float]:
+        new_defense = (
+            matchup.away_team if new_offense == matchup.home_team else matchup.home_team
+        )
+        start_yardline = float(fallback_yardline)
+        if drive_volume_model is not None:
+            start_yardline = drive_volume_model.sample_start_yardline(
+                team=new_offense,
+                opponent=new_defense,
+                rng=rng_tempo,
+                fallback_yardline_100=float(fallback_yardline),
+            )
+        drives[new_offense] += 1
+        start_yardline_sum[new_offense] += start_yardline
+        return new_offense, new_defense, start_yardline, 1, min(10.0, start_yardline)
+
+    return start_possession
+
+
+def _other_team(team: str, matchup: MatchupSpec) -> str:
+    return matchup.away_team if team == matchup.home_team else matchup.home_team
+
+
 def simulate_matchup_volume_probe(
     matchup: MatchupSpec,
     *,
@@ -60,9 +98,9 @@ def simulate_matchup_volume_probe(
 ) -> PlayByPlaySimulationResult:
     """Research simulator that isolates drive/pace mechanics from play outcomes.
 
-    With ``drive_volume_model=None`` this mirrors the v0.12 clock/start-field heuristics while
-    tracking drive diagnostics. Supplying a fitted model changes only drive starts and clock
-    runoff, leaving play calling, outcomes, and player allocation on independent RNG streams.
+    With ``drive_volume_model=None`` this mechanically mirrors the v0.12 clock/start-field
+    heuristics under standardized component RNG streams while tracking drive diagnostics.
+    Supplying a fitted model changes only drive starts and clock runoff.
     """
     config = config or SimulationConfig()
     game_id = matchup.resolved_game_id
@@ -108,44 +146,19 @@ def simulate_matchup_volume_probe(
         start_yardline_sum = {matchup.home_team: 0.0, matchup.away_team: 0.0}
         runoff_sum = {matchup.home_team: 0.0, matchup.away_team: 0.0}
         runoff_count = {matchup.home_team: 0, matchup.away_team: 0}
-
-        def start_possession(
-            new_offense: str,
-            *,
-            fallback_yardline: float,
-        ) -> tuple[str, str, float, int, float]:
-            new_defense = (
-                matchup.away_team if new_offense == matchup.home_team else matchup.home_team
-            )
-            start_yardline = float(fallback_yardline)
-            if drive_volume_model is not None:
-                start_yardline = drive_volume_model.sample_start_yardline(
-                    team=new_offense,
-                    opponent=new_defense,
-                    rng=rng_tempo,
-                    fallback_yardline_100=float(fallback_yardline),
-                )
-            drives[new_offense] += 1
-            start_yardline_sum[new_offense] += start_yardline
-            return new_offense, new_defense, start_yardline, 1, min(10.0, start_yardline)
-
-        def flip_possession(
-            current_offense: str,
-            *,
-            fallback_yardline: float = 75.0,
-        ) -> tuple[str, str, float, int, float]:
-            new_offense = (
-                matchup.away_team
-                if current_offense == matchup.home_team
-                else matchup.home_team
-            )
-            return start_possession(new_offense, fallback_yardline=fallback_yardline)
+        start_possession = _make_possession_starter(
+            matchup,
+            drive_volume_model,
+            rng_tempo,
+            drives,
+            start_yardline_sum,
+        )
 
         initial_offense = (
             matchup.home_team if rng_special.random() < 0.5 else matchup.away_team
         )
         offense, defense, yardline, down, distance = start_possession(
-            initial_offense, fallback_yardline=75.0
+            initial_offense, 75.0
         )
         clock = 3600.0
         play_index = 0
@@ -166,14 +179,14 @@ def simulate_matchup_volume_probe(
                         3.0 if rng_special.random() < _field_goal_success(yardline) else 0.0
                     )
                     clock -= min(6.0, clock)
-                    offense, defense, yardline, down, distance = flip_possession(
-                        offense, fallback_yardline=75.0
+                    offense, defense, yardline, down, distance = start_possession(
+                        _other_team(offense, matchup), 75.0
                     )
                     continue
                 if action == "PUNT":
                     clock -= min(8.0, clock)
-                    offense, defense, yardline, down, distance = flip_possession(
-                        offense, fallback_yardline=80.0
+                    offense, defense, yardline, down, distance = start_possession(
+                        _other_team(offense, matchup), 80.0
                     )
                     continue
 
@@ -281,8 +294,8 @@ def simulate_matchup_volume_probe(
                     _record(player_stats, simulation, target, "receiving_tds", 1.0)
                 else:
                     _record(player_stats, simulation, rusher, "rushing_tds", 1.0)
-                offense, defense, yardline, down, distance = flip_possession(
-                    play_offense, fallback_yardline=75.0
+                offense, defense, yardline, down, distance = start_possession(
+                    _other_team(play_offense, matchup), 75.0
                 )
             elif turnover:
                 if outcome.get("fumble_lost", 0.0) >= 0.5:
@@ -293,8 +306,8 @@ def simulate_matchup_volume_probe(
                         "fumbles_lost",
                         1.0,
                     )
-                offense, defense, yardline, down, distance = flip_possession(
-                    play_offense, fallback_yardline=75.0
+                offense, defense, yardline, down, distance = start_possession(
+                    _other_team(play_offense, matchup), 75.0
                 )
             else:
                 yardline = float(np.clip(yardline - yards, 0.5, 99.5))
@@ -305,8 +318,8 @@ def simulate_matchup_volume_probe(
                     down += 1
                     distance = float(np.clip(distance - yards, 0.5, 30.0))
                     if down > 4:
-                        offense, defense, yardline, down, distance = flip_possession(
-                            play_offense, fallback_yardline=75.0
+                        offense, defense, yardline, down, distance = start_possession(
+                            _other_team(play_offense, matchup), 75.0
                         )
 
             legacy_runoff = outcome.get("seconds_between_plays", np.nan)
@@ -338,7 +351,7 @@ def simulate_matchup_volume_probe(
                     matchup.away_team if rng_special.random() < 0.5 else matchup.home_team
                 )
                 offense, defense, yardline, down, distance = start_possession(
-                    halftime_offense, fallback_yardline=75.0
+                    halftime_offense, 75.0
                 )
 
         for team in (matchup.home_team, matchup.away_team):
@@ -433,7 +446,7 @@ def simulate_matchup_volume_probe(
         "drive_volume_model": (
             drive_volume_model.model_source
             if drive_volume_model is not None
-            else "v012_legacy_clock_and_fixed_drive_start"
+            else "v012_legacy_mechanics_standardized_rng"
         ),
         "component_rng_streams": True,
         "state_allocation_attempts": int(state_allocation_attempts),
@@ -447,6 +460,7 @@ def simulate_matchup_volume_probe(
         "research_only": True,
         "production_projection_changed": False,
         "limitations": [
+            "legacy cells use v0.12 mechanisms under standardized component RNG streams, not byte-identical v0.12 trajectories",
             "no overtime state machine",
             "touchdowns use seven points instead of a separate PAT/two-point model",
             "fourth-down decisions remain transparent heuristics pending calibration",
