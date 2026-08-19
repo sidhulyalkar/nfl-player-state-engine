@@ -1,8 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Iterable, Sequence
 
 import numpy as np
 import pandas as pd
@@ -99,7 +98,9 @@ class RecencyWeightedConditionalConformal:
             return np.ones(len(data), dtype=float)
         reference = timestamps.loc[valid].max()
         self.fitted_through = reference
-        age_days = (reference - timestamps.fillna(reference)).dt.total_seconds().to_numpy(float) / 86400.0
+        age_days = (
+            (reference - timestamps.fillna(reference)).dt.total_seconds().to_numpy(float) / 86400.0
+        )
         return np.power(0.5, np.maximum(age_days, 0.0) / max(self.half_life_days, 1e-6))
 
     def _fit_subset(self, subset: pd.DataFrame, weights: np.ndarray) -> ConformalAdjustment:
@@ -132,7 +133,11 @@ class RecencyWeightedConditionalConformal:
         data = history.copy()
         for column in required:
             data[column] = pd.to_numeric(data[column], errors="coerce")
-        data = data.replace([np.inf, -np.inf], np.nan).dropna(subset=list(required)).reset_index(drop=True)
+        data = (
+            data.replace([np.inf, -np.inf], np.nan)
+            .dropna(subset=list(required))
+            .reset_index(drop=True)
+        )
         if data.empty:
             raise ValueError("No finite calibration rows remain")
         weights = self._recency_weights(data)
@@ -148,15 +153,23 @@ class RecencyWeightedConditionalConformal:
                 continue
             grouper: str | list[str] = level[0] if len(level) == 1 else list(level)
             for values, subset in data.groupby(grouper, dropna=False):
-                key_values = (str(values),) if len(level) == 1 else tuple(str(value) for value in values)
+                key_values = (
+                    (str(values),)
+                    if len(level) == 1
+                    else tuple(str(value) for value in values)
+                )
                 indexes = subset.index.to_numpy()
                 raw = self._fit_subset(subset, data.loc[indexes, "_weight"].to_numpy(float))
                 if raw.rows < self.min_group_rows:
                     continue
-                parent = self._best_adjustment(dict(zip(level, key_values, strict=True)), levels=level[:-1])
+                parent = self._best_adjustment(
+                    dict(zip(level, key_values, strict=True)), levels=level[:-1]
+                )
                 strength = raw.rows / (raw.rows + self.shrinkage_rows)
                 self.adjustments[(level, key_values)] = ConformalAdjustment(
-                    median_bias=float(strength * raw.median_bias + (1.0 - strength) * parent.median_bias),
+                    median_bias=float(
+                        strength * raw.median_bias + (1.0 - strength) * parent.median_bias
+                    ),
                     interval_expansion=float(
                         strength * raw.interval_expansion
                         + (1.0 - strength) * parent.interval_expansion
@@ -175,7 +188,9 @@ class RecencyWeightedConditionalConformal:
         candidate_levels = self.group_hierarchy
         if levels is not None:
             allowed = set(levels)
-            candidate_levels = tuple(level for level in candidate_levels if set(level).issubset(allowed))
+            candidate_levels = tuple(
+                level for level in candidate_levels if set(level).issubset(allowed)
+            )
         best = self.adjustments.get(((), ()))
         if best is None:
             raise RuntimeError("Calibrator has not been fitted")
@@ -204,7 +219,11 @@ class RecencyWeightedConditionalConformal:
         biases = np.zeros(len(out), dtype=float)
         expansions = np.zeros(len(out), dtype=float)
         for row_number, (_, row) in enumerate(out.iterrows()):
-            context = {column: str(row[column]) for column in ("position", "target") if column in out}
+            context = {
+                column: str(row[column])
+                for column in ("position", "target")
+                if column in out
+            }
             adjustment = self._best_adjustment(context)
             biases[row_number] = adjustment.median_bias
             expansions[row_number] = adjustment.interval_expansion
@@ -304,7 +323,11 @@ class HierarchicalForecastFusion:
         numeric = list(self._required_columns(include_actual=True))
         for column in numeric:
             data[column] = pd.to_numeric(data[column], errors="coerce")
-        data = data.replace([np.inf, -np.inf], np.nan).dropna(subset=numeric).reset_index(drop=True)
+        data = (
+            data.replace([np.inf, -np.inf], np.nan)
+            .dropna(subset=numeric)
+            .reset_index(drop=True)
+        )
         if data.empty:
             raise ValueError("No finite fusion rows remain")
         self.fitted_weights = {}
@@ -320,12 +343,18 @@ class HierarchicalForecastFusion:
             for values, subset in data.groupby(grouper, dropna=False):
                 if len(subset) < self.min_group_rows:
                     continue
-                key_values = (str(values),) if len(level) == 1 else tuple(str(value) for value in values)
+                key_values = (
+                    (str(values),)
+                    if len(level) == 1
+                    else tuple(str(value) for value in values)
+                )
                 raw = self._fit_weights(subset)
                 context = dict(zip(level, key_values, strict=True))
                 parent = self._best_weights(context, maximum_depth=len(level) - 1)
                 strength = len(subset) / (len(subset) + self.shrinkage_rows)
-                shrunk = strength * raw + (1.0 - strength) * np.asarray(parent.weights, dtype=float)
+                shrunk = strength * raw + (1.0 - strength) * np.asarray(
+                    parent.weights, dtype=float
+                )
                 shrunk = np.maximum(shrunk, 0.0)
                 shrunk = shrunk / max(float(shrunk.sum()), 1e-12)
                 self.fitted_weights[(level, key_values)] = FusionWeights(
@@ -337,7 +366,9 @@ class HierarchicalForecastFusion:
                 )
         return self
 
-    def _best_weights(self, context: dict[str, str], *, maximum_depth: int | None = None) -> FusionWeights:
+    def _best_weights(
+        self, context: dict[str, str], *, maximum_depth: int | None = None
+    ) -> FusionWeights:
         best = self.fitted_weights.get(((), ()))
         if best is None:
             raise RuntimeError("Fusion has not been fitted")
@@ -372,23 +403,31 @@ class HierarchicalForecastFusion:
             "regime_maturity_bucket",
         }
         for row_number, (_, row) in enumerate(out.iterrows()):
-            context = {column: str(row[column]) for column in context_columns if column in out}
+            context = {
+                column: str(row[column]) for column in context_columns if column in out
+            }
             weights = self._best_weights(context)
             selected.append(weights)
             weight_array = np.asarray(weights.weights, dtype=float)
             for quantile_index, quantile in enumerate((10, 50, 90)):
                 values = np.asarray(
-                    [float(row[f"{expert}_q{quantile}"]) for expert in self.experts], dtype=float
+                    [float(row[f"{expert}_q{quantile}"]) for expert in self.experts],
+                    dtype=float,
                 )
                 blended[row_number, quantile_index] = float(values @ weight_array)
         blended.sort(axis=1)
         out[["q10", "q50", "q90"]] = blended
         q50_matrix = np.column_stack(
-            [pd.to_numeric(out[f"{expert}_q50"], errors="coerce").to_numpy(float) for expert in self.experts]
+            [
+                pd.to_numeric(out[f"{expert}_q50"], errors="coerce").to_numpy(float)
+                for expert in self.experts
+            ]
         )
         out["expert_disagreement_range"] = np.ptp(q50_matrix, axis=1)
         out["expert_disagreement_sd"] = np.std(q50_matrix, axis=1)
-        out["fusion_level"] = ["/".join(item.level) if item.level else "global" for item in selected]
+        out["fusion_level"] = [
+            "/".join(item.level) if item.level else "global" for item in selected
+        ]
         for expert_index, expert in enumerate(self.experts):
             out[f"fusion_weight_{expert}"] = [item.weights[expert_index] for item in selected]
         out["fusion_research_only"] = int(self.research_only)
