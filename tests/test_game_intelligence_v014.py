@@ -449,6 +449,8 @@ def test_transition_model_fails_closed_on_missing_schema() -> None:
     try:
         build_possession_transition_frame(bad)
     except ValueError as exc:
-        assert "missing columns" in str(exc).lower()
+        message = str(exc).lower()
+        assert "game_id" in message
+        assert "requires" in message
     else:
         raise AssertionError("transition extraction should fail closed on missing schema")
