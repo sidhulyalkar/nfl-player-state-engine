@@ -32,7 +32,8 @@ jobs:
             scripts/run_v013_drive_volume_benchmark.py \
             scripts/run_v014_transition_benchmark.py \
             scripts/run_v015_decision_benchmark.py \
-            scripts/run_v016_terminal_benchmark.py
+            scripts/run_v016_terminal_benchmark.py \
+            scripts/run_player_state_graph_research.py
       - name: Compile Python sources and all scripts
         run: python -m compileall -q src scripts tests
       - run: pytest
