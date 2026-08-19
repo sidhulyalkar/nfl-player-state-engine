@@ -100,14 +100,51 @@ class PlayCallModel:
 
 
 class EmpiricalPlayOutcomeModel:
-    """Hierarchical empirical outcome sampler conditioned on play family and game state."""
+    """Hierarchical empirical outcome sampler conditioned on play family and game state.
+
+    v0.16 optionally indexes the same empirical rows by canonical terminal family. The
+    ordinary ``sample`` method is unchanged, so all earlier simulators retain their exact
+    behavior. ``sample_for_terminal_family`` is only used by the v0.16 research authority
+    bridge and still returns a historically observed, internally coherent outcome row.
+    """
 
     def __init__(self, *, min_stratum_plays: int = 30) -> None:
         self.min_stratum_plays = int(min_stratum_plays)
         self.strata: dict[tuple[object, ...], pd.DataFrame] = {}
         self.family: dict[str, pd.DataFrame] = {}
+        self.terminal_strata: dict[tuple[object, ...], pd.DataFrame] = {}
+        self.terminal_family: dict[tuple[str, str], pd.DataFrame] = {}
         self.fitted = False
         self.model_source = "hierarchical_empirical_play_outcomes_v010"
+        self.terminal_conditioning_available = False
+
+    @staticmethod
+    def _outcome_columns(frame: pd.DataFrame) -> list[str]:
+        return [
+            column
+            for column in (
+                "yards_gained",
+                "touchdown",
+                "first_down",
+                "turnover",
+                "interception",
+                "fumble_lost",
+                "complete_pass",
+                "seconds_between_plays",
+            )
+            if column in frame
+        ]
+
+    @staticmethod
+    def _sample_pool(pool: pd.DataFrame, rng: np.random.Generator) -> dict[str, float]:
+        if pool.empty:
+            raise ValueError("Cannot sample from an empty empirical outcome pool")
+        row = pool.iloc[int(rng.integers(0, len(pool)))]
+        sampled: dict[str, float] = {}
+        for column in pool.columns:
+            value = pd.to_numeric(row[column], errors="coerce")
+            sampled[column] = 0.0 if pd.isna(value) else float(value)
+        return sampled
 
     def fit(self, frame: pd.DataFrame) -> EmpiricalPlayOutcomeModel:
         required = {
@@ -122,29 +159,42 @@ class EmpiricalPlayOutcomeModel:
         missing = required - set(frame)
         if missing:
             raise ValueError(f"Outcome model missing: {sorted(missing)}")
-        columns = [
-            column
-            for column in (
-                "yards_gained",
-                "touchdown",
-                "first_down",
-                "turnover",
-                "interception",
-                "fumble_lost",
-                "complete_pass",
-                "seconds_between_plays",
-            )
-            if column in frame
-        ]
+        columns = self._outcome_columns(frame)
+        self.strata.clear()
+        self.family.clear()
+        self.terminal_strata.clear()
+        self.terminal_family.clear()
+        self.terminal_conditioning_available = False
+
         for family, family_group in frame.groupby("play_family", sort=False):
-            self.family[str(family)] = family_group.loc[:, columns].reset_index(drop=True)
+            family_name = str(family)
+            self.family[family_name] = family_group.loc[:, columns].reset_index(drop=True)
             for key, group in family_group.groupby(
                 ["down", "distance_bucket", "field_zone"], sort=False
             ):
                 if len(group) >= self.min_stratum_plays:
-                    self.strata[(str(family), *tuple(key))] = group.loc[:, columns].reset_index(
+                    self.strata[(family_name, *tuple(key))] = group.loc[:, columns].reset_index(
                         drop=True
                     )
+
+        if "terminal_family" in frame:
+            terminal = frame.loc[frame["terminal_family"].notna()].copy()
+            terminal["terminal_family"] = terminal["terminal_family"].astype(str)
+            if not terminal.empty:
+                self.terminal_conditioning_available = True
+                for (family, terminal_name), group in terminal.groupby(
+                    ["play_family", "terminal_family"], sort=False
+                ):
+                    key = (str(family), str(terminal_name))
+                    self.terminal_family[key] = group.loc[:, columns].reset_index(drop=True)
+                    for stratum, stratum_group in group.groupby(
+                        ["down", "distance_bucket", "field_zone"], sort=False
+                    ):
+                        if len(stratum_group) >= max(3, self.min_stratum_plays // 3):
+                            self.terminal_strata[(str(family), *tuple(stratum), str(terminal_name))] = (
+                                stratum_group.loc[:, columns].reset_index(drop=True)
+                            )
+
         self.fitted = True
         return self
 
@@ -164,9 +214,37 @@ class EmpiricalPlayOutcomeModel:
             pool = self.family.get(str(play_family))
         if pool is None or pool.empty:
             raise ValueError(f"No outcome samples available for {play_family}")
-        row = pool.iloc[int(rng.integers(0, len(pool)))]
-        sampled: dict[str, float] = {}
-        for column in pool.columns:
-            value = pd.to_numeric(row[column], errors="coerce")
-            sampled[column] = 0.0 if pd.isna(value) else float(value)
-        return sampled
+        return self._sample_pool(pool, rng)
+
+    def sample_for_terminal_family(
+        self,
+        *,
+        play_family: str,
+        down: int,
+        distance_bucket: int,
+        field_zone: int,
+        terminal_family: str,
+        rng: np.random.Generator,
+    ) -> dict[str, float]:
+        """Sample a historical outcome row compatible with a requested terminal family."""
+        if not self.fitted:
+            raise RuntimeError("EmpiricalPlayOutcomeModel must be fitted before sampling")
+        if not self.terminal_conditioning_available:
+            raise ValueError("Outcome model was not fitted with terminal_family labels")
+        terminal_name = str(terminal_family)
+        pool = self.terminal_strata.get(
+            (
+                str(play_family),
+                int(down),
+                int(distance_bucket),
+                int(field_zone),
+                terminal_name,
+            )
+        )
+        if pool is None or pool.empty:
+            pool = self.terminal_family.get((str(play_family), terminal_name))
+        if pool is None or pool.empty:
+            raise ValueError(
+                f"No terminal-conditioned outcome samples for {play_family}/{terminal_name}"
+            )
+        return self._sample_pool(pool, rng)
