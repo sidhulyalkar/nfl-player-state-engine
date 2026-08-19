@@ -258,11 +258,16 @@ class HierarchicalForecastFusion:
     Expected wide columns are ``<expert>_q10``, ``<expert>_q50``, ``<expert>_q90`` plus
     ``actual`` during fitting. Context-specific weights shrink toward their parent hierarchy.
     Expert predictions are retained in transformed output so disagreement remains observable.
+
+    A weak inverse-standalone-loss prior resolves non-identifiable convex mixtures. It acts as
+    a tie-break, not a shortcut around the primary pinball objective: complementary experts
+    still earn weight when their blend improves historical quantile loss.
     """
 
     experts: tuple[str, ...] = ("direct", "world", "consensus")
     min_group_rows: int = 150
     shrinkage_rows: float = 300.0
+    loss_prior_strength: float = 0.01
     hierarchy: tuple[tuple[str, ...], ...] = (
         (),
         ("position",),
@@ -285,6 +290,27 @@ class HierarchicalForecastFusion:
             required.add("actual")
         return required
 
+    def _standalone_loss_prior(
+        self,
+        actual: np.ndarray,
+        predictions: dict[int, np.ndarray],
+    ) -> np.ndarray:
+        losses = np.asarray(
+            [
+                np.mean(
+                    [
+                        _pinball(actual, predictions[quantile][:, expert_index], quantile / 100.0)
+                        for quantile in (10, 50, 90)
+                    ]
+                )
+                for expert_index in range(len(self.experts))
+            ],
+            dtype=float,
+        )
+        floor = max(float(np.min(losses)) * 0.05, 1e-6)
+        inverse = 1.0 / np.maximum(losses + floor, 1e-12)
+        return inverse / max(float(inverse.sum()), 1e-12)
+
     def _fit_weights(self, data: pd.DataFrame) -> np.ndarray:
         actual = data["actual"].to_numpy(float)
         predictions = {
@@ -293,25 +319,28 @@ class HierarchicalForecastFusion:
             )
             for quantile in (10, 50, 90)
         }
+        loss_prior = self._standalone_loss_prior(actual, predictions)
 
         def objective(weights: np.ndarray) -> float:
             total = 0.0
             for quantile in (10, 50, 90):
                 blended = predictions[quantile] @ weights
                 total += _pinball(actual, blended, quantile / 100.0)
-            return total / 3.0
+            regularization = max(float(self.loss_prior_strength), 0.0) * float(
+                np.sum((weights - loss_prior) ** 2)
+            )
+            return total / 3.0 + regularization
 
-        initial = np.full(len(self.experts), 1.0 / len(self.experts), dtype=float)
         result = minimize(
             objective,
-            initial,
+            loss_prior,
             method="SLSQP",
             bounds=[(0.0, 1.0)] * len(self.experts),
             constraints={"type": "eq", "fun": lambda weights: float(np.sum(weights) - 1.0)},
             options={"maxiter": 250, "ftol": 1e-10},
         )
         if not result.success or not np.isfinite(result.fun):
-            return initial
+            return loss_prior
         weights = np.maximum(np.asarray(result.x, dtype=float), 0.0)
         return weights / max(float(weights.sum()), 1e-12)
 
