@@ -12,9 +12,7 @@ from player_state_engine.game_intelligence.decision import (
     DriveTerminationHazardModel,
     FourthDownDecisionModel,
 )
-from player_state_engine.game_intelligence.decision_simulator import (
-    simulate_matchup_decision_probe,
-)
+from player_state_engine.game_intelligence.decision_simulator import simulate_matchup_decision_probe
 from player_state_engine.game_intelligence.drive import DriveVolumeModel
 from player_state_engine.game_intelligence.models import EmpiricalPlayOutcomeModel, PlayCallModel
 from player_state_engine.game_intelligence.opportunity import StateConditionedOpportunityModel
@@ -38,13 +36,12 @@ def _shadow_rng(
     payload = f"{salt}|{state_key}|{repr(rng.bit_generator.state)}".encode()
     digest = hashlib.blake2b(payload, digest_size=16).digest()
     words = np.frombuffer(digest, dtype=np.uint32).astype(np.uint64)
-    seed = int(np.bitwise_xor.reduce(words))
-    return np.random.default_rng(seed)
+    return np.random.default_rng(int(np.bitwise_xor.reduce(words)))
 
 
 @dataclass(slots=True)
 class TerminalAuthorityBridge:
-    """Expose a v0.16 family distribution through the v0.15 hazard interface."""
+    """Expose v0.16 family probabilities through the v0.15 hazard interface."""
 
     model: TerminalFamilyModel
     model_source: str = "terminal_family_authority_bridge_v016"
@@ -112,8 +109,7 @@ class TerminalAuthorityBridge:
             raise RuntimeError("Terminal authority bridge was sampled before probability evaluation")
         shadow = _shadow_rng(rng, salt="terminal-family", state_key=self.state_key())
         probability = np.asarray(
-            [self.current_distribution[family] for family in TERMINAL_FAMILIES],
-            dtype=float,
+            [self.current_distribution[family] for family in TERMINAL_FAMILIES], dtype=float
         )
         family = str(
             TERMINAL_FAMILIES[
@@ -150,13 +146,9 @@ class TerminalAuthorityBridge:
 
 
 class TerminalConditionedOutcomeModel:
-    """Preserve the legacy RNG draw while returning a family-compatible empirical outcome."""
+    """Consume the frozen outcome RNG draw, then return a family-compatible observed row."""
 
-    def __init__(
-        self,
-        base: EmpiricalPlayOutcomeModel,
-        bridge: TerminalAuthorityBridge,
-    ) -> None:
+    def __init__(self, base: EmpiricalPlayOutcomeModel, bridge: TerminalAuthorityBridge) -> None:
         self.base = base
         self.bridge = bridge
         self.model_source = f"{base.model_source}+terminal_conditioning_v016"
@@ -183,8 +175,7 @@ class TerminalConditionedOutcomeModel:
         family_rng = np.random.default_rng(
             int.from_bytes(
                 hashlib.blake2b(
-                    f"family|{self.bridge.state_key()}|{pre_state}".encode(),
-                    digest_size=8,
+                    f"family|{self.bridge.state_key()}|{pre_state}".encode(), digest_size=8
                 ).digest(),
                 "little",
             )
@@ -197,17 +188,15 @@ class TerminalConditionedOutcomeModel:
             dtype=float,
         )
         probability = probability / max(float(probability.sum()), 1e-12)
-        terminal_family = str(
+        requested_family = str(
             TERMINAL_FAMILIES[
                 int(family_rng.choice(np.arange(len(TERMINAL_FAMILIES)), p=probability))
             ]
         )
-
         outcome_rng = np.random.default_rng(
             int.from_bytes(
                 hashlib.blake2b(
-                    f"outcome|{self.bridge.state_key()}|{pre_state}".encode(),
-                    digest_size=8,
+                    f"outcome|{self.bridge.state_key()}|{pre_state}".encode(), digest_size=8
                 ).digest(),
                 "little",
             )
@@ -218,7 +207,7 @@ class TerminalConditionedOutcomeModel:
                 down=down,
                 distance_bucket=distance_bucket,
                 field_zone=field_zone,
-                terminal_family=terminal_family,
+                terminal_family=requested_family,
                 rng=outcome_rng,
             )
         except ValueError:
@@ -227,8 +216,9 @@ class TerminalConditionedOutcomeModel:
             return legacy
 
         self.bridge.discarded_legacy_outcomes += 1
-        self.bridge.record_family(terminal_family)
-        if terminal_family == "END_HALF":
+        # Record the requested family only after a compatible row has actually been produced.
+        self.bridge.record_family(requested_family)
+        if requested_family == "END_HALF":
             seconds = self.bridge.seconds_to_boundary()
             if np.isfinite(seconds) and seconds > 0:
                 outcome["seconds_between_plays"] = float(seconds)
@@ -236,7 +226,7 @@ class TerminalConditionedOutcomeModel:
 
 
 class TerminalAwareDriveVolumeModel:
-    """Delegate v0.13 pace except when an END_HALF family owns the clock boundary."""
+    """Delegate v0.13 pace except when END_HALF owns a structural clock boundary."""
 
     def __init__(self, base: DriveVolumeModel, bridge: TerminalAuthorityBridge) -> None:
         self.base = base
@@ -278,15 +268,20 @@ def _add_terminal_count_columns(
     *,
     bridge: TerminalAuthorityBridge | None,
     simulations: int,
-) -> None:
+) -> float | None:
+    """Add realized terminal metrics and keep model-requested families diagnostic-only."""
     draws = result.team_draws.copy()
     if draws.empty:
-        return
-    score_from_existing = (
-        pd.to_numeric(draws["points"], errors="coerce").fillna(0.0)
-        - 3.0 * pd.to_numeric(draws["field_goals_made"], errors="coerce").fillna(0.0)
-    ).clip(lower=0.0) / 7.0
-    draws["terminal_score_events"] = score_from_existing
+        return None
+
+    # These are realized game outcomes already produced by the frozen simulator state machine.
+    draws["terminal_score_events"] = (
+        (
+            pd.to_numeric(draws["points"], errors="coerce").fillna(0.0)
+            - 3.0 * pd.to_numeric(draws["field_goals_made"], errors="coerce").fillna(0.0)
+        ).clip(lower=0.0)
+        / 7.0
+    )
     draws["terminal_turnover_events"] = pd.to_numeric(
         draws["turnovers"], errors="coerce"
     ).fillna(0.0)
@@ -298,27 +293,38 @@ def _add_terminal_count_columns(
         + draws["terminal_turnover_events"]
         + draws["terminal_downs_events"]
     )
+    # The inherited state machine does not expose realized END_HALF ownership by team.
     draws["terminal_end_half_events"] = np.nan
+    for family in ("score", "turnover", "downs", "end_half"):
+        draws[f"requested_terminal_{family}_events"] = np.nan
 
+    mismatch: float | None = None
     if bridge is not None:
         divisor = max(int(simulations), 1)
+        mismatch = 0.0
         for team in draws["team"].astype(str).unique():
             counts = bridge.counts.get(team, {})
             mask = draws["team"].astype(str).eq(team)
-            draws.loc[mask, "terminal_score_events"] = float(counts.get("SCORE", 0)) / divisor
-            draws.loc[mask, "terminal_turnover_events"] = (
-                float(counts.get("TURNOVER", 0)) / divisor
+            requested = {
+                "score": float(counts.get("SCORE", 0)),
+                "turnover": float(counts.get("TURNOVER", 0)),
+                "downs": float(counts.get("DOWNS", 0)),
+                "end_half": float(counts.get("END_HALF", 0)),
+            }
+            for family, count in requested.items():
+                draws.loc[mask, f"requested_terminal_{family}_events"] = count / divisor
+            realized = {
+                "score": float(draws.loc[mask, "terminal_score_events"].sum()),
+                "turnover": float(draws.loc[mask, "terminal_turnover_events"].sum()),
+                "downs": float(draws.loc[mask, "terminal_downs_events"].sum()),
+            }
+            mismatch += sum(
+                abs(requested[family] - realized[family])
+                for family in ("score", "turnover", "downs")
             )
-            draws.loc[mask, "terminal_downs_events"] = float(counts.get("DOWNS", 0)) / divisor
-            draws.loc[mask, "terminal_non_clock_events"] = (
-                float(counts.get("SCORE", 0))
-                + float(counts.get("TURNOVER", 0))
-                + float(counts.get("DOWNS", 0))
-            ) / divisor
-            draws.loc[mask, "terminal_end_half_events"] = (
-                float(counts.get("END_HALF", 0)) / divisor
-            )
+
     result.team_draws = draws
+    return mismatch
 
 
 def simulate_matchup_terminal_probe(
@@ -361,6 +367,7 @@ def simulate_matchup_terminal_probe(
                 "terminal_family_authority": False,
                 "terminal_conditioned_outcomes": False,
                 "terminal_shadow_rng_stream": False,
+                "terminal_realization_mismatch_total": None,
             }
         )
         return result
@@ -390,7 +397,9 @@ def simulate_matchup_terminal_probe(
         league_config=league_config,
         config=config,
     )
-    _add_terminal_count_columns(result, bridge=bridge, simulations=config.simulations)
+    realization_mismatch = _add_terminal_count_columns(
+        result, bridge=bridge, simulations=config.simulations
+    )
     fallback_rate = bridge.conditioning_fallbacks / max(bridge.probability_calls, 1)
     result.diagnostics.update(
         {
@@ -405,6 +414,8 @@ def simulate_matchup_terminal_probe(
             "terminal_conditioning_fallbacks": int(bridge.conditioning_fallbacks),
             "terminal_conditioning_fallback_rate": float(fallback_rate),
             "terminal_probability_calls": int(bridge.probability_calls),
+            "terminal_realization_mismatch_total": float(realization_mismatch or 0.0),
+            "terminal_team_metrics_source": "realized_game_draws_not_requested_family_counts",
             "end_half_clock_authority": True,
             "termination_hazard_authority": True,
             "automatic_promotion": False,
@@ -413,7 +424,7 @@ def simulate_matchup_terminal_probe(
                 "v0.16 terminal-family authority is research-only and the live simulator remains frozen",
                 "terminal family selection uses hierarchical empirical state rather than a deep sequence model",
                 "terminal-conditioned outcomes reuse observed historical rows and do not model causal execution heads separately",
-                "END_HALF authority is restricted to a short structural clock window and delegates halftime possession to the frozen state machine",
+                "END_HALF authority is restricted to a short structural clock window and realized team ownership is isolated-only",
                 "no overtime state machine, PAT/two-point strategy model, or player-level return model",
             ],
         }
