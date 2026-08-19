@@ -118,11 +118,11 @@ def _schedule_pairs(schedule: pd.DataFrame, regular_weeks: set[int]) -> list[tup
     seen: set[tuple[int, str, str]] = set()
     pairs: list[tuple[int, str, str]] = []
     for row in schedule.itertuples(index=False):
-        week = int(getattr(row, "week"))
+        week = int(row.week)
         if week not in regular_weeks:
             continue
-        manager = str(getattr(row, "manager_id"))
-        opponent = str(getattr(row, "opponent_id"))
+        manager = str(row.manager_id)
+        opponent = str(row.opponent_id)
         low, high = sorted((manager, opponent))
         key = (week, low, high)
         if low == high or key in seen:
@@ -214,10 +214,7 @@ class FantasySeasonSimulator:
             wins = {manager: 0.0 for manager in managers}
             points_for = {manager: 0.0 for manager in managers}
             for week in regular_weeks:
-                week_points = [
-                    point_lookup.get((week, manager), 0.0)
-                    for manager in managers
-                ]
+                week_points = [point_lookup.get((week, manager), 0.0) for manager in managers]
                 median = float(np.median(week_points)) if week_points else 0.0
                 for manager, value in zip(managers, week_points, strict=True):
                     points_for[manager] += float(value)
@@ -242,12 +239,7 @@ class FantasySeasonSimulator:
                 key=lambda manager: (-wins[manager], -points_for[manager], manager),
             )[: self.playoff_teams]
             seed_number = {manager: index + 1 for index, manager in enumerate(seeds)}
-            champion = _reseeded_champion(
-                seeds,
-                seed_number,
-                playoff_weeks,
-                point_lookup,
-            )
+            champion = _reseeded_champion(seeds, seed_number, playoff_weeks, point_lookup)
             for manager in managers:
                 accum[manager]["wins"] += wins[manager]
                 accum[manager]["points"] += points_for[manager]
