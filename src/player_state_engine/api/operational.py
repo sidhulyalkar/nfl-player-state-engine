@@ -39,11 +39,11 @@ def create_app(**kwargs: Any) -> FastAPI:
         registry_path=kwargs.get("game_intelligence_registry"),
         benchmark_root=kwargs.get("game_intelligence_benchmark_root"),
     )
-    app.version = "0.14.0"
+    app.version = "0.15.0"
     app.description = (
         f"{app.description} Live Draft War Room, ranking calibration, guarded game-intelligence "
         "simulation, expanding frozen replay, factorial attribution, simulated-state opportunity, "
-        "drive-volume, and possession-transition research surfaces."
+        "drive-volume, possession-transition, and fourth-down decision research surfaces."
     )
     return app
 
