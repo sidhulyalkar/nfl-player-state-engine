@@ -102,6 +102,11 @@ class TerminalAuthorityBridge:
             ]
         )
 
+    def record_family(self, family: str) -> None:
+        self.current_family = str(family)
+        if self.current_team is not None:
+            self.counts[self.current_team][self.current_family] += 1
+
     def sample_family(self, rng: np.random.Generator) -> str:
         if self.current_distribution is None or self.current_team is None:
             raise RuntimeError("Terminal authority bridge was sampled before probability evaluation")
@@ -115,8 +120,7 @@ class TerminalAuthorityBridge:
                 int(shadow.choice(np.arange(len(TERMINAL_FAMILIES)), p=probability))
             ]
         )
-        self.current_family = family
-        self.counts[self.current_team][family] += 1
+        self.record_family(family)
         return family
 
     def seconds_to_boundary(self) -> float:
@@ -125,6 +129,24 @@ class TerminalAuthorityBridge:
         return _seconds_to_boundary(
             float(self.current_state.get("game_seconds_remaining", 3600.0))
         )
+
+    def infer_legacy_family(self, outcome: dict[str, float]) -> str:
+        """Mirror the frozen simulator's realized terminal ordering for fallback accounting."""
+        state = self.current_state or {}
+        yardline = float(state.get("yardline_100", 99.5))
+        distance = float(state.get("ydstogo", 10.0))
+        down = int(round(float(state.get("down", 1.0))))
+        yards = float(np.clip(outcome.get("yards_gained", 0.0), -25.0, 99.0))
+        touchdown = bool(outcome.get("touchdown", 0.0) >= 0.5 or yards >= yardline)
+        turnover = bool(outcome.get("turnover", 0.0) >= 0.5)
+        first_down = bool(outcome.get("first_down", 0.0) >= 0.5 or yards >= distance)
+        if touchdown:
+            return "SCORE"
+        if turnover:
+            return "TURNOVER"
+        if down == 4 and not first_down:
+            return "DOWNS"
+        return "CONTINUE"
 
 
 class TerminalConditionedOutcomeModel:
@@ -180,9 +202,6 @@ class TerminalConditionedOutcomeModel:
                 int(family_rng.choice(np.arange(len(TERMINAL_FAMILIES)), p=probability))
             ]
         )
-        self.bridge.current_family = terminal_family
-        if self.bridge.current_team is not None:
-            self.bridge.counts[self.bridge.current_team][terminal_family] += 1
 
         outcome_rng = np.random.default_rng(
             int.from_bytes(
@@ -204,9 +223,11 @@ class TerminalConditionedOutcomeModel:
             )
         except ValueError:
             self.bridge.conditioning_fallbacks += 1
+            self.bridge.record_family(self.bridge.infer_legacy_family(legacy))
             return legacy
 
         self.bridge.discarded_legacy_outcomes += 1
+        self.bridge.record_family(terminal_family)
         if terminal_family == "END_HALF":
             seconds = self.bridge.seconds_to_boundary()
             if np.isfinite(seconds) and seconds > 0:
