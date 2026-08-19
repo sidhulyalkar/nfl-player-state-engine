@@ -4,7 +4,7 @@
 
 v0.16 tests the missing mechanism between the v0.15 binary drive-termination diagnostic and a coherent generative possession state machine.
 
-The target is not generic "drive ends." It is the canonical family following an offensive scrimmage play:
+The target is the canonical family produced directly by an offensive scrimmage play:
 
 - `CONTINUE`
 - `SCORE`
@@ -37,7 +37,7 @@ P(terminal family | ends)
       +-- END_HALF
 ```
 
-The hazard and conditional-family heads are scored separately as well as jointly.
+The binary hazard, conditional-family head, and joint five-family distribution are evaluated separately.
 
 ## Canonical labeling boundary
 
@@ -45,15 +45,17 @@ The generative target is deliberately different from the v0.15 "final scrimmage 
 
 A failed third-down play followed by a punt or field-goal attempt is **not terminal** for v0.16. It is `CONTINUE`, because fourth-down action policy still owns the next event.
 
-A scrimmage play is terminal when it directly creates one of these families:
+Historical labels mirror the frozen simulator's realized ordering rather than introducing a second football ontology:
 
-1. `TURNOVER`: interception, lost fumble, or other offensive turnover;
-2. `SCORE`: offensive touchdown, unless the play is already classified as a turnover;
-3. `DOWNS`: failed fourth-down scrimmage attempt;
-4. `END_HALF`: final eligible possession event before halftime or game end, after higher-priority terminal outcomes are excluded;
+1. `SCORE` if the play is marked touchdown or yards gained crosses the current goal line;
+2. otherwise `TURNOVER` if the outcome loses possession;
+3. otherwise `DOWNS` if a fourth-down scrimmage play fails to convert;
+4. otherwise `END_HALF` if the play is the final eligible possession event before halftime or game end;
 5. otherwise `CONTINUE`.
 
-This ordering prevents a late interception from being mislabeled `END_HALF` merely because no later play follows it.
+A first down is realized when either the source first-down flag is present **or** yards gained reach the distance to go. This matches the simulator's transition logic and avoids false `DOWNS` labels when a source field is sparse.
+
+The ordering also prevents a late score, turnover, or failed fourth-down play from being relabeled `END_HALF` simply because no later eligible play follows it.
 
 ## Point-in-time evidence
 
@@ -89,7 +91,7 @@ Terminal labels are permuted within `(season, down bucket, field zone)`. This pr
 
 ### Conditional-family permutation
 
-Only terminal type is permuted among already-terminal rows. Exact termination labels remain unchanged. This tests whether the second-stage family head adds signal beyond merely knowing a possession ends.
+Only terminal type is permuted among already-terminal rows. Exact termination labels remain unchanged. This tests whether the second-stage family head adds signal beyond merely knowing that a possession ends.
 
 ## Structural support during generation
 
@@ -98,11 +100,13 @@ Simulator authority cannot create impossible terminal families just because an e
 - `DOWNS` has zero generative support unless the current play is fourth down.
 - `END_HALF` has zero generative support unless the game clock is inside a short structural boundary window.
 
-These constraints apply to authority, not retrospective scoring. Historical oddities remain visible during evaluation rather than being silently erased.
+If a learned conditional distribution places all mass on illegal families, fallback normalization occurs only across structurally legal terminal families. Illegal support can never be reintroduced by a generic uniform fallback.
+
+These constraints apply to simulator authority, not retrospective scoring. Historical observations remain visible during evaluation rather than being silently projected onto the authority rules.
 
 ## Historically coherent outcome generation
 
-v0.16 does not convert a class label directly into fake stats.
+v0.16 does not convert a class label directly into fake statistics.
 
 `EmpiricalPlayOutcomeModel` gains an additive terminal index over the same pre-cutoff outcome rows. After a terminal family is selected, the simulator samples an observed outcome row compatible with:
 
@@ -110,9 +114,16 @@ v0.16 does not convert a class label directly into fake stats.
 - terminal family;
 - down / distance / field zone where sufficient support exists.
 
-Fallback is to a broader play-family × terminal-family pool. If no compatible pool exists, the challenger falls back to the frozen legacy outcome and records the fallback.
+Fallback broadens to play-family × terminal-family support. If no compatible pool exists, the challenger returns the exact frozen legacy outcome.
 
-A high fallback rate fails the v0.16 gate.
+On fallback:
+
+- the fallback is counted;
+- the bridge records the family that the legacy outcome actually realizes;
+- stale requested `END_HALF` authority is removed if the legacy outcome realizes another family;
+- downstream scoring uses the realized game event, never the originally requested family.
+
+A high conditioning fallback rate fails the v0.16 gate.
 
 ## Common-random-number contract
 
@@ -120,7 +131,7 @@ Terminal authority must not obtain artificial lift by shifting unrelated Monte C
 
 For every simulated scrimmage play:
 
-1. the exact frozen v0.15 empirical outcome draw is still consumed from the legacy outcome RNG;
+1. the exact frozen v0.15 empirical outcome draw is consumed from the legacy outcome RNG;
 2. its pre-draw RNG state is hashed into deterministic shadow streams;
 3. the challenger samples terminal family and terminal-conditioned outcome from those shadow streams;
 4. shadow streams do not advance the legacy outcome RNG;
@@ -129,11 +140,31 @@ For every simulated scrimmage play:
 
 This preserves the established RNG trajectory for future legacy draws while allowing the intervention itself to differ.
 
+## Requested vs realized semantics
+
+A generative model should be graded on the football world it actually produced, not on its internal request.
+
+The terminal bridge therefore tracks two concepts separately:
+
+- **requested family**: the terminal family sampled by the challenger;
+- **realized family**: the family implied by the outcome row that the simulator actually executes.
+
+Full-simulation terminal metrics are reconstructed from realized team draws:
+
+- scoring events;
+- turnovers;
+- turnovers on downs;
+- total non-clock terminal events.
+
+Requested counts remain diagnostics only.
+
+The promotion gate requires requested-vs-realized mismatch to remain at zero under the tested contract. Any mismatch indicates an authority-mechanics bug or unsupported semantic edge case and fails closed.
+
 ## END_HALF clock coupling
 
-`END_HALF` is not represented as a turnover or score. When it receives authority, the terminal-aware pace wrapper advances the clock to the actual halftime/game boundary. The existing v0.15 state machine then performs its ordinary halftime transition.
+`END_HALF` is not represented as a turnover or score. When it is both requested and successfully realized through the terminal-conditioned path, the terminal-aware pace wrapper advances the clock to the actual halftime/game boundary. The inherited state machine then performs its ordinary halftime transition.
 
-This keeps the clock mechanism separate from terminal football outcomes.
+If terminal conditioning falls back to a non-`END_HALF` legacy outcome, the bridge clears that clock authority before pace is sampled.
 
 ## Eight-cell factorial replay
 
@@ -145,6 +176,20 @@ v0.16 runs every combination of:
 
 That yields eight cells. Terminal authority is compared within four parent contexts, so it cannot earn promotion by working only when stacked on every previous challenger.
 
+Learned play calling, state-conditioned player opportunity, and v0.13 drive-volume logic remain fixed across all cells.
+
+## Aggregation contract
+
+Sparse diagnostics must use the right evidence denominator.
+
+- game metrics are weighted by replay games;
+- player metrics by player rows;
+- drive metrics by drive-team rows;
+- terminal event metrics by terminal-team rows;
+- terminal conditioning fallback rate by terminal probability / conditioning attempts rather than a simple average of per-game percentages.
+
+This prevents a tiny game with one fallback from receiving the same aggregate weight as a large game with hundreds of terminal evaluations.
+
 ## Required evidence before research-champion review
 
 Default gate requirements include:
@@ -152,12 +197,13 @@ Default gate requirements include:
 - at least three held-out seasons;
 - at least 200 replay games;
 - sufficient full and conditional terminal samples;
-- joint terminal-family log loss beats context baseline by a preregistered margin;
+- joint terminal-family log loss beats the context baseline by a preregistered margin;
 - joint model beats full permutation;
 - conditional-family head beats conditional permutation;
 - calibration ECE below the safety ceiling;
 - conditioned-outcome fallback rate below 1%;
-- terminal event frequency improves in at least three of four parent contexts;
+- requested-vs-realized mismatch rate equal to zero;
+- realized terminal event frequency improves in at least three of four parent contexts;
 - weekly consistency;
 - no material regression in drives, plays, pace, scoring, opportunity, fantasy, punts, field goals, or fourth-down decisions.
 
