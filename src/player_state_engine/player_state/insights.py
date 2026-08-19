@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Mapping
 
 import numpy as np
 import pandas as pd
@@ -69,6 +69,12 @@ def _points(draws: pd.DataFrame) -> np.ndarray:
     if not len(values):
         raise ValueError("draws contain no finite league_fantasy_points")
     return values
+
+
+def _mean_column(draws: pd.DataFrame, column: str) -> float:
+    if column not in draws:
+        return 0.0
+    return float(pd.to_numeric(draws[column], errors="coerce").fillna(0.0).mean())
 
 
 def rank_probabilities(
@@ -217,12 +223,12 @@ def build_player_intelligence_card(
 ) -> PlayerIntelligenceCard:
     values = _points(draws)
     q10, q50, q90 = np.quantile(values, [0.10, 0.50, 0.90])
-    expected_routes = float(pd.to_numeric(draws.get("routes", 0.0), errors="coerce").mean())
-    expected_targets = float(pd.to_numeric(draws.get("targets", 0.0), errors="coerce").mean())
-    expected_carries = float(pd.to_numeric(draws.get("carries", 0.0), errors="coerce").mean())
-    rz_plays = pd.to_numeric(draws.get("team_red_zone_plays", 0.0), errors="coerce")
-    rz_share = snapshot.role.mean("red_zone_share", 0.0)
-    expected_rz = float(rz_plays.mean() * rz_share)
+    expected_routes = _mean_column(draws, "routes")
+    expected_targets = _mean_column(draws, "targets")
+    expected_carries = _mean_column(draws, "carries")
+    expected_rz = _mean_column(draws, "team_red_zone_plays") * snapshot.role.mean(
+        "red_zone_share", 0.0
+    )
     leading_uncertainty = _uncertainty_driver(uncertainty)
     if upside_driver is None:
         upside_driver = (
@@ -236,8 +242,16 @@ def build_player_intelligence_card(
         median=float(q50),
         q10=float(q10),
         q90=float(q90),
-        probability_top_12=(float(rank_probability["top_12"]) if rank_probability and "top_12" in rank_probability else None),
-        probability_top_24=(float(rank_probability["top_24"]) if rank_probability and "top_24" in rank_probability else None),
+        probability_top_12=(
+            float(rank_probability["top_12"])
+            if rank_probability and "top_12" in rank_probability
+            else None
+        ),
+        probability_top_24=(
+            float(rank_probability["top_24"])
+            if rank_probability and "top_24" in rank_probability
+            else None
+        ),
         probability_below_replacement=(
             float(np.mean(values < replacement_threshold)) if replacement_threshold is not None else None
         ),
@@ -245,7 +259,7 @@ def build_player_intelligence_card(
         expected_routes=expected_routes,
         expected_targets=expected_targets,
         expected_carries=expected_carries,
-        expected_red_zone_opportunities=expected_rz,
+        expected_red_zone_opportunities=float(expected_rz),
         role_state=snapshot.role.role_label,
         role_change_probability=float(snapshot.role.role_change_probability),
         role_maturity=float(snapshot.role.maturity),
