@@ -8,7 +8,6 @@ import pandas as pd
 from player_state_engine.game_intelligence.decision import (
     DriveTerminationHazardModel,
     _add_context,
-    _chronology,
     _normalize_game_id,
     _numeric,
     _play_family,
@@ -239,6 +238,21 @@ def _normalize(values: np.ndarray) -> np.ndarray:
     return array / total
 
 
+def _normalize_with_support(values: np.ndarray, support: np.ndarray) -> np.ndarray:
+    """Normalize only over structurally legal families, including sparse fallback."""
+    legal = np.asarray(support, dtype=float)
+    legal[~np.isfinite(legal)] = 0.0
+    legal = np.clip(legal, 0.0, 1.0)
+    if float(legal.sum()) <= 0:
+        raise ValueError("Terminal-family structural support contains no legal family")
+    values_array = np.asarray(values, dtype=float)
+    values_array[~np.isfinite(values_array)] = 0.0
+    masked = np.clip(values_array, 0.0, None) * legal
+    if float(masked.sum()) <= 0:
+        return legal / legal.sum()
+    return masked / masked.sum()
+
+
 def _weighted_terminal_counts(frame: pd.DataFrame) -> np.ndarray:
     if frame.empty:
         return np.zeros(len(TERMINAL_END_FAMILIES), dtype=float)
@@ -451,7 +465,7 @@ class TerminalFamilyModel:
             authority_mode=authority_mode,
             authority_end_window_seconds=self.authority_end_window_seconds,
         )
-        conditional = _normalize(conditional * support)
+        conditional = _normalize_with_support(conditional, support)
         probability = np.concatenate(([1.0 - hazard], hazard * conditional))
         probability = _normalize(probability)
         return {
