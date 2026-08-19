@@ -288,7 +288,7 @@ def simulate_matchup_decision_probe(
                             clock_value=clock,
                         )
                     continue
-                fourth_down_go_attempts[play_offense] += 1.0
+                fourth_down_go_attempts[offense] += 1.0
 
             play_offense = offense
             if pending_drive and str(pending_drive.get("team")) == str(play_offense):
