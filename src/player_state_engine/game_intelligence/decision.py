@@ -440,7 +440,6 @@ class FourthDownDecisionModel:
         counts: np.ndarray,
         prior_probability: np.ndarray,
     ) -> np.ndarray:
-        evidence = float(np.asarray(counts, dtype=float).sum())
         strength = max(float(self.prior_strength), 1e-6)
         return _normalize_probabilities(counts + strength * prior_probability)
 
