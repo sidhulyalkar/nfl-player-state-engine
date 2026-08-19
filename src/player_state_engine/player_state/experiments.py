@@ -32,7 +32,7 @@ class PairedEffectEstimate:
         return asdict(self)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ExperimentEvidence:
     experiment_id: str
     evidence_tier: EvidenceTier
