@@ -51,8 +51,7 @@ def _with_terminal_context(frame: pd.DataFrame) -> pd.DataFrame:
     clock = _numeric(data, "game_seconds_remaining", 3600.0).clip(0.0, 3600.0)
     if "qtr" in data:
         qtr = pd.to_numeric(data["qtr"], errors="coerce")
-        fallback = clock.map(_quarter_from_clock)
-        qtr = qtr.fillna(fallback).astype(int)
+        qtr = qtr.fillna(clock.map(_quarter_from_clock)).astype(int)
     else:
         qtr = clock.map(_quarter_from_clock).astype(int)
     data["qtr"] = qtr
@@ -67,12 +66,13 @@ def _with_terminal_context(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def extract_terminal_family_events(pbp: pd.DataFrame) -> pd.DataFrame:
-    """Label the realized possession family after each offensive scrimmage play.
+    """Label the realized family produced directly by each offensive scrimmage play.
 
-    Unlike the v0.15 diagnostic hazard, a third-down failure followed by a punt or field-goal
-    attempt remains ``CONTINUE`` here. The possession has not ended yet; the fourth-down policy
-    still owns the next action. Only a score, turnover, failed fourth down, or half/game expiry
-    is terminal for this generative target.
+    The labels intentionally mirror the frozen simulator's realized ordering. A failed third
+    down followed by a punt or field-goal attempt remains ``CONTINUE`` because fourth-down
+    policy still owns the next event. A play becomes terminal only when the play itself scores,
+    turns the ball over, fails on fourth down, or is the final eligible possession event before
+    halftime/game end.
     """
     data = _normalize_game_id(pbp)
     required = {
@@ -120,22 +120,24 @@ def extract_terminal_family_events(pbp: pd.DataFrame) -> pd.DataFrame:
     result["score_differential"] = _numeric(result, "score_differential", 0.0)
     result = _with_terminal_context(result)
 
+    yards = _numeric(result, "yards_gained", 0.0).clip(-25.0, 99.0)
+    touchdown = _numeric(result, "touchdown").ge(0.5) | yards.ge(result["yardline_100"])
     turnover = (
         _numeric(result, "turnover")
         .add(_numeric(result, "interception"))
         .add(_numeric(result, "fumble_lost"))
         .gt(0)
     )
-    touchdown = _numeric(result, "touchdown").ge(0.5) & ~turnover
-    first_down = _numeric(result, "first_down").ge(0.5)
-    failed_fourth = _numeric(result, "down").eq(4) & ~first_down & ~turnover & ~touchdown
+    first_down = _numeric(result, "first_down").ge(0.5) | yards.ge(result["ydstogo"])
+    failed_fourth = _numeric(result, "down").eq(4) & ~first_down & ~touchdown & ~turnover
     current_qtr = pd.to_numeric(result["qtr"], errors="coerce").fillna(4).astype(int)
     next_qtr = next_event_qtr.reindex(result.index)
     end_half = current_qtr.isin([2, 4]) & (next_qtr.isna() | next_qtr.gt(current_qtr))
 
+    # Match the simulator exactly: score first, then turnover, then failed fourth down.
     result["terminal_family"] = np.select(
-        [turnover, touchdown, failed_fourth, end_half],
-        ["TURNOVER", "SCORE", "DOWNS", "END_HALF"],
+        [touchdown, turnover, failed_fourth, end_half],
+        ["SCORE", "TURNOVER", "DOWNS", "END_HALF"],
         default="CONTINUE",
     )
     result["terminated"] = result["terminal_family"].ne("CONTINUE").astype(int)
@@ -160,8 +162,7 @@ def extract_terminal_family_events(pbp: pd.DataFrame) -> pd.DataFrame:
         "play_family",
         *_TERMINAL_FAMILY_CONTEXT_COLUMNS,
     ]
-    columns = list(dict.fromkeys(columns))
-    return result[columns].reset_index(drop=True)
+    return result[list(dict.fromkeys(columns))].reset_index(drop=True)
 
 
 def attach_terminal_family_labels(
@@ -212,7 +213,7 @@ def permute_conditional_terminal_families_within_context_season(
     *,
     seed: int = 42,
 ) -> pd.DataFrame:
-    """Shuffle terminal type only, preserving the exact termination hazard labels."""
+    """Shuffle terminal type only while preserving the exact termination labels."""
     data = events.copy() if "terminal_family" in events else extract_terminal_family_events(events)
     rng = np.random.default_rng(seed)
     terminal = data["terminal_family"].ne("CONTINUE")
@@ -288,13 +289,7 @@ def _top_label_ece(actual: np.ndarray, matrix: np.ndarray, bins: int = 10) -> fl
 
 @dataclass(slots=True)
 class TerminalFamilyModel:
-    """Two-stage point-in-time terminal-family generator.
-
-    Stage one estimates whether the current offensive scrimmage play ends the possession.
-    Stage two estimates the terminal type conditional on an ending. The decomposition keeps
-    the v0.15 hazard question visible instead of allowing a strong CONTINUE majority class to
-    hide a weak SCORE/TURNOVER/DOWNS/END_HALF classifier.
-    """
+    """Two-stage point-in-time terminal-family generator."""
 
     prior_strength: float = 30.0
     half_life_weeks: float = 8.0
@@ -466,8 +461,7 @@ class TerminalFamilyModel:
             authority_end_window_seconds=self.authority_end_window_seconds,
         )
         conditional = _normalize_with_support(conditional, support)
-        probability = np.concatenate(([1.0 - hazard], hazard * conditional))
-        probability = _normalize(probability)
+        probability = _normalize(np.concatenate(([1.0 - hazard], hazard * conditional)))
         return {
             family: float(probability[index])
             for index, family in enumerate(TERMINAL_FAMILIES)
@@ -479,9 +473,7 @@ class TerminalFamilyModel:
         for _, row in data.iterrows():
             state = row.to_dict()
             play_family = str(row["play_family"])
-            model = self.distribution(
-                team=str(row["team"]), state=state, play_family=play_family
-            )
+            model = self.distribution(team=str(row["team"]), state=state, play_family=play_family)
             team_base = self.distribution(
                 team=str(row["team"]),
                 state=state,
@@ -538,9 +530,10 @@ def evaluate_terminal_family_scores(scored: pd.DataFrame) -> dict[str, float]:
     ].to_numpy(dtype=float)
     one_hot = np.eye(len(TERMINAL_FAMILIES), dtype=float)[actual]
     predicted = np.argmax(model, axis=1)
-    actual_probability = model[np.arange(len(model)), actual]
-    team_probability = team_base[np.arange(len(team_base)), actual]
-    context_probability = context_base[np.arange(len(context_base)), actual]
+    rows = np.arange(len(model))
+    actual_probability = model[rows, actual]
+    team_probability = team_base[rows, actual]
+    context_probability = context_base[rows, actual]
     global_probability = pd.to_numeric(
         scored["global_base_probability"], errors="coerce"
     ).to_numpy(dtype=float)
@@ -685,7 +678,5 @@ def evaluate_terminal_family_team_draws(
         actual_values = pd.to_numeric(
             merged[f"{metric}_actual"], errors="coerce"
         ).fillna(0.0)
-        result[f"team_{metric}_mae"] = float(
-            np.mean(np.abs(predicted_values - actual_values))
-        )
+        result[f"team_{metric}_mae"] = float(np.mean(np.abs(predicted_values - actual_values)))
     return result
