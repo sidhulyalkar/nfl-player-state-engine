@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 import numpy as np
 import pandas as pd
@@ -354,7 +354,9 @@ class PlayerStateGraph:
             if fixed_execution:
                 scrambles = np.rint(remaining * execution.scramble_rate).astype(int)
             else:
-                scrambles = rng_execution.binomial(remaining, np.clip(scramble_rate, 0.0, 0.35))
+                scrambles = rng_execution.binomial(
+                    remaining, np.clip(scramble_rate, 0.0, 0.35)
+                )
             attempts = np.maximum(remaining - scrambles, 0)
             if fixed_execution:
                 completions = np.rint(attempts * execution.completion_rate).astype(int)
@@ -517,7 +519,10 @@ class PlayerStateGraph:
             reductions[component] = max(total_variance - variance, 0.0)
         reduction_total = sum(reductions.values())
         shares = (
-            {component: reductions[component] / reduction_total for component in self.COMPONENTS}
+            {
+                component: reductions[component] / reduction_total
+                for component in self.COMPONENTS
+            }
             if reduction_total > 1e-12
             else {component: 0.0 for component in self.COMPONENTS}
         )
