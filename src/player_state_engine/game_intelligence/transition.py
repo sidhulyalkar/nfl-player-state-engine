@@ -29,6 +29,19 @@ def _nullable_numeric(frame: pd.DataFrame, column: str) -> pd.Series:
     return pd.to_numeric(frame[column], errors="coerce")
 
 
+def _scalar_number(value: object, default: float = 0.0) -> float:
+    """Convert a nullable scalar to finite float without relying on truthiness.
+
+    nflverse/Pandas inputs can carry ``pd.NA`` values whose boolean value is
+    intentionally ambiguous. All transition classification should therefore
+    coerce numerically and apply an explicit fallback instead of using ``or``.
+    """
+    numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    if pd.isna(numeric) or not np.isfinite(float(numeric)):
+        return float(default)
+    return float(numeric)
+
+
 def _normalize_game_id(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     if "game_id" not in out and "nflverse_game_id" in out:
@@ -167,11 +180,11 @@ def extract_field_goal_attempts(pbp: pd.DataFrame) -> pd.DataFrame:
 
 
 def _classify_transition(window: pd.DataFrame, last_scrimmage: pd.Series) -> str:
-    turnover = bool(
-        float(last_scrimmage.get("interception", 0.0) or 0.0) >= 0.5
-        or float(last_scrimmage.get("fumble_lost", 0.0) or 0.0) >= 0.5
+    turnover = (
+        _scalar_number(last_scrimmage.get("interception")) >= 0.5
+        or _scalar_number(last_scrimmage.get("fumble_lost")) >= 0.5
     )
-    touchdown = bool(float(last_scrimmage.get("touchdown", 0.0) or 0.0) >= 0.5)
+    touchdown = _scalar_number(last_scrimmage.get("touchdown")) >= 0.5
     if touchdown:
         return "TOUCHDOWN"
     if turnover:
@@ -185,12 +198,12 @@ def _classify_transition(window: pd.DataFrame, last_scrimmage: pd.Series) -> str
         )
     if _punt_mask(window).any():
         return "PUNT"
-    qtr = float(last_scrimmage.get("qtr", 0.0) or 0.0)
+    qtr = _scalar_number(last_scrimmage.get("qtr"))
     next_qtr = _nullable_numeric(window, "qtr").dropna()
     if qtr <= 2 and not next_qtr.empty and float(next_qtr.iloc[-1]) >= 3:
         return "HALFTIME"
-    down = float(last_scrimmage.get("down", 0.0) or 0.0)
-    first_down = float(last_scrimmage.get("first_down", 0.0) or 0.0)
+    down = _scalar_number(last_scrimmage.get("down"))
+    first_down = _scalar_number(last_scrimmage.get("first_down"))
     if down >= 4 and first_down < 0.5:
         return "DOWNS"
     return "OTHER"
@@ -528,12 +541,14 @@ class PossessionTransitionModel:
         base_seconds = base.dropna(subset=["transition_seconds"])
         if base_seconds.empty:
             return 8.0
-        base_mean = _weighted_mean(base_seconds["transition_seconds"], base_seconds["recency_weight"])
-        contextual = contextual.dropna(subset=["transition_seconds"])
-        if contextual.empty or alpha <= 0:
+        base_mean = _weighted_mean(
+            base_seconds["transition_seconds"], base_seconds["recency_weight"]
+        )
+        contextual_seconds = contextual.dropna(subset=["transition_seconds"])
+        if contextual_seconds.empty or alpha <= 0:
             return float(np.clip(base_mean, 0.0, 45.0))
         context_mean = _weighted_mean(
-            contextual["transition_seconds"], contextual["recency_weight"]
+            contextual_seconds["transition_seconds"], contextual_seconds["recency_weight"]
         )
         if not np.isfinite(context_mean):
             context_mean = base_mean
@@ -574,16 +589,17 @@ class PossessionTransitionModel:
     ) -> float:
         if not self.fitted:
             raise RuntimeError("PossessionTransitionModel must be fitted before prediction")
+        distance = float(kick_distance if kick_distance is not None else yardline_100 + 17.0)
         if self.field_goals.empty:
-            distance = float(kick_distance or (yardline_100 + 17.0))
             return float(np.clip(0.96 - max(distance - 30.0, 0.0) * 0.012, 0.25, 0.98))
-        distance = float(kick_distance or (yardline_100 + 17.0))
         bucket = _distance_bucket(distance)
         league = self.field_goals
         bucket_rows = league.loc[league["distance_bucket"].astype(str).eq(bucket)]
         if bucket_rows.empty:
             bucket_rows = league
         base = _weighted_mean(bucket_rows["made"], bucket_rows["recency_weight"])
+        if not np.isfinite(base):
+            base = 0.82
         team_rows = bucket_rows.loc[bucket_rows["team"].astype(str).eq(str(team))]
         evidence = (
             float(
@@ -597,6 +613,8 @@ class PossessionTransitionModel:
         if team_rows.empty:
             return float(np.clip(base, 0.02, 0.995))
         team_rate = _weighted_mean(team_rows["made"], team_rows["recency_weight"])
+        if not np.isfinite(team_rate):
+            team_rate = base
         alpha = evidence / (evidence + max(float(self.field_goal_prior_strength), 1e-6))
         return float(np.clip((1.0 - alpha) * base + alpha * team_rate, 0.02, 0.995))
 
@@ -614,6 +632,8 @@ class PossessionTransitionModel:
             base_start = _weighted_mean(
                 base_pool["next_start_yardline_100"], base_pool["recency_weight"]
             )
+            if not np.isfinite(base_start):
+                base_start = 75.0
             base_seconds_pool = base_pool.dropna(subset=["transition_seconds"])
             base_seconds = (
                 _weighted_mean(
@@ -651,6 +671,8 @@ class PossessionTransitionModel:
             if not self.field_goals.empty
             else 0.82
         )
+        if not np.isfinite(league_rate):
+            league_rate = 0.82
         rows: list[dict[str, object]] = []
         for _, row in attempts.iterrows():
             bucket = str(row["distance_bucket"])
@@ -662,6 +684,8 @@ class PossessionTransitionModel:
                 if not bucket_rows.empty
                 else league_rate
             )
+            if not np.isfinite(base_probability):
+                base_probability = league_rate
             rows.append(
                 {
                     **row.to_dict(),
@@ -780,25 +804,25 @@ def observed_transition_team_games(pbp: pd.DataFrame) -> pd.DataFrame:
     if pairs.empty:
         return pd.DataFrame(columns=columns)
 
-    events = data.loc[data["posteam"].notna(), ["game_id", "posteam"]].copy()
+    event_index = data.index[data["posteam"].notna()]
+    event_source = data.loc[event_index]
+    events = event_source.loc[:, ["game_id", "posteam"]].copy()
     events["team"] = events["posteam"].astype(str)
-    events["punts"] = _punt_mask(data.loc[events.index]).astype(float)
-    fg_mask = _field_goal_mask(data.loc[events.index])
+    events["punts"] = _punt_mask(event_source).astype(float)
+    fg_mask = _field_goal_mask(event_source)
     events["field_goal_attempts"] = fg_mask.astype(float)
-    events["field_goals_made"] = (
-        fg_mask & _field_goal_made(data.loc[events.index])
-    ).astype(float)
-    scrimmage = _scrimmage_mask(data.loc[events.index])
+    events["field_goals_made"] = (fg_mask & _field_goal_made(event_source)).astype(float)
+    scrimmage = _scrimmage_mask(event_source)
     events["turnovers"] = (
         scrimmage
         & (
-            _numeric(data.loc[events.index], "interception").gt(0)
-            | _numeric(data.loc[events.index], "fumble_lost").gt(0)
+            _numeric(event_source, "interception").gt(0)
+            | _numeric(event_source, "fumble_lost").gt(0)
         )
     ).astype(float)
     if "turnover_on_downs" in data:
         events["turnovers_on_downs"] = (
-            scrimmage & _numeric(data.loc[events.index], "turnover_on_downs").gt(0)
+            scrimmage & _numeric(event_source, "turnover_on_downs").gt(0)
         ).astype(float)
     else:
         events["turnovers_on_downs"] = 0.0
