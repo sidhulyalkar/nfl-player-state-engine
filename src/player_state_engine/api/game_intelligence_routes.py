@@ -90,7 +90,7 @@ def install_game_intelligence_routes(
     )
     benchmark = Path(
         benchmark_root
-        or os.getenv("PSE_GAME_INTELLIGENCE_BENCHMARK_ROOT", "artifacts/game_intelligence/v015")
+        or os.getenv("PSE_GAME_INTELLIGENCE_BENCHMARK_ROOT", "artifacts/game_intelligence/v016")
     )
 
     @app.get("/v1/research/game-intelligence/sources")
@@ -108,7 +108,7 @@ def install_game_intelligence_routes(
         artifact_dir = _latest_artifact_dir(root) if root.exists() else None
         benchmark_summary = _latest_benchmark_summary(benchmark)
         return {
-            "model_family": "game_intelligence_v015_research",
+            "model_family": "game_intelligence_v016_research",
             "latest_registry_entry": latest,
             "registry_entries": len(entries),
             "artifact_available": artifact_dir is not None,
@@ -133,7 +133,7 @@ def install_game_intelligence_routes(
         if summary is None:
             raise HTTPException(
                 status_code=503,
-                detail=f"No v0.15 game-intelligence benchmark summary available under {benchmark}",
+                detail=f"No v0.16 game-intelligence benchmark summary available under {benchmark}",
             )
         path, payload = summary
         return {
@@ -178,6 +178,8 @@ def install_game_intelligence_routes(
             home_spread=request.home_spread,
             game_total=request.game_total,
         )
+        # Intentionally keep the live research endpoint on the established simulator path.
+        # v0.16 terminal authority remains benchmark-only until expanding replay and human review.
         result = simulate_matchup(
             matchup,
             tendencies=read_table(tendency_path),
@@ -194,5 +196,6 @@ def install_game_intelligence_routes(
             "diagnostics": result.diagnostics,
             "research_only": True,
             "promoted": False,
+            "terminal_family_authority": False,
             "production_projection_changed": False,
         }

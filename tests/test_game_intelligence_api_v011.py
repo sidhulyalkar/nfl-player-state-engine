@@ -11,8 +11,8 @@ def test_benchmark_api_is_guarded_and_read_only(tmp_path) -> None:
     benchmark_root = tmp_path / "benchmark"
     benchmark_root.mkdir(parents=True)
     summary = {
-        "aggregate_metrics": {"transition_decision": {"games": 250.0}},
-        "diagnostics": {"protocol": "v015_fourth_down_decision_four_cell_expanding_weekly"},
+        "aggregate_metrics": {"transition_decision_terminal": {"games": 250.0}},
+        "diagnostics": {"protocol": "v016_terminal_family_eight_cell_expanding_weekly"},
         "promotion": {
             "promoted": False,
             "reasons": ["downstream evidence incomplete"],
@@ -29,15 +29,15 @@ def test_benchmark_api_is_guarded_and_read_only(tmp_path) -> None:
         game_intelligence_registry=tmp_path / "registry.json",
         game_intelligence_benchmark_root=benchmark_root,
     )
-    assert app.version == "0.15.0"
+    assert app.version == "0.16.0"
     client = TestClient(app)
 
     status = client.get("/v1/research/game-intelligence/status")
     assert status.status_code == 200
     status_payload = status.json()
-    assert status_payload["model_family"] == "game_intelligence_v015_research"
+    assert status_payload["model_family"] == "game_intelligence_v016_research"
     assert status_payload["benchmark_available"] is True
-    assert status_payload["benchmark_protocol"] == "v015_fourth_down_decision_four_cell_expanding_weekly"
+    assert status_payload["benchmark_protocol"] == "v016_terminal_family_eight_cell_expanding_weekly"
     assert status_payload["automatic_promotion"] is False
 
     response = client.get("/v1/research/game-intelligence/benchmark")
@@ -60,4 +60,4 @@ def test_benchmark_api_fails_closed_without_summary(tmp_path) -> None:
     )
     response = TestClient(app).get("/v1/research/game-intelligence/benchmark")
     assert response.status_code == 503
-    assert "v0.15" in response.json()["detail"]
+    assert "v0.16" in response.json()["detail"]
