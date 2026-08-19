@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
-from typing import Iterable
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -87,4 +87,4 @@ def validate_no_future_evidence(
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)

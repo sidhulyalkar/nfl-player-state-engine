@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from player_state_engine.state_graph.regime import RegimeDetector
-from player_state_engine.state_graph.role import DiscountedBetaRoleEstimator, ROLE_METRICS
+from player_state_engine.state_graph.role import ROLE_METRICS, DiscountedBetaRoleEstimator
 from player_state_engine.state_graph.types import (
     AvailabilityState,
     BetaPosterior,

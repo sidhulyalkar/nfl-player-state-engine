@@ -35,7 +35,10 @@ from player_state_engine.state_graph.provenance import (
 )
 from player_state_engine.state_graph.regime import BOUNDARY_COLUMNS, RegimeDetector
 from player_state_engine.state_graph.role import ROLE_METRICS, DiscountedBetaRoleEstimator
-from player_state_engine.state_graph.season_sim import FantasySeasonSimulator, SeasonSimulationSummary
+from player_state_engine.state_graph.season_sim import (
+    FantasySeasonSimulator,
+    SeasonSimulationSummary,
+)
 from player_state_engine.state_graph.tracking_distillation import TrackingTeacherDistiller
 from player_state_engine.state_graph.types import (
     AvailabilityState,

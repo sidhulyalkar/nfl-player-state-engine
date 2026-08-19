@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from player_state_engine.state_graph.types import DynamicRoleState, ForecastQuantiles, UncertaintyBreakdown
+from player_state_engine.state_graph.types import (
+    DynamicRoleState,
+    ForecastQuantiles,
+    UncertaintyBreakdown,
+)
 
 
 @dataclass(slots=True, frozen=True)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -104,7 +104,7 @@ def test_dynamic_role_state_detects_discontinuous_change() -> None:
 
 
 def test_publication_time_guard_blocks_retrospective_leakage() -> None:
-    cutoff = datetime(2026, 9, 13, 16, 0, tzinfo=timezone.utc)
+    cutoff = datetime(2026, 9, 13, 16, 0, tzinfo=UTC)
     safe = SourceAvailabilityRecord(
         source_family="official_injury",
         event_time=cutoff - timedelta(days=1),
@@ -201,7 +201,7 @@ def test_conditional_conformal_widens_undercovered_intervals() -> None:
 def test_fusion_learns_to_prefer_better_archived_expert() -> None:
     rows = []
     rng = np.random.default_rng(3)
-    for index in range(100):
+    for _index in range(100):
         actual = float(rng.normal(15.0, 4.0))
         for expert, bias in (("direct", 0.2), ("world", 1.5), ("consensus", 4.5)):
             median = actual + bias
