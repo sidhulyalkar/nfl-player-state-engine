@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from math import exp, log
-from typing import Mapping
+from math import exp
 
 import numpy as np
 from scipy.stats import beta as beta_distribution
