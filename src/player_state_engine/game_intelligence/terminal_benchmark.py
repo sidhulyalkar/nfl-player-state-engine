@@ -12,10 +12,7 @@ from player_state_engine.game_intelligence.decision import (
     extract_fourth_down_decisions,
     observed_fourth_down_team_games,
 )
-from player_state_engine.game_intelligence.decision_benchmark import (
-    _chronology,
-    _safe_ratio,
-)
+from player_state_engine.game_intelligence.decision_benchmark import _chronology, _safe_ratio
 from player_state_engine.game_intelligence.drive import (
     DriveVolumeModel,
     evaluate_drive_volume_draws,
@@ -53,9 +50,7 @@ from player_state_engine.game_intelligence.terminal import (
     permute_conditional_terminal_families_within_context_season,
     permute_terminal_families_within_context_season,
 )
-from player_state_engine.game_intelligence.terminal_simulator import (
-    simulate_matchup_terminal_probe,
-)
+from player_state_engine.game_intelligence.terminal_simulator import simulate_matchup_terminal_probe
 from player_state_engine.game_intelligence.transition import (
     PossessionTransitionModel,
     evaluate_transition_team_draws,
@@ -116,6 +111,21 @@ _LOWER_IS_BETTER = {
     "team_terminal_turnover_events_mae",
     "team_terminal_downs_events_mae",
     "terminal_conditioning_fallback_rate",
+    "terminal_realization_mismatch_total",
+}
+_TOTAL_METRICS = {
+    "games",
+    "player_rows",
+    "predicted_player_rows",
+    "observed_player_rows",
+    "fantasy_rows",
+    "drive_team_rows",
+    "transition_team_rows",
+    "decision_team_rows",
+    "terminal_team_rows",
+    "terminal_conditioning_fallbacks",
+    "terminal_probability_calls",
+    "terminal_realization_mismatch_total",
 }
 
 
@@ -131,20 +141,11 @@ class TerminalBenchmarkResult:
 def _aggregate(records: list[dict[str, float]]) -> dict[str, float]:
     if not records:
         return {}
-    totals = {
-        "games",
-        "player_rows",
-        "predicted_player_rows",
-        "observed_player_rows",
-        "fantasy_rows",
-        "drive_team_rows",
-        "transition_team_rows",
-        "decision_team_rows",
-        "terminal_team_rows",
-    }
     keys = sorted({key for record in records for key in record})
     result: dict[str, float] = {}
     for key in keys:
+        if key == "terminal_conditioning_fallback_rate":
+            continue
         weighted: list[tuple[float, float]] = []
         for record in records:
             value = record.get(key)
@@ -181,43 +182,53 @@ def _aggregate(records: list[dict[str, float]]) -> dict[str, float]:
             weighted.append((float(value), weight))
         if not weighted:
             continue
-        if key in totals:
+        if key in _TOTAL_METRICS:
             result[key] = float(sum(value for value, _ in weighted))
         else:
             denominator = sum(weight for _, weight in weighted)
             result[key] = float(
                 sum(value * weight for value, weight in weighted) / max(denominator, 1e-12)
             )
+    calls = result.get("terminal_probability_calls", 0.0)
+    fallbacks = result.get("terminal_conditioning_fallbacks", 0.0)
+    if calls > 0:
+        result["terminal_conditioning_fallback_rate"] = float(fallbacks / calls)
     return result
+
+
+def _isolated_weight_column(column: str) -> str:
+    if (
+        "conditional_terminal" in column
+        or "permuted_conditional" in column
+        or column == "real_conditional_beats_permuted"
+    ):
+        return "conditional_terminal_rows"
+    if column.endswith("_recall"):
+        family = column[: -len("_recall")]
+        return f"{family}_rows"
+    return "terminal_family_rows"
 
 
 def _aggregate_isolated(frame: pd.DataFrame) -> dict[str, float]:
     if frame.empty:
         return {}
     result: dict[str, float] = {}
-    totals = {"terminal_family_rows", "conditional_terminal_rows"}
     for column in frame.columns:
         if column in {"season", "week"}:
             continue
         values = pd.to_numeric(frame[column], errors="coerce")
-        valid = values.notna()
-        if not valid.any():
+        if column.endswith("_rows"):
+            result[column] = float(values.dropna().sum())
             continue
-        if column in totals or column.endswith("_rows"):
-            result[column] = float(values[valid].sum())
+        weight_column = _isolated_weight_column(column)
+        if weight_column not in frame:
             continue
-        weights = pd.to_numeric(
-            frame.loc[valid, "terminal_family_rows"], errors="coerce"
-        ).fillna(0.0)
-        positive = weights.gt(0)
-        if not positive.any():
+        weights = pd.to_numeric(frame[weight_column], errors="coerce")
+        mask = values.notna() & weights.notna() & weights.gt(0)
+        if not mask.any():
             continue
-        selected = values.loc[valid]
         result[column] = float(
-            np.average(
-                selected.loc[positive.index][positive].to_numpy(dtype=float),
-                weights=weights[positive].to_numpy(dtype=float),
-            )
+            np.average(values.loc[mask].to_numpy(dtype=float), weights=weights.loc[mask])
         )
     return result
 
@@ -295,8 +306,7 @@ def _evaluate_terminal_non_clock_team_draws(
 
 
 def _effect_columns(
-    row: dict[str, float | int],
-    metrics: dict[str, dict[str, float]],
+    row: dict[str, float | int], metrics: dict[str, dict[str, float]]
 ) -> None:
     for parent, (candidate_name, baseline_name) in _PARENT_PAIRS.items():
         candidate = metrics[candidate_name]
@@ -478,10 +488,7 @@ def run_v016_terminal_benchmark(
                 isolated_rows.append(isolated)
 
             usage = build_player_usage_profiles(
-                play_frame,
-                season=season,
-                week=week,
-                players=players,
+                play_frame, season=season, week=week, players=players
             )
             if usage.empty:
                 skipped.append(
@@ -489,10 +496,18 @@ def run_v016_terminal_benchmark(
                 )
                 continue
 
-            variant_team_draws = {name: [] for name in _VARIANTS}
-            variant_player_draws = {name: [] for name in _VARIANTS}
-            variant_player_summaries = {name: [] for name in _VARIANTS}
-            variant_fallbacks: dict[str, list[float]] = {name: [] for name in _VARIANTS}
+            variant_team_draws: dict[str, list[pd.DataFrame]] = {
+                name: [] for name in _VARIANTS
+            }
+            variant_player_draws: dict[str, list[pd.DataFrame]] = {
+                name: [] for name in _VARIANTS
+            }
+            variant_player_summaries: dict[str, list[pd.DataFrame]] = {
+                name: [] for name in _VARIANTS
+            }
+            variant_fallbacks: dict[str, int] = {name: 0 for name in _VARIANTS}
+            variant_calls: dict[str, int] = {name: 0 for name in _VARIANTS}
+            variant_mismatch: dict[str, float] = {name: 0.0 for name in _VARIANTS}
 
             for game_index, (_, schedule_row) in enumerate(schedule_fold.iterrows()):
                 matchup = matchup_from_schedule(schedule_row)
@@ -522,9 +537,16 @@ def run_v016_terminal_benchmark(
                     summary["season"] = season
                     summary["week"] = week
                     variant_player_summaries[variant].append(summary)
-                    fallback = simulation.diagnostics.get("terminal_conditioning_fallback_rate")
-                    if fallback is not None and np.isfinite(float(fallback)):
-                        variant_fallbacks[variant].append(float(fallback))
+                    variant_fallbacks[variant] += int(
+                        simulation.diagnostics.get("terminal_conditioning_fallbacks", 0) or 0
+                    )
+                    variant_calls[variant] += int(
+                        simulation.diagnostics.get("terminal_probability_calls", 0) or 0
+                    )
+                    variant_mismatch[variant] += float(
+                        simulation.diagnostics.get("terminal_realization_mismatch_total", 0.0)
+                        or 0.0
+                    )
 
             reference = "legacy_transition_legacy_decision_legacy_terminal"
             if not variant_team_draws[reference]:
@@ -544,13 +566,17 @@ def run_v016_terminal_benchmark(
             game_ids = set(team_frames[reference]["game_id"].astype(str))
 
             observed_teams = observed_team_games(play_frame, schedule_fold)
-            observed_teams = observed_teams.loc[observed_teams["game_id"].astype(str).isin(game_ids)]
+            observed_teams = observed_teams.loc[
+                observed_teams["game_id"].astype(str).isin(game_ids)
+            ]
             observed_opportunity = observed_player_opportunity(play_frame)
             observed_opportunity = observed_opportunity.loc[
                 observed_opportunity["game_id"].astype(str).isin(game_ids)
             ]
             observed_drive = observed_drive_volume(test_plays)
-            observed_drive = observed_drive.loc[observed_drive["game_id"].astype(str).isin(game_ids)]
+            observed_drive = observed_drive.loc[
+                observed_drive["game_id"].astype(str).isin(game_ids)
+            ]
             observed_transitions = observed_transition_team_games(test_raw)
             observed_transitions = observed_transitions.loc[
                 observed_transitions["game_id"].astype(str).isin(game_ids)
@@ -563,7 +589,9 @@ def run_v016_terminal_benchmark(
             observed_terminal = observed_terminal.loc[
                 observed_terminal["game_id"].astype(str).isin(game_ids)
             ]
-            fold_test_plays = test_plays.loc[test_plays["game_id"].astype(str).isin(game_ids)]
+            fold_test_plays = test_plays.loc[
+                test_plays["game_id"].astype(str).isin(game_ids)
+            ]
             learned_probability = play_call_model.predict_pass_probability(fold_test_plays)
             play_metrics = evaluate_play_call_probabilities(
                 fold_test_plays["is_dropback"], learned_probability
@@ -590,18 +618,22 @@ def run_v016_terminal_benchmark(
                 )
                 fantasy_metrics = _fantasy_metrics(player_summaries[variant], player_actuals)
                 metrics = _combine_metrics(
-                    play_metrics,
-                    team_metrics,
-                    opportunity_metrics,
-                    fantasy_metrics,
+                    play_metrics, team_metrics, opportunity_metrics, fantasy_metrics
                 )
                 metrics.update(drive_metrics)
                 metrics.update(transition_metrics)
                 metrics.update(decision_metrics)
                 metrics.update(terminal_metrics)
-                if variant_fallbacks[variant]:
+                if variant_calls[variant] > 0:
+                    metrics["terminal_conditioning_fallbacks"] = float(
+                        variant_fallbacks[variant]
+                    )
+                    metrics["terminal_probability_calls"] = float(variant_calls[variant])
                     metrics["terminal_conditioning_fallback_rate"] = float(
-                        np.mean(variant_fallbacks[variant])
+                        variant_fallbacks[variant] / variant_calls[variant]
+                    )
+                    metrics["terminal_realization_mismatch_total"] = float(
+                        variant_mismatch[variant]
                     )
                 fold_metrics[variant] = metrics
                 records[variant].append(metrics)
@@ -639,6 +671,7 @@ def run_v016_terminal_benchmark(
         "play_call_model_fixed": "learned",
         "opportunity_model_fixed": "state_conditioned",
         "drive_volume_model_fixed": "hierarchical_v013",
+        "terminal_team_metrics_source": "realized_game_draws_not_requested_family_counts",
         "outcome_model": "same empirical evidence; terminal cells condition on canonical family",
         "terminal_negative_controls": (
             "full family labels shuffled within season/down/field-zone; conditional terminal type "
@@ -673,6 +706,7 @@ def v016_terminal_promotion_gate(
     max_family_regression_ratio: float = 1.05,
     max_ece: float = 0.10,
     max_fallback_rate: float = 0.01,
+    max_realization_mismatch: float = 1e-9,
     min_parent_context_wins: int = 3,
     min_weekly_win_rate: float = 0.52,
 ) -> SimulationPromotionDecision:
@@ -734,12 +768,11 @@ def v016_terminal_promotion_gate(
         if ratio is not None and ratio < 1.0:
             parent_wins += 1
         rate = _weekly_win_rate(
-            benchmark.weekly_metrics,
-            parent,
-            "team_terminal_non_clock_events_mae",
+            benchmark.weekly_metrics, parent, "team_terminal_non_clock_events_mae"
         )
         if rate is not None:
             weekly_rates.append(rate)
+
         fallback = candidate.get("terminal_conditioning_fallback_rate")
         if fallback is None:
             reasons.append(f"missing terminal conditioning fallback evidence in {candidate_name}")
@@ -747,6 +780,14 @@ def v016_terminal_promotion_gate(
             reasons.append(
                 f"terminal conditioning fallback rate too high in {candidate_name}: "
                 f"{fallback:.3f} > {max_fallback_rate:.3f}"
+            )
+        mismatch = candidate.get("terminal_realization_mismatch_total")
+        if mismatch is None:
+            reasons.append(f"missing terminal realization mismatch evidence in {candidate_name}")
+        elif mismatch > float(max_realization_mismatch):
+            reasons.append(
+                f"requested terminal families do not match realized outcomes in {candidate_name}: "
+                f"{mismatch:.6f} > {max_realization_mismatch:.6f}"
             )
 
         for metric in (
@@ -860,7 +901,7 @@ def recommend_v017_development(benchmark: TerminalBenchmarkResult) -> dict[str, 
     if full_signal:
         signals.append("five-family terminal distribution beats context and permutation controls")
     if terminal_ratio is not None and terminal_ratio < 1.0:
-        signals.append("terminal authority improves non-clock terminal event frequency")
+        signals.append("terminal authority improves realized non-clock terminal event frequency")
     if play_ratio is not None and play_ratio < 1.0:
         signals.append("terminal authority improves team play volume")
     if points_ratio is not None and points_ratio < 1.0:
@@ -874,7 +915,7 @@ def recommend_v017_development(benchmark: TerminalBenchmarkResult) -> dict[str, 
         ):
             next_experiment = "latent_drive_strategy_state"
             rationale = (
-                "Terminal family is now predictive and transfers safely into the world model. "
+                "Terminal family is predictive and transfers safely into the world model. "
                 "The next interpretable missing variable is persistent possession strategy state."
             )
         else:
@@ -892,8 +933,8 @@ def recommend_v017_development(benchmark: TerminalBenchmarkResult) -> dict[str, 
     elif conditional_signal and terminal_ratio is not None and terminal_ratio >= 1.0:
         next_experiment = "terminal_authority_mechanics_audit"
         rationale = (
-            "Terminal type is learnable in isolation but does not transfer to simulation frequency. "
-            "Audit conditioned outcome support, END_HALF clock coupling and interaction with fourth-down policy."
+            "Terminal type is learnable in isolation but does not transfer to realized simulation frequency. "
+            "Audit conditioned outcome support, clock coupling and fourth-down interaction."
         )
     elif full_signal and play_ratio is not None and play_ratio >= 1.0:
         next_experiment = "drive_strategy_and_continuation_state"
