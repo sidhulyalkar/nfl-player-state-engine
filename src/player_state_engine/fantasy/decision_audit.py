@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -53,6 +54,27 @@ def _finite(value: object) -> float | None:
     except (TypeError, ValueError):
         return None
     return numeric if np.isfinite(numeric) else None
+
+
+def _optional_text(*values: object) -> str | None:
+    for value in values:
+        if value is None:
+            continue
+        try:
+            if not bool(pd.notna(value)):
+                continue
+        except (TypeError, ValueError):
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
+def _utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _league_contract(config: LeagueConfig) -> dict[str, object]:
@@ -114,13 +136,11 @@ def build_draft_audit_record(
             snapshots.append(
                 DecisionCandidateSnapshot(
                     player_id=str(row["player_id"]),
-                    player_name=(str(row["player_name"]) if pd.notna(row.get("player_name")) else None),
-                    position=(str(row["position"]) if pd.notna(row.get("position")) else None),
+                    player_name=_optional_text(row.get("player_name")),
+                    position=_optional_text(row.get("position")),
                     rank=(int(row["live_rank"]) if pd.notna(row.get("live_rank")) else None),
-                    action=(
-                        str(row.get("guarded_draft_action") or row.get("draft_action"))
-                        if pd.notna(row.get("guarded_draft_action", row.get("draft_action")))
-                        else None
+                    action=_optional_text(
+                        row.get("guarded_draft_action"), row.get("draft_action")
                     ),
                     projected_value=_finite(row.get("live_draft_score")),
                     challenger_value=_finite(row.get("room_challenger_score")),
@@ -129,24 +149,20 @@ def build_draft_audit_record(
                         row.get("room_survival_to_next_pick")
                     ),
                     reliability_score=_finite(row.get("draft_reliability_score")),
-                    reasons=(
-                        str(row.get("draft_reliability_reasons") or row.get("draft_reasons"))
-                        if pd.notna(
-                            row.get("draft_reliability_reasons", row.get("draft_reasons"))
-                        )
-                        else None
+                    reasons=_optional_text(
+                        row.get("draft_reliability_reasons"), row.get("draft_reasons")
                     ),
                 )
             )
         candidates = tuple(snapshots)
         top = ordered.iloc[0]
         recommended_id = str(top["player_id"])
-        recommended_action = str(
-            top.get("guarded_draft_action") or top.get("draft_action") or "CONSIDER"
-        )
+        recommended_action = _optional_text(
+            top.get("guarded_draft_action"), top.get("draft_action")
+        ) or "CONSIDER"
 
     state_key = draft_state_key(state)
-    recorded = (recorded_at or datetime.now(UTC)).astimezone(UTC).isoformat()
+    recorded = _utc(recorded_at or datetime.now(UTC)).isoformat()
     return DecisionAuditRecord(
         decision_id=_decision_id(str(league_key), "draft", state_key),
         recorded_at=recorded,
