@@ -37,6 +37,19 @@ def _archive(seed: int = 12) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def test_standard_wis_normalization_for_one_central_interval() -> None:
+    frame = pd.DataFrame(
+        {
+            "actual": [10.0],
+            "model_q10": [8.0],
+            "model_q50": [10.0],
+            "model_q90": [12.0],
+        }
+    )
+    scorecard = evaluate_forecast(frame, model="model")
+    assert np.isclose(scorecard.weighted_interval_score, 0.4 / 1.5)
+
+
 def test_scorecard_rewards_better_calibrated_sharper_forecast() -> None:
     archive = _archive()
     direct = evaluate_forecast(archive, model="direct")
