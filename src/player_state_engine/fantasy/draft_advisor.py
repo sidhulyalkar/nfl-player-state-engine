@@ -19,6 +19,14 @@ def _percentile(series: pd.Series, *, ascending: bool = True) -> pd.Series:
     return series.rank(method="average", pct=True, ascending=ascending).fillna(0.5)
 
 
+def _numeric_column(frame: pd.DataFrame, name: str, default: float) -> pd.Series:
+    if name in frame:
+        source = frame[name]
+    else:
+        source = pd.Series(default, index=frame.index, dtype=float)
+    return pd.to_numeric(source, errors="coerce").fillna(default)
+
+
 def _drafted_position_counts(projections: pd.DataFrame, state: DraftState) -> Counter[str]:
     ids = {str(player_id) for player_id in state.drafted_player_ids}
     if not ids or "player_id" not in projections or "position" not in projections:
@@ -44,8 +52,8 @@ def _confidence_reasons(row: pd.Series) -> str:
         reasons.append("market ADP imputed")
     if float(row.get("league_scoring_coverage", 1.0)) < 0.999:
         reasons.append("league scoring only partially resolved")
-    if float(row.get("room_vs_analytic_survival_gap", 0.0)) > 0.25:
-        reasons.append("room model disagrees with analytic survival")
+    if float(row.get("room_vs_baseline_survival_gap", 0.0)) > 0.25:
+        reasons.append("room model disagrees with baseline survival")
     if float(row.get("uncertainty_percentile", 0.0)) > 0.80:
         reasons.append("projection uncertainty is high")
     if float(row.get("room_survival_standard_error", 0.0)) > 0.03:
@@ -53,7 +61,8 @@ def _confidence_reasons(row: pd.Series) -> str:
     return ", ".join(reasons) if reasons else "inputs and independent draft models agree"
 
 
-def build_reliable_live_draft_board(
+def augment_live_draft_board_with_reliability(
+    baseline: pd.DataFrame,
     projections: pd.DataFrame,
     config: LeagueConfig,
     state: DraftState,
@@ -62,17 +71,20 @@ def build_reliable_live_draft_board(
     room_seed: int = 20260820,
     position_need_strength: float = 0.35,
 ) -> pd.DataFrame:
-    """Build a guarded, league-specific live draft board.
+    """Add a correlated room challenger and guardrails to an already-ranked board.
 
-    The existing live board remains the production baseline. This advisor adds a correlated
-    draft-room challenger, model-disagreement diagnostics, and a presentation guardrail. It does
-    not silently promote the challenger: ``draft_action`` is preserved and ``guarded_draft_action``
-    becomes more conservative only when the evidence supporting the recommendation is weak.
+    This boundary is intentionally separate from ``build_live_draft_board`` so product paths
+    that have already applied the historically learned empirical survival model can keep that
+    model authoritative. The room simulation then acts as an independent structural challenger
+    and disagreement sensor rather than overwriting the production survival probability.
     """
 
-    baseline = build_live_draft_board(projections, config, state)
     if baseline.empty:
-        return baseline
+        return baseline.copy()
+    required = {"player_id", "position", "live_rank", "live_draft_score", "draft_action"}
+    missing = required - set(baseline.columns)
+    if missing:
+        raise ValueError(f"reliable draft board missing baseline columns: {sorted(missing)}")
 
     room = simulate_draft_room(
         baseline,
@@ -86,21 +98,24 @@ def build_reliable_live_draft_board(
             position_need_strength=float(position_need_strength),
         ),
     )
-    out = baseline.merge(room.drop(columns=["position"]), on="player_id", how="left", validate="one_to_one")
-
-    out["room_market_urgency"] = 1.0 - pd.to_numeric(
-        out["room_survival_to_next_pick"], errors="coerce"
-    ).fillna(0.0).clip(0, 1)
-    out["room_wait_loss_percentile"] = _percentile(
-        pd.to_numeric(out["room_position_wait_loss"], errors="coerce").fillna(0.0)
+    out = baseline.merge(
+        room.drop(columns=["position"]),
+        on="player_id",
+        how="left",
+        validate="one_to_one",
     )
 
-    base_pct = pd.to_numeric(out.get("base_draft_percentile", 0.5), errors="coerce").fillna(0.5)
-    need_component = (
-        (pd.to_numeric(out.get("roster_need_score", 0.0), errors="coerce").fillna(0.0) + 0.5) / 1.5
+    out["room_market_urgency"] = 1.0 - _numeric_column(
+        out, "room_survival_to_next_pick", 0.0
     ).clip(0, 1)
-    tier_pct = pd.to_numeric(out.get("tier_cliff_percentile", 0.5), errors="coerce").fillna(0.5)
-    median_score = pd.to_numeric(out.get("median_format_score", 0.5), errors="coerce").fillna(0.5)
+    out["room_wait_loss_percentile"] = _percentile(
+        _numeric_column(out, "room_position_wait_loss", 0.0)
+    )
+
+    base_pct = _numeric_column(out, "base_draft_percentile", 0.5).clip(0, 1)
+    need_component = ((_numeric_column(out, "roster_need_score", 0.0) + 0.5) / 1.5).clip(0, 1)
+    tier_pct = _numeric_column(out, "tier_cliff_percentile", 0.5).clip(0, 1)
+    median_score = _numeric_column(out, "median_format_score", 0.5).clip(0, 1)
     median_weight = 0.04 if config.median_scoring else 0.0
     denominator = 0.48 + 0.14 + 0.12 + 0.08 + 0.14 + median_weight
     out["room_challenger_score"] = 100.0 * (
@@ -116,21 +131,20 @@ def build_reliable_live_draft_board(
     out["room_rank_delta"] = out["live_rank"].astype(int) - out["room_rank"]
     out["room_challenger_promoted"] = False
 
-    analytic_survival = pd.to_numeric(out.get("survival_to_next_pick", 0.0), errors="coerce").fillna(0.0)
-    room_survival = pd.to_numeric(out["room_survival_to_next_pick"], errors="coerce").fillna(0.0)
-    out["room_vs_analytic_survival_gap"] = (room_survival - analytic_survival).abs()
-    agreement = (1.0 - out["room_vs_analytic_survival_gap"] / 0.50).clip(0, 1)
+    baseline_survival = _numeric_column(out, "survival_to_next_pick", 0.0).clip(0, 1)
+    room_survival = _numeric_column(out, "room_survival_to_next_pick", 0.0).clip(0, 1)
+    out["room_vs_baseline_survival_gap"] = (room_survival - baseline_survival).abs()
+    # Backwards-compatible diagnostic name from the first research scaffold.
+    out["room_vs_analytic_survival_gap"] = out["room_vs_baseline_survival_gap"]
+    agreement = (1.0 - out["room_vs_baseline_survival_gap"] / 0.50).clip(0, 1)
 
-    scoring_coverage = pd.to_numeric(
-        out.get("league_scoring_coverage", pd.Series(1.0, index=out.index)), errors="coerce"
-    ).fillna(0.0).clip(0, 1)
+    scoring_coverage = _numeric_column(out, "league_scoring_coverage", 1.0).clip(0, 1)
     market_quality = (~out["room_market_imputed"].fillna(True).astype(bool)).astype(float)
-    uncertainty = pd.to_numeric(out.get("uncertainty", 0.0), errors="coerce").fillna(0.0)
+    uncertainty = _numeric_column(out, "uncertainty", 0.0)
     out["uncertainty_percentile"] = _percentile(uncertainty)
     uncertainty_quality = 1.0 - out["uncertainty_percentile"]
     monte_carlo_quality = (
-        1.0
-        - pd.to_numeric(out["room_survival_standard_error"], errors="coerce").fillna(1.0) / 0.05
+        1.0 - _numeric_column(out, "room_survival_standard_error", 1.0) / 0.05
     ).clip(0, 1)
 
     out["draft_reliability_score"] = 100.0 * (
@@ -166,3 +180,26 @@ def build_reliable_live_draft_board(
         validate="one_to_one",
     )
     return out.sort_values(["live_rank", "player_id"], kind="mergesort").reset_index(drop=True)
+
+
+def build_reliable_live_draft_board(
+    projections: pd.DataFrame,
+    config: LeagueConfig,
+    state: DraftState,
+    *,
+    room_simulations: int = 600,
+    room_seed: int = 20260820,
+    position_need_strength: float = 0.35,
+) -> pd.DataFrame:
+    """Build a guarded, league-specific live draft board from the transparent baseline."""
+
+    baseline = build_live_draft_board(projections, config, state)
+    return augment_live_draft_board_with_reliability(
+        baseline,
+        projections,
+        config,
+        state,
+        room_simulations=room_simulations,
+        room_seed=room_seed,
+        position_need_strength=position_need_strength,
+    )
