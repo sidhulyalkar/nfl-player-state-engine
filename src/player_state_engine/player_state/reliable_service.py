@@ -5,7 +5,10 @@ from datetime import datetime
 
 from player_state_engine.fantasy.league import LeagueConfig
 from player_state_engine.player_state.graph import PlayerStateSnapshot
-from player_state_engine.player_state.service import PlayerForecastBundle, PlayerStateForecastService
+from player_state_engine.player_state.service import (
+    PlayerForecastBundle,
+    PlayerStateForecastService,
+)
 from player_state_engine.player_state.trust import ForecastTrustReport, assess_forecast_trust
 
 
