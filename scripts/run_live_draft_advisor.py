@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 from player_state_engine.data.io import read_table, write_table
@@ -49,6 +50,12 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=20260820)
     parser.add_argument("--top", type=int, default=25)
     parser.add_argument(
+        "--max-projection-age-hours",
+        type=float,
+        default=24.0,
+        help="Hard VERIFY threshold for the projection artifact",
+    )
+    parser.add_argument(
         "--strict-readiness",
         action="store_true",
         help="Stop when the projection pool cannot fully represent the league contract",
@@ -77,6 +84,9 @@ def main() -> None:
         print(json.dumps({"readiness": readiness.as_dict()}, indent=2, default=str))
         raise SystemExit(2)
 
+    projection_age_hours = max(
+        0.0, (time.time() - args.projections.stat().st_mtime) / 3600.0
+    )
     state = DraftState(
         teams=league.teams,
         draft_slot=args.draft_slot,
@@ -92,6 +102,8 @@ def main() -> None:
         state,
         room_simulations=args.room_simulations,
         room_seed=args.seed,
+        projection_age_hours=projection_age_hours,
+        max_projection_age_hours=args.max_projection_age_hours,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.json_output.parent.mkdir(parents=True, exist_ok=True)
@@ -114,6 +126,8 @@ def main() -> None:
             "room_position_wait_loss",
             "draft_reliability",
             "draft_reliability_score",
+            "projection_freshness_status",
+            "projection_age_hours",
             "draft_reasons",
             "draft_reliability_reasons",
         )
@@ -132,6 +146,8 @@ def main() -> None:
             "room_simulations": int(args.room_simulations),
             "room_seed": int(args.seed),
             "projection_artifact": str(args.projections),
+            "projection_age_hours": projection_age_hours,
+            "max_projection_age_hours": float(args.max_projection_age_hours),
         },
     )
     audit_appended = append_decision_record(args.audit_log, audit_record)
@@ -143,6 +159,8 @@ def main() -> None:
         "next_pick": state.next_pick,
         "draft_slot": state.draft_slot,
         "room_simulations": int(args.room_simulations),
+        "projection_age_hours": projection_age_hours,
+        "max_projection_age_hours": float(args.max_projection_age_hours),
         "readiness": readiness.as_dict(),
         "decision_id": audit_record.decision_id,
         "audit_record_appended": audit_appended,
@@ -151,10 +169,14 @@ def main() -> None:
     }
     args.json_output.write_text(json.dumps(payload, indent=2, default=str))
     print(f"League readiness: {readiness.score:.1f}/100 • ready={readiness.ready}")
+    print(f"Projection age: {projection_age_hours:.2f} hours")
     if readiness.flags:
         print("Readiness flags: " + ", ".join(readiness.flags))
     print(top.to_string(index=False))
-    print(f"\nDecision receipt: {audit_record.decision_id} ({'new' if audit_appended else 'existing'})")
+    print(
+        f"\nDecision receipt: {audit_record.decision_id} "
+        f"({'new' if audit_appended else 'existing'})"
+    )
     print(f"Wrote full board to {args.output}")
     print(f"Wrote top recommendations to {args.json_output}")
     print(f"Audit ledger: {args.audit_log}")
