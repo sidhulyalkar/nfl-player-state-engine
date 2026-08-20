@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 import pandas as pd
@@ -28,8 +28,8 @@ class ForecastTrustReport:
 
 def _utc(value: datetime) -> datetime:
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _bounded(value: float) -> float:
@@ -60,7 +60,7 @@ def assess_forecast_trust(
     if not len(values):
         raise ValueError("draws contain no finite league_fantasy_points")
 
-    now = _utc(as_of or datetime.now(timezone.utc))
+    now = _utc(as_of or datetime.now(UTC))
     freshness_hours: float | None
     if card.evidence_freshness is None:
         freshness_hours = None
