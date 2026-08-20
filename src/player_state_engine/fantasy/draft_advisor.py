@@ -39,6 +39,8 @@ def _guarded_action(row: pd.Series) -> str:
     confidence = float(row.get("draft_reliability_score", 0.0))
     rank_gap = abs(float(row.get("room_rank_delta", 0.0)))
     baseline = str(row.get("draft_action", "CONSIDER"))
+    if bool(row.get("projection_freshness_hard_fail", False)):
+        return "VERIFY"
     if confidence < 50.0 or (rank_gap >= 15 and confidence < 70.0):
         return "VERIFY"
     if baseline == "DRAFT NOW" and confidence < 65.0:
@@ -58,6 +60,11 @@ def _confidence_reasons(row: pd.Series) -> str:
         reasons.append("projection uncertainty is high")
     if float(row.get("room_survival_standard_error", 0.0)) > 0.03:
         reasons.append("draft-room Monte Carlo is noisy")
+    freshness_status = str(row.get("projection_freshness_status", "UNKNOWN"))
+    if freshness_status == "STALE":
+        reasons.append("projection artifact is stale")
+    elif freshness_status == "UNKNOWN":
+        reasons.append("projection freshness is unknown")
     return ", ".join(reasons) if reasons else "inputs and independent draft models agree"
 
 
@@ -70,6 +77,8 @@ def augment_live_draft_board_with_reliability(
     room_simulations: int = 600,
     room_seed: int = 20260820,
     position_need_strength: float = 0.35,
+    projection_age_hours: float | None = None,
+    max_projection_age_hours: float = 24.0,
 ) -> pd.DataFrame:
     """Add a correlated room challenger and guardrails to an already-ranked board.
 
@@ -147,12 +156,29 @@ def augment_live_draft_board_with_reliability(
         1.0 - _numeric_column(out, "room_survival_standard_error", 1.0) / 0.05
     ).clip(0, 1)
 
+    max_age = max(float(max_projection_age_hours), 1e-6)
+    if projection_age_hours is None or not np.isfinite(float(projection_age_hours)):
+        age_value = np.nan
+        freshness_quality = 0.50
+        freshness_status = "UNKNOWN"
+        hard_freshness_fail = False
+    else:
+        age_value = max(0.0, float(projection_age_hours))
+        freshness_quality = float(np.exp(-age_value / max_age))
+        freshness_status = "FRESH" if age_value <= max_age else "STALE"
+        hard_freshness_fail = age_value > max_age
+    out["projection_age_hours"] = age_value
+    out["projection_freshness_score"] = freshness_quality
+    out["projection_freshness_status"] = freshness_status
+    out["projection_freshness_hard_fail"] = hard_freshness_fail
+
     out["draft_reliability_score"] = 100.0 * (
-        0.25 * scoring_coverage
-        + 0.25 * market_quality
-        + 0.20 * uncertainty_quality
+        0.20 * scoring_coverage
+        + 0.20 * market_quality
+        + 0.15 * uncertainty_quality
         + 0.20 * agreement
         + 0.10 * monte_carlo_quality
+        + 0.15 * freshness_quality
     )
     out["draft_reliability_score"] = out["draft_reliability_score"].clip(0, 100)
     out["draft_reliability"] = pd.cut(
@@ -190,6 +216,8 @@ def build_reliable_live_draft_board(
     room_simulations: int = 600,
     room_seed: int = 20260820,
     position_need_strength: float = 0.35,
+    projection_age_hours: float | None = None,
+    max_projection_age_hours: float = 24.0,
 ) -> pd.DataFrame:
     """Build a guarded, league-specific live draft board from the transparent baseline."""
 
@@ -202,4 +230,6 @@ def build_reliable_live_draft_board(
         room_simulations=room_simulations,
         room_seed=room_seed,
         position_need_strength=position_need_strength,
+        projection_age_hours=projection_age_hours,
+        max_projection_age_hours=max_projection_age_hours,
     )
