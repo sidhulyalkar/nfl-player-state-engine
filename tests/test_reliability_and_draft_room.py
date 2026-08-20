@@ -64,9 +64,36 @@ def _room_board() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _draft_state() -> DraftState:
+    return DraftState(
+        teams=8,
+        draft_slot=4,
+        current_pick=12,
+        total_rounds=18,
+        drafted_player_ids=("RB1", "WR1", "QB1"),
+        roster_player_ids=("QB1",),
+    )
+
+
+def _draft_league() -> LeagueConfig:
+    return LeagueConfig(
+        teams=8,
+        scoring="ppr",
+        roster_slots={"QB": 2, "RB": 3, "WR": 3, "TE": 1, "FLEX": 3, "BENCH": 6},
+    )
+
+
 def _role(now: datetime) -> RolePosterior:
     def state(mean: float) -> StateEstimate:
-        return StateEstimate(mean, max(0.0, mean - 0.08), mean, min(1.0, mean + 0.08), 40.0, 0.90, 0.05)
+        return StateEstimate(
+            mean,
+            max(0.0, mean - 0.08),
+            mean,
+            min(1.0, mean + 0.08),
+            40.0,
+            0.90,
+            0.05,
+        )
 
     return RolePosterior(
         player_id="WR1",
@@ -123,26 +150,13 @@ def test_two_qb_format_increases_qb_room_pressure() -> None:
 
 
 def test_reliable_draft_board_preserves_baseline_and_exposes_guardrails() -> None:
-    projections = _projection_board()
-    league = LeagueConfig(
-        teams=8,
-        scoring="ppr",
-        roster_slots={"QB": 2, "RB": 3, "WR": 3, "TE": 1, "FLEX": 3, "BENCH": 6},
-    )
-    state = DraftState(
-        teams=8,
-        draft_slot=4,
-        current_pick=12,
-        total_rounds=18,
-        drafted_player_ids=("RB1", "WR1", "QB1"),
-        roster_player_ids=("QB1",),
-    )
     board = build_reliable_live_draft_board(
-        projections,
-        league,
-        state,
+        _projection_board(),
+        _draft_league(),
+        _draft_state(),
         room_simulations=300,
         room_seed=9,
+        projection_age_hours=2.0,
     )
     required = {
         "draft_action",
@@ -152,6 +166,7 @@ def test_reliable_draft_board_preserves_baseline_and_exposes_guardrails() -> Non
         "room_rank",
         "draft_reliability_score",
         "draft_reliability_reasons",
+        "projection_freshness_status",
     }
     assert required.issubset(board.columns)
     assert board["room_challenger_score"].between(0, 100).all()
@@ -159,7 +174,25 @@ def test_reliable_draft_board_preserves_baseline_and_exposes_guardrails() -> Non
     assert set(board["guarded_draft_action"]).issubset(
         {"DRAFT NOW", "TARGET", "WAIT", "CONSIDER", "VERIFY"}
     )
+    assert set(board["projection_freshness_status"]) == {"FRESH"}
     assert not board["room_challenger_promoted"].any()
+
+
+def test_stale_projection_artifact_forces_verify_without_overwriting_baseline_action() -> None:
+    board = build_reliable_live_draft_board(
+        _projection_board(),
+        _draft_league(),
+        _draft_state(),
+        room_simulations=250,
+        room_seed=10,
+        projection_age_hours=72.0,
+        max_projection_age_hours=24.0,
+    )
+    assert set(board["projection_freshness_status"]) == {"STALE"}
+    assert board["projection_freshness_hard_fail"].all()
+    assert set(board["guarded_draft_action"]) == {"VERIFY"}
+    assert board["draft_action"].ne("VERIFY").any()
+    assert board["draft_reliability_reasons"].str.contains("stale").all()
 
 
 def test_forecast_trust_penalizes_stale_evidence_without_calling_player_bad() -> None:
