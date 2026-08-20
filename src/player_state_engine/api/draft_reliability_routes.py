@@ -5,6 +5,7 @@ import time
 from datetime import UTC, datetime
 
 from player_state_engine.api.draft_routes import DraftBoardService
+from player_state_engine.fantasy.decision_board import DecisionType, build_decision_board
 from player_state_engine.fantasy.draft_advisor import augment_live_draft_board_with_reliability
 from player_state_engine.fantasy.draft_survival import artifact_metadata as survival_artifact_metadata
 from player_state_engine.fantasy.readiness import assess_league_readiness
@@ -79,6 +80,10 @@ def install_draft_reliability_routes(app: FastAPI, draft_service: DraftBoardServ
             draft_service.projections_path,
             snapshot=snapshot,
         )
+        roster_ids = {str(player_id) for player_id in state.roster_player_ids}
+        full_board = build_decision_board(projections, config, DecisionType.DRAFT)
+        roster = full_board.loc[full_board["player_id"].astype(str).isin(roster_ids)].copy()
+
         now = datetime.now(UTC)
         stale_after = float(os.getenv("PSE_DRAFT_STALE_SECONDS", "60"))
         snapshot_age = max(0.0, (now - snapshot.identity.imported_at).total_seconds())
@@ -105,6 +110,8 @@ def install_draft_reliability_routes(app: FastAPI, draft_service: DraftBoardServ
                 "recent_position_runs": run_counts,
             },
             "roster_id": roster_id,
+            "roster": frame_records(roster),
+            "recent_picks": picks[-16:],
             "board": frame_records(reliable.head(max(1, min(int(limit), 1000)))),
             "readiness": readiness.as_dict(),
             "trust": trust,
