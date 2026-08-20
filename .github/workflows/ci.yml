@@ -36,6 +36,7 @@ jobs:
             scripts/run_live_draft_advisor.py \
             scripts/check_fantasy_league_readiness.py \
             scripts/evaluate_draft_survival.py \
+            scripts/evaluate_player_forecasts.py \
             scripts/settle_draft_decisions.py
       - name: Compile Python sources and all scripts
         run: python -m compileall -q src scripts tests
