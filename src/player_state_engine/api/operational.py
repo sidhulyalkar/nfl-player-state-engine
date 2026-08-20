@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from player_state_engine.api.app import create_app as create_base_app
 from player_state_engine.api.draft_planner_routes import install_draft_planner_routes
+from player_state_engine.api.draft_reliability_routes import install_draft_reliability_routes
 from player_state_engine.api.draft_routes import install_draft_routes
 from player_state_engine.api.game_intelligence_routes import install_game_intelligence_routes
 from player_state_engine.api.ranking_routes import install_ranking_routes
@@ -27,6 +28,7 @@ def create_app(**kwargs: Any) -> FastAPI:
         projections_path=kwargs.get("projections_path"),
     )
     install_draft_planner_routes(app, draft_service)
+    install_draft_reliability_routes(app, draft_service)
     install_ranking_routes(
         app,
         store_root=kwargs.get("store_root"),
@@ -41,10 +43,10 @@ def create_app(**kwargs: Any) -> FastAPI:
     )
     app.version = "0.16.0"
     app.description = (
-        f"{app.description} Live Draft War Room, ranking calibration, guarded game-intelligence "
-        "simulation, expanding frozen replay, factorial attribution, simulated-state opportunity, "
-        "drive-volume, possession-transition, fourth-down decision, and terminal-family research "
-        "surfaces."
+        f"{app.description} Live Draft War Room, ranking calibration, guarded draft reliability, "
+        "guarded game-intelligence simulation, expanding frozen replay, factorial attribution, "
+        "simulated-state opportunity, drive-volume, possession-transition, fourth-down decision, "
+        "and terminal-family research surfaces."
     )
     return app
 
