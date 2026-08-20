@@ -84,7 +84,7 @@ def _wis(
 
 
 def _forecast_columns(model: str) -> tuple[str, str, str]:
-    return tuple(f"{model}_q{quantile}" for quantile in (10, 50, 90))  # type: ignore[return-value]
+    return f"{model}_q10", f"{model}_q50", f"{model}_q90"
 
 
 def forecast_loss_frame(
@@ -164,13 +164,22 @@ def compare_forecasts(
 
     candidate_loss = forecast_loss_frame(frame, model=candidate, actual_column=actual_column)
     reference_loss = forecast_loss_frame(frame, model=reference, actual_column=actual_column)
-    identity_columns = [column for column in ("season", "week", "player_id", "target") if column in frame]
+    identity_columns = [
+        column
+        for column in ("season", "week", "player_id", "position", "target")
+        if column in frame
+    ]
     if not identity_columns:
         candidate_loss = candidate_loss.reset_index().rename(columns={"index": "_row_id"})
         reference_loss = reference_loss.reset_index().rename(columns={"index": "_row_id"})
         identity_columns = ["_row_id"]
     paired = candidate_loss[
-        [*identity_columns, f"{candidate}_wis", f"{candidate}_covered", f"{candidate}_interval_width"]
+        [
+            *identity_columns,
+            f"{candidate}_wis",
+            f"{candidate}_covered",
+            f"{candidate}_interval_width",
+        ]
     ].merge(
         reference_loss[
             [
@@ -247,7 +256,15 @@ def grouped_forecast_scorecards(
 ) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     for model in models:
-        rows.append({"group": "overall", "value": "all", **evaluate_forecast(frame, model=model, actual_column=actual_column).as_dict()})
+        rows.append(
+            {
+                "group": "overall",
+                "value": "all",
+                **evaluate_forecast(
+                    frame, model=model, actual_column=actual_column
+                ).as_dict(),
+            }
+        )
         for group_column in group_columns:
             if group_column not in frame:
                 continue
