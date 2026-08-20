@@ -75,12 +75,16 @@ def _wis(
     q50: np.ndarray,
     q90: np.ndarray,
 ) -> np.ndarray:
-    """Weighted interval score for the central 80% interval plus its median."""
+    """Standard WIS for one central 80% interval plus its median.
+
+    With one interval (K=1), the standard WIS normalization is K + 1/2 = 1.5,
+    with weights 1/2 for absolute median error and alpha/2 for interval score.
+    """
 
     alpha = 0.20
     median_component = 0.5 * np.abs(actual - q50)
     interval_component = (alpha / 2.0) * _interval_score(actual, q10, q90, alpha=alpha)
-    return (median_component + interval_component) / (0.5 + alpha / 2.0)
+    return (median_component + interval_component) / 1.5
 
 
 def _forecast_columns(model: str) -> tuple[str, str, str]:
@@ -166,7 +170,14 @@ def compare_forecasts(
     reference_loss = forecast_loss_frame(frame, model=reference, actual_column=actual_column)
     identity_columns = [
         column
-        for column in ("season", "week", "player_id", "position", "target")
+        for column in (
+            "season",
+            "week",
+            "player_id",
+            "position",
+            "target",
+            "forecast_horizon",
+        )
         if column in frame
     ]
     if not identity_columns:
