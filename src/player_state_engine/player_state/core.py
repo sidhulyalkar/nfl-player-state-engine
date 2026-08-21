@@ -234,13 +234,37 @@ class DynamicRoleFilter:
             self._states[metric] = _BetaState(alpha, beta, alpha, beta)
         self._evidence_rows = 0
 
+    def _decay_factor(self, elapsed_days: float) -> float:
+        return float(0.5 ** (max(float(elapsed_days), 0.0) / (7.0 * self.half_life_weeks)))
+
     def _decay(self, state: _BetaState, observed_at: datetime) -> None:
         if state.last_observed_at is None:
             return
-        elapsed_days = max(0.0, (_utc(observed_at) - state.last_observed_at).total_seconds() / 86400.0)
-        factor = 0.5 ** (elapsed_days / (7.0 * self.half_life_weeks))
+        elapsed_days = (_utc(observed_at) - state.last_observed_at).total_seconds() / 86400.0
+        if elapsed_days <= 0.0:
+            return
+        factor = self._decay_factor(elapsed_days)
         state.alpha = state.prior_alpha + factor * (state.alpha - state.prior_alpha)
         state.beta = state.prior_beta + factor * (state.beta - state.prior_beta)
+        state.change_probability *= factor
+
+    def _state_as_of(
+        self, state: _BetaState, as_of: datetime
+    ) -> tuple[float, float, float]:
+        """Return a non-mutating posterior decayed to an evaluation timestamp."""
+
+        alpha = float(state.alpha)
+        beta = float(state.beta)
+        change_probability = float(state.change_probability)
+        if state.last_observed_at is None:
+            return alpha, beta, change_probability
+        elapsed_days = (_utc(as_of) - state.last_observed_at).total_seconds() / 86400.0
+        if elapsed_days <= 0.0:
+            return alpha, beta, change_probability
+        factor = self._decay_factor(elapsed_days)
+        alpha = state.prior_alpha + factor * (alpha - state.prior_alpha)
+        beta = state.prior_beta + factor * (beta - state.prior_beta)
+        return float(alpha), float(beta), float(change_probability * factor)
 
     @staticmethod
     def _surprise_probability(state: _BetaState, share: float, opportunities: float) -> float:
@@ -257,8 +281,13 @@ class DynamicRoleFilter:
     def update(self, observation: ShareObservation, *, prediction_cutoff: datetime) -> bool:
         if observation.available_for_prediction_at > _utc(prediction_cutoff):
             return False
+        applied = False
         for metric, share_value in observation.shares.items():
             state = self._states[metric]
+            if state.last_observed_at is not None and observation.observed_at < state.last_observed_at:
+                # Incremental insertion of older evidence would require replaying later rows.
+                # Fail closed for this metric rather than rewinding the latent-state clock.
+                continue
             self._decay(state, observation.observed_at)
             opportunities = max(float(observation.opportunities.get(metric, 1.0)), 1.0)
             share = _bounded(float(share_value), 1e-6, 1.0 - 1e-6)
@@ -267,38 +296,52 @@ class DynamicRoleFilter:
             state.beta += (1.0 - share) * opportunities
             state.change_probability = max(0.65 * state.change_probability, surprise)
             state.last_observed_at = observation.observed_at
-        self._evidence_rows += 1
-        return True
+            applied = True
+        if applied:
+            self._evidence_rows += 1
+        return applied
 
     def fit(self, observations: list[ShareObservation], *, prediction_cutoff: datetime) -> DynamicRoleFilter:
-        for observation in sorted(observations, key=lambda item: (item.available_for_prediction_at, item.observed_at)):
-            self.update(observation, prediction_cutoff=prediction_cutoff)
+        cutoff = _utc(prediction_cutoff)
+        eligible = [
+            observation
+            for observation in observations
+            if observation.available_for_prediction_at <= cutoff
+        ]
+        for observation in sorted(
+            eligible,
+            key=lambda item: (item.observed_at, item.available_for_prediction_at),
+        ):
+            self.update(observation, prediction_cutoff=cutoff)
         return self
 
     def posterior(self, *, as_of: datetime) -> RolePosterior:
+        as_of = _utc(as_of)
         estimates: dict[str, StateEstimate] = {}
         change = 0.0
         maturity_values: list[float] = []
         for metric, state in self._states.items():
-            total = state.effective_sample_size
+            alpha, beta, change_probability = self._state_as_of(state, as_of)
+            total = alpha + beta
+            mean = alpha / max(total, 1e-12)
             learned_rows = max(total - self.prior_strength, 0.0)
             maturity = _bounded(learned_rows / self.maturity_rows)
             estimates[metric] = StateEstimate(
-                mean=float(state.mean),
-                q10=float(beta_distribution.ppf(0.10, state.alpha, state.beta)),
-                q50=float(beta_distribution.ppf(0.50, state.alpha, state.beta)),
-                q90=float(beta_distribution.ppf(0.90, state.alpha, state.beta)),
+                mean=float(mean),
+                q10=float(beta_distribution.ppf(0.10, alpha, beta)),
+                q50=float(beta_distribution.ppf(0.50, alpha, beta)),
+                q90=float(beta_distribution.ppf(0.90, alpha, beta)),
                 effective_sample_size=float(total),
                 maturity=maturity,
-                change_probability=float(state.change_probability),
+                change_probability=float(change_probability),
             )
-            change = max(change, state.change_probability)
+            change = max(change, change_probability)
             maturity_values.append(maturity)
         maturity = float(np.mean(maturity_values)) if maturity_values else 0.0
         return RolePosterior(
             player_id=self.player_id,
             position=self.position,
-            as_of=_utc(as_of),
+            as_of=as_of,
             states=estimates,
             role_change_probability=float(change),
             maturity=maturity,
