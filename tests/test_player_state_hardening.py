@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from player_state_engine.fantasy.league import LeagueConfig
 from player_state_engine.player_state import (
@@ -18,7 +19,10 @@ from player_state_engine.player_state import (
     RecencyWeightedConditionalConformal,
     ShareObservation,
     TeamVolumeState,
+    UncertaintyBreakdown,
+    build_player_intelligence_card,
     paired_block_bootstrap,
+    projection_change_attribution,
 )
 
 
@@ -152,3 +156,51 @@ def test_qb_total_carries_respect_team_carry_share_without_double_counting_scram
     draws = PlayerStateGraph(LeagueConfig()).simulate(snapshot, simulations=1000, seed=91)
     assert (draws["carries"] <= draws["team_rushes"] + 1e-12).all()
     assert (draws["passing_completions"] <= draws["passing_attempts"] + 1e-12).all()
+
+
+def test_projection_attribution_uses_residual_when_raw_effects_cancel() -> None:
+    attribution = projection_change_attribution(10.0, 12.0, {"role": 1.0, "volume": -1.0})
+    assert attribution.contributions["role"] == 1.0
+    assert attribution.contributions["volume"] == -1.0
+    assert attribution.contributions["unattributed_residual"] == 2.0
+    assert sum(attribution.contributions.values()) == pytest.approx(attribution.total_change)
+
+
+def test_intelligence_red_zone_expectation_respects_availability_and_limited_role() -> None:
+    cutoff = datetime(2025, 9, 10, 16, tzinfo=UTC)
+    role_filter = DynamicRoleFilter("wr-rz", "WR", prior_strength=10.0, maturity_rows=40.0)
+    role_filter.fit(
+        [
+            ShareObservation(
+                observed_at=datetime(2025, 9, 8, 16, tzinfo=UTC),
+                available_for_prediction_at=datetime(2025, 9, 9, 16, tzinfo=UTC),
+                shares={"red_zone_share": 0.30},
+                opportunities={"red_zone_share": 20},
+            )
+        ],
+        prediction_cutoff=cutoff,
+    )
+    role = role_filter.posterior(as_of=cutoff)
+    snapshot = PlayerStateSnapshot(
+        player_id="wr-rz",
+        position="WR",
+        role=role,
+        team_volume=TeamVolumeState(35.0, 3.0, 25.0, 3.0, 8.0, 1.0),
+        execution=ExecutionState(),
+        p_active=0.50,
+        limited_probability=0.50,
+        limited_role_multiplier=0.50,
+    )
+    draws = pd.DataFrame(
+        {
+            "league_fantasy_points": [10.0, 12.0, 14.0],
+            "team_red_zone_plays": [8.0, 8.0, 8.0],
+            "routes": [20.0, 20.0, 20.0],
+            "targets": [5.0, 5.0, 5.0],
+            "carries": [0.0, 0.0, 0.0],
+        }
+    )
+    uncertainty = UncertaintyBreakdown(1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0)
+    card = build_player_intelligence_card(snapshot, draws, uncertainty)
+    expected = 8.0 * role.mean("red_zone_share") * 0.50 * 0.75
+    assert card.expected_red_zone_opportunities == pytest.approx(expected)
