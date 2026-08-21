@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -e '.[dev,intelligence,api]'
-      - name: Lint package, tests, and game-intelligence operational scripts
+      - name: Lint package, tests, and operational scripts
         run: |
           ruff check src tests \
             scripts/acquire_game_intelligence_sources.py \
@@ -32,7 +32,12 @@ jobs:
             scripts/run_v013_drive_volume_benchmark.py \
             scripts/run_v014_transition_benchmark.py \
             scripts/run_v015_decision_benchmark.py \
-            scripts/run_v016_terminal_benchmark.py
+            scripts/run_v016_terminal_benchmark.py \
+            scripts/run_live_draft_advisor.py \
+            scripts/check_fantasy_league_readiness.py \
+            scripts/evaluate_draft_survival.py \
+            scripts/evaluate_player_forecasts.py \
+            scripts/settle_draft_decisions.py
       - name: Compile Python sources and all scripts
         run: python -m compileall -q src scripts tests
       - run: pytest

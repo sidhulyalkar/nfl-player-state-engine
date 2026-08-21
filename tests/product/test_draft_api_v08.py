@@ -62,7 +62,16 @@ def test_draft_board_and_compare_are_server_side_and_2qb_aware(tmp_path) -> None
             season=2026,
             scoring={"rec": 1.0},
             roster_positions=[
-                "QB", "QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "BN", "BN"
+                "QB",
+                "QB",
+                "RB",
+                "RB",
+                "WR",
+                "WR",
+                "TE",
+                "FLEX",
+                "BN",
+                "BN",
             ],
             draft_type="snake",
         ),
@@ -115,6 +124,29 @@ def test_draft_board_and_compare_are_server_side_and_2qb_aware(tmp_path) -> None
     assert board["draft_state"]["draft_slot"] == 2
     assert board["survival_model"]["source"] == "normal_adp_fallback"
     assert all(row["player_id"] != "RB1" for row in board["board"])
+
+    reliable_response = client.get(
+        "/v1/leagues/L1/draft/reliable-board",
+        params={
+            "roster_id": "1",
+            "refresh": "false",
+            "room_simulations": 120,
+            "max_projection_age_hours": 24,
+        },
+    )
+    assert reliable_response.status_code == 200
+    reliable = reliable_response.json()
+    assert reliable["readiness"]["ready"] is True
+    assert reliable["survival_model"]["source"] == "normal_adp_fallback"
+    assert reliable["research"]["baseline_survival_authoritative"] is True
+    assert reliable["research"]["room_challenger_promoted"] is False
+    reliable_by_id = {row["player_id"]: row for row in reliable["board"]}
+    baseline_by_id = {row["player_id"]: row for row in board["board"]}
+    qb2 = reliable_by_id["QB2"]
+    assert qb2["survival_to_next_pick"] == baseline_by_id["QB2"]["survival_to_next_pick"]
+    assert "room_survival_to_next_pick" in qb2
+    assert "draft_reliability_score" in qb2
+    assert qb2["room_challenger_promoted"] is False
 
     compare_response = client.post(
         "/v1/leagues/L1/draft/compare",
