@@ -46,6 +46,27 @@ class ExperimentEvidence:
     downstream_decision_passed: bool | None
     preregistered: bool
     minimum_useful_effect: float
+    minimum_season_consistency: float = 0.60
+    minimum_position_consistency: float = 0.60
+    minimum_coverage: float = 0.90
+    minimum_source_availability: float = 0.90
+
+    def __post_init__(self) -> None:
+        for name in (
+            "minimum_season_consistency",
+            "minimum_position_consistency",
+            "minimum_coverage",
+            "minimum_source_availability",
+        ):
+            value = float(getattr(self, name))
+            if not 0.0 <= value <= 1.0:
+                raise ValueError(f"{name} must be between 0 and 1")
+        if float(self.minimum_useful_effect) < 0.0:
+            raise ValueError("minimum_useful_effect must be nonnegative")
+
+    @staticmethod
+    def _clears(value: float | None, threshold: float) -> bool:
+        return bool(value is not None and np.isfinite(float(value)) and float(value) >= threshold)
 
     @property
     def promotion_eligible(self) -> bool:
@@ -61,6 +82,10 @@ class ExperimentEvidence:
             and self.negative_control_passed
             and directional_effect >= self.minimum_useful_effect
             and directional_ci > 0.0
+            and self._clears(self.season_consistency, self.minimum_season_consistency)
+            and self._clears(self.position_consistency, self.minimum_position_consistency)
+            and self._clears(self.coverage, self.minimum_coverage)
+            and self._clears(self.source_availability, self.minimum_source_availability)
             and (self.downstream_decision_passed is not False)
         )
 
@@ -82,11 +107,12 @@ def paired_block_bootstrap(
     samples: int = 2000,
     seed: int = 42,
 ) -> PairedEffectEstimate:
-    """Paired block bootstrap for forecasts evaluated on identical player-weeks.
+    """Paired cluster bootstrap for forecasts evaluated on identical player-weeks.
 
     The returned effect is candidate minus reference. For a loss metric, negative is better.
-    Blocks default to season/week to avoid pretending player rows from one NFL week are
-    independent observations.
+    Blocks default to season/week so player rows from one NFL week are not treated as independent.
+    Resampled block sums and counts preserve the same row-weighted estimand as the point estimate,
+    even when weeks contain different numbers of eligible players.
     """
 
     required = {candidate_column, reference_column, *block_columns}
@@ -101,15 +127,18 @@ def paired_block_bootstrap(
     work["_difference"] = candidate.loc[valid].to_numpy(float) - reference.loc[valid].to_numpy(float)
     if work.empty:
         raise ValueError("No paired finite rows remain")
-    block_means = (
-        work.groupby(list(block_columns), dropna=False)["_difference"].mean().to_numpy(float)
-    )
-    if not len(block_means):
+    block_stats = work.groupby(list(block_columns), dropna=False)["_difference"].agg(["sum", "count"])
+    if block_stats.empty:
         raise ValueError("No bootstrap blocks remain")
+    block_sums = block_stats["sum"].to_numpy(float)
+    block_counts = block_stats["count"].to_numpy(float)
     rng = np.random.default_rng(seed)
     samples = max(int(samples), 200)
-    draws = rng.choice(block_means, size=(samples, len(block_means)), replace=True).mean(axis=1)
-    effect = float(work["_difference"].mean())
+    indexes = rng.integers(0, len(block_stats), size=(samples, len(block_stats)))
+    draw_sums = block_sums[indexes].sum(axis=1)
+    draw_counts = block_counts[indexes].sum(axis=1)
+    draws = draw_sums / np.maximum(draw_counts, 1.0)
+    effect = float(block_sums.sum() / max(float(block_counts.sum()), 1.0))
     low, high = np.quantile(draws, [0.025, 0.975])
     improves = draws < 0.0 if lower_is_better else draws > 0.0
     return PairedEffectEstimate(
@@ -117,7 +146,7 @@ def paired_block_bootstrap(
         ci_low=float(low),
         ci_high=float(high),
         probability_improves=float(np.mean(improves)),
-        blocks=len(block_means),
+        blocks=len(block_stats),
         rows=len(work),
         metric=str(metric),
         lower_is_better=bool(lower_is_better),
