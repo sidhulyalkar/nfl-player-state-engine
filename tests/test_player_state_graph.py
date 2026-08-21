@@ -376,7 +376,6 @@ def test_season_simulator_uses_pregame_lineup_not_hindsight_best_ball() -> None:
 
 def test_six_team_playoff_gives_top_two_seeds_opening_round_byes() -> None:
     config = LeagueConfig(teams=6, roster_slots={"QB": 1}, playoff_weeks=(2, 3, 4))
-    managers = ["A", "B", "C", "D", "E", "F"]
     week_points = {
         1: {"A": 60.0, "B": 50.0, "C": 40.0, "D": 30.0, "E": 20.0, "F": 10.0},
         2: {"A": 0.0, "B": 0.0, "C": 40.0, "D": 30.0, "E": 20.0, "F": 50.0},
