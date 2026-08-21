@@ -359,15 +359,36 @@ class PlayerStateGraph:
                 )
             attempts = np.maximum(remaining - scrambles, 0)
             if fixed_execution:
-                completions = np.rint(attempts * execution.completion_rate).astype(int)
-                pass_tds = np.rint(attempts * execution.pass_td_rate).astype(int)
-                interceptions = np.rint(attempts * execution.interception_rate).astype(int)
+                completions = np.minimum(
+                    np.rint(attempts * execution.completion_rate).astype(int), attempts
+                )
+                pass_tds = np.minimum(
+                    np.rint(attempts * execution.pass_td_rate).astype(int), completions
+                )
+                incompletions = np.maximum(attempts - completions, 0)
+                interceptions = np.minimum(
+                    np.rint(attempts * execution.interception_rate).astype(int), incompletions
+                )
             else:
                 completions = rng_execution.binomial(attempts, execution.completion_rate)
-                pass_tds = rng_execution.binomial(
-                    attempts, np.clip(execution.pass_td_rate * environment, 0.0, 0.20)
+                td_rate_per_attempt = np.clip(
+                    execution.pass_td_rate * environment, 0.0, 0.20
                 )
-                interceptions = rng_execution.binomial(attempts, execution.interception_rate)
+                td_rate_per_completion = np.clip(
+                    td_rate_per_attempt / max(execution.completion_rate, 1e-6),
+                    0.0,
+                    1.0,
+                )
+                pass_tds = rng_execution.binomial(completions, td_rate_per_completion)
+                incompletions = np.maximum(attempts - completions, 0)
+                interception_rate_per_incompletion = np.clip(
+                    execution.interception_rate / max(1.0 - execution.completion_rate, 1e-6),
+                    0.0,
+                    1.0,
+                )
+                interceptions = rng_execution.binomial(
+                    incompletions, interception_rate_per_incompletion
+                )
             passing_yards = _efficiency_total(
                 rng_execution,
                 completions,
@@ -422,7 +443,9 @@ class PlayerStateGraph:
                 else rng_role.binomial(routes, target_rate_per_route)
             )
             if fixed_execution:
-                receptions = np.rint(targets * execution.catch_rate).astype(int)
+                receptions = np.minimum(
+                    np.rint(targets * execution.catch_rate).astype(int), targets
+                )
             else:
                 receptions = rng_execution.binomial(targets, execution.catch_rate)
             receiving_yards = _efficiency_total(
@@ -432,18 +455,27 @@ class PlayerStateGraph:
                 execution.efficiency_cv,
                 fixed=fixed_execution,
             ) * efficiency_multiplier
-            receiving_td_probability = np.clip(
+            receiving_td_rate_per_target = np.clip(
                 execution.receiving_td_rate_per_target
                 * environment
                 * (0.60 + red_zone_share),
                 0.0,
                 0.30,
             )
-            receiving_tds = (
-                np.rint(targets * receiving_td_probability).astype(int)
-                if fixed_execution
-                else rng_execution.binomial(targets, receiving_td_probability)
-            )
+            if fixed_execution:
+                receiving_tds = np.minimum(
+                    np.rint(targets * receiving_td_rate_per_target).astype(int),
+                    receptions,
+                )
+            else:
+                receiving_td_rate_per_reception = np.clip(
+                    receiving_td_rate_per_target / max(execution.catch_rate, 1e-6),
+                    0.0,
+                    1.0,
+                )
+                receiving_tds = rng_execution.binomial(
+                    receptions, receiving_td_rate_per_reception
+                )
             carries = (
                 np.rint(team_rushes * carry_share).astype(int)
                 if fixed_role
