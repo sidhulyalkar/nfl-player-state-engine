@@ -15,7 +15,8 @@ class SeasonSimulationResult:
     weekly_lineups: pd.DataFrame
     simulations: int
     playoff_teams: int
-    bracket_policy: str = "reseed_high_vs_low"
+    bracket_policy: str = "reseed_high_vs_low_with_standard_byes"
+    lineup_policy: str = "pregame_expected_value"
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,11 +43,18 @@ def _starter_slots(config: LeagueConfig) -> list[tuple[str, tuple[str, ...]]]:
     return slots
 
 
-def _optimal_lineup(group: pd.DataFrame, config: LeagueConfig) -> tuple[float, tuple[str, ...]]:
+def _optimal_lineup(
+    group: pd.DataFrame,
+    config: LeagueConfig,
+    *,
+    value_column: str = "league_fantasy_points",
+) -> tuple[float, tuple[str, ...]]:
     slots = _starter_slots(config)
     if group.empty or not slots:
         return 0.0, ()
-    scores = pd.to_numeric(group["league_fantasy_points"], errors="coerce").fillna(0.0).to_numpy(float)
+    if value_column not in group:
+        raise ValueError(f"lineup group missing value column: {value_column}")
+    scores = pd.to_numeric(group[value_column], errors="coerce").fillna(0.0).to_numpy(float)
     positions = group["position"].astype(str).str.upper().to_numpy()
     matrix = np.full((len(group), len(slots)), -1e9, dtype=float)
     for player_index, position in enumerate(positions):
@@ -92,19 +100,47 @@ def _validate_draws(draws: pd.DataFrame) -> pd.DataFrame:
     return data
 
 
+def _pregame_lineup_plan(draws: pd.DataFrame, config: LeagueConfig) -> dict[tuple[int, str], tuple[str, ...]]:
+    """Choose starters from information available before a simulated outcome is realized.
+
+    The Monte Carlo mean for each player-week is used as the pregame selection score. This keeps
+    lineup decisions fixed across paths and prevents hindsight-optimal/best-ball scoring from
+    inflating managed-league win, playoff, and championship probabilities.
+    """
+
+    expected = (
+        draws.groupby(["week", "manager_id", "player_id", "position"], as_index=False)[
+            "league_fantasy_points"
+        ]
+        .mean()
+        .rename(columns={"league_fantasy_points": "pregame_expected_points"})
+    )
+    plans: dict[tuple[int, str], tuple[str, ...]] = {}
+    for (week, manager_id), group in expected.groupby(["week", "manager_id"], sort=False):
+        _, starters = _optimal_lineup(group, config, value_column="pregame_expected_points")
+        plans[(int(week), str(manager_id))] = starters
+    return plans
+
+
 def _lineup_table(draws: pd.DataFrame, config: LeagueConfig) -> pd.DataFrame:
+    plans = _pregame_lineup_plan(draws, config)
     rows: list[dict[str, object]] = []
     for (simulation_id, week, manager_id), group in draws.groupby(
         ["simulation_id", "week", "manager_id"], sort=False
     ):
-        points, starters = _optimal_lineup(group, config)
+        starters = plans.get((int(week), str(manager_id)), ())
+        starter_ids = set(starters)
+        points = float(
+            group.loc[group["player_id"].astype(str).isin(starter_ids), "league_fantasy_points"].sum()
+        )
         rows.append(
             {
                 "simulation_id": int(simulation_id),
                 "week": int(week),
                 "manager_id": str(manager_id),
-                "lineup_points": float(points),
+                "lineup_points": points,
                 "starter_player_ids": starters,
+                "lineup_policy": "pregame_expected_value",
             }
         )
     return pd.DataFrame(rows)
@@ -132,6 +168,33 @@ def _schedule_pairs(schedule: pd.DataFrame, regular_weeks: set[int]) -> list[tup
     return pairs
 
 
+def _play_round(
+    participants: list[str],
+    seed_number: dict[str, int],
+    week: int,
+    points: dict[tuple[int, str], float],
+) -> list[str]:
+    participants = sorted(participants, key=lambda manager: seed_number[manager])
+    winners: list[str] = []
+    left = 0
+    right = len(participants) - 1
+    while left < right:
+        high_seed = participants[left]
+        low_seed = participants[right]
+        high_points = float(points.get((int(week), high_seed), 0.0))
+        low_points = float(points.get((int(week), low_seed), 0.0))
+        if high_points == low_points:
+            winner = high_seed
+        else:
+            winner = high_seed if high_points > low_points else low_seed
+        winners.append(winner)
+        left += 1
+        right -= 1
+    if left == right:
+        winners.append(participants[left])
+    return winners
+
+
 def _reseeded_champion(
     seeds: list[str],
     seed_number: dict[str, int],
@@ -141,33 +204,27 @@ def _reseeded_champion(
     alive = list(seeds)
     if len(alive) <= 1:
         return alive[0] if alive else None
-    for week in playoff_weeks:
+
+    rounds_required = (len(alive) - 1).bit_length()
+    if len(playoff_weeks) < rounds_required:
+        raise ValueError(
+            f"{len(alive)} playoff teams require at least {rounds_required} playoff weeks"
+        )
+
+    bracket_size = 1 << rounds_required
+    opening_byes = bracket_size - len(alive)
+    for round_index, week in enumerate(playoff_weeks[:rounds_required]):
         if len(alive) <= 1:
             break
         alive.sort(key=lambda manager: seed_number[manager])
-        winners: list[str] = []
-        left = 0
-        right = len(alive) - 1
-        if len(alive) % 2 == 1:
-            winners.append(alive[0])
-            left = 1
-        while left < right:
-            high_seed = alive[left]
-            low_seed = alive[right]
-            high_points = float(points.get((int(week), high_seed), 0.0))
-            low_points = float(points.get((int(week), low_seed), 0.0))
-            if high_points == low_points:
-                winner = high_seed
-            else:
-                winner = high_seed if high_points > low_points else low_seed
-            winners.append(winner)
-            left += 1
-            right -= 1
-        if left == right:
-            winners.append(alive[left])
-        alive = winners
-    if len(alive) > 1:
-        alive.sort(key=lambda manager: seed_number[manager])
+        if round_index == 0 and opening_byes > 0:
+            bye_teams = alive[:opening_byes]
+            participants = alive[opening_byes:]
+            alive = bye_teams + _play_round(participants, seed_number, week, points)
+        else:
+            alive = _play_round(alive, seed_number, week, points)
+
+    alive.sort(key=lambda manager: seed_number[manager])
     return alive[0] if alive else None
 
 
@@ -175,8 +232,9 @@ class FantasySeasonSimulator:
     """League-specific paired Monte Carlo from weekly player draws to title probability.
 
     Draws remain correlated when the caller generated them with shared football-world sample
-    IDs. The simulator then applies legal lineup optimization, head-to-head matchups, optional
-    league-median games, standings, a reseeded playoff bracket, and championship outcomes.
+    IDs. The simulator applies a single pregame expected-value lineup plan to every Monte Carlo
+    path, then scores the realized outcomes, head-to-head matchups, optional league-median games,
+    standings, standard opening-round byes, reseeded playoffs, and championship outcomes.
     """
 
     def __init__(self, config: LeagueConfig, *, playoff_teams: int | None = None) -> None:
