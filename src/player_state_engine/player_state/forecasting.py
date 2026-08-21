@@ -28,6 +28,19 @@ def _pinball(actual: np.ndarray, predicted: np.ndarray, quantile: float) -> floa
     return float(np.mean(np.maximum(quantile * error, (quantile - 1.0) * error)))
 
 
+def _order_quantile_triplet(
+    frame: pd.DataFrame,
+    columns: tuple[str, str, str],
+) -> np.ndarray:
+    """Repair crossed q10/q50/q90 rows in-place and return a per-row repair mask."""
+
+    values = frame.loc[:, list(columns)].to_numpy(float)
+    crossed = (values[:, 0] > values[:, 1]) | (values[:, 1] > values[:, 2])
+    values.sort(axis=1)
+    frame.loc[:, list(columns)] = values
+    return crossed
+
+
 def calibration_report(frame: pd.DataFrame) -> dict[str, float]:
     required = {"actual", "q10", "q50", "q90"}
     missing = required - set(frame.columns)
@@ -67,11 +80,14 @@ class ConformalAdjustment:
 
 @dataclass
 class RecencyWeightedConditionalConformal:
-    """Recency-weighted conditional conformal adjustment for q10/q50/q90 forecasts.
+    """Recency-weighted conditional calibration for q10/q50/q90 forecasts.
 
     Fitting is strictly historical. Sparse position/target groups back off through a hierarchy
     to a global adjustment. The calibrator reports both coverage and sharpness so wider tails
     cannot masquerade as a free calibration win.
+
+    Because recency weights and hierarchical shrinkage intentionally relax exchangeability, this
+    is a conformal-style research calibrator, not a claim of exact finite-sample coverage.
     """
 
     target_coverage: float = 0.80
@@ -140,6 +156,7 @@ class RecencyWeightedConditionalConformal:
         )
         if data.empty:
             raise ValueError("No finite calibration rows remain")
+        _order_quantile_triplet(data, ("q10", "q50", "q90"))
         weights = self._recency_weights(data)
         data["_weight"] = weights
         self.adjustments = {}
@@ -213,9 +230,12 @@ class RecencyWeightedConditionalConformal:
         if missing:
             raise ValueError(f"Forecast frame missing columns: {sorted(missing)}")
         out = forecasts.copy()
-        q10 = pd.to_numeric(out["q10"], errors="coerce").to_numpy(float)
-        q50 = pd.to_numeric(out["q50"], errors="coerce").to_numpy(float)
-        q90 = pd.to_numeric(out["q90"], errors="coerce").to_numpy(float)
+        for column in required:
+            out[column] = pd.to_numeric(out[column], errors="coerce")
+        crossed = _order_quantile_triplet(out, ("q10", "q50", "q90"))
+        q10 = out["q10"].to_numpy(float)
+        q50 = out["q50"].to_numpy(float)
+        q90 = out["q90"].to_numpy(float)
         biases = np.zeros(len(out), dtype=float)
         expansions = np.zeros(len(out), dtype=float)
         for row_number, (_, row) in enumerate(out.iterrows()):
@@ -233,6 +253,7 @@ class RecencyWeightedConditionalConformal:
         stacked.sort(axis=1)
         out[["q10", "q50", "q90"]] = stacked
         out["conditional_conformal_applied"] = 1
+        out["conformal_input_quantiles_reordered"] = crossed
         out["conformal_interval_expansion"] = expansions
         out["conformal_median_bias"] = biases
         out["conformal_fitted_through"] = self.fitted_through
@@ -261,7 +282,8 @@ class HierarchicalForecastFusion:
 
     A weak inverse-standalone-loss prior resolves non-identifiable convex mixtures. It acts as
     a tie-break, not a shortcut around the primary pinball objective: complementary experts
-    still earn weight when their blend improves historical quantile loss.
+    still earn weight when their blend improves historical quantile loss. Crossed expert
+    quantiles are repaired identically during fitting and inference and surfaced as diagnostics.
     """
 
     experts: tuple[str, ...] = ("direct", "world", "consensus")
@@ -289,6 +311,15 @@ class HierarchicalForecastFusion:
         if include_actual:
             required.add("actual")
         return required
+
+    def _repair_expert_quantiles(self, data: pd.DataFrame) -> np.ndarray:
+        repaired = np.zeros(len(data), dtype=bool)
+        for expert in self.experts:
+            repaired |= _order_quantile_triplet(
+                data,
+                (f"{expert}_q10", f"{expert}_q50", f"{expert}_q90"),
+            )
+        return repaired
 
     def _standalone_loss_prior(
         self,
@@ -359,6 +390,7 @@ class HierarchicalForecastFusion:
         )
         if data.empty:
             raise ValueError("No finite fusion rows remain")
+        self._repair_expert_quantiles(data)
         self.fitted_weights = {}
         global_weights = self._fit_weights(data)
         self.fitted_weights[((), ())] = FusionWeights(
@@ -423,6 +455,9 @@ class HierarchicalForecastFusion:
         if missing:
             raise ValueError(f"Fusion forecast frame missing columns: {sorted(missing)}")
         out = forecasts.copy()
+        for column in self._required_columns(include_actual=False):
+            out[column] = pd.to_numeric(out[column], errors="coerce")
+        repaired = self._repair_expert_quantiles(out)
         blended = np.zeros((len(out), 3), dtype=float)
         selected: list[FusionWeights] = []
         context_columns = {
@@ -454,6 +489,7 @@ class HierarchicalForecastFusion:
         )
         out["expert_disagreement_range"] = np.ptp(q50_matrix, axis=1)
         out["expert_disagreement_sd"] = np.std(q50_matrix, axis=1)
+        out["fusion_input_quantiles_reordered"] = repaired
         out["fusion_level"] = [
             "/".join(item.level) if item.level else "global" for item in selected
         ]
