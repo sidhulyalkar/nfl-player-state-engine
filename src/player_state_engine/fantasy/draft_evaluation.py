@@ -178,7 +178,9 @@ def compare_survival_models_paired(
     """Paired block bootstrap of Brier loss difference: challenger minus baseline.
 
     Negative deltas favor the challenger. Blocks default to whole drafts so observations from
-    the same room are never treated as independent evidence.
+    the same room are never treated as independent evidence. Resampled block sums and counts
+    preserve the same row-weighted Brier-delta estimand as the reported point estimate even when
+    drafts contain different numbers of eligible rows.
     """
 
     required = {outcome_column, challenger_column, baseline_column}
@@ -200,28 +202,30 @@ def compare_survival_models_paired(
     observed = float(np.mean(row_delta))
 
     usable_blocks = tuple(column for column in block_columns if column in data)
+    work = data.assign(_delta=row_delta)
     if usable_blocks:
-        if len(usable_blocks) == 1:
-            grouped = list(data.assign(_delta=row_delta).groupby(usable_blocks[0], dropna=False))
-        else:
-            grouped = list(
-                data.assign(_delta=row_delta).groupby(list(usable_blocks), dropna=False)
-            )
-        block_means = np.asarray(
-            [float(pd.to_numeric(group["_delta"], errors="coerce").mean()) for _, group in grouped],
-            dtype=float,
-        )
+        grouper: str | list[str]
+        grouper = usable_blocks[0] if len(usable_blocks) == 1 else list(usable_blocks)
+        block_stats = work.groupby(grouper, dropna=False)["_delta"].agg(["sum", "count"])
     else:
-        block_means = row_delta.astype(float)
-    block_means = block_means[np.isfinite(block_means)]
-    if not len(block_means):
+        block_stats = pd.DataFrame(
+            {
+                "sum": row_delta.astype(float),
+                "count": np.ones(len(row_delta), dtype=float),
+            }
+        )
+    block_stats = block_stats.replace([np.inf, -np.inf], np.nan).dropna(subset=["sum", "count"])
+    if block_stats.empty:
         raise ValueError("no finite bootstrap blocks remain")
 
+    block_sums = block_stats["sum"].to_numpy(float)
+    block_counts = block_stats["count"].to_numpy(float)
     rng = np.random.default_rng(int(seed))
-    samples = np.empty(max(100, int(bootstrap_samples)), dtype=float)
-    for index in range(len(samples)):
-        resampled = rng.choice(block_means, size=len(block_means), replace=True)
-        samples[index] = float(np.mean(resampled))
+    sample_count = max(100, int(bootstrap_samples))
+    indexes = rng.integers(0, len(block_stats), size=(sample_count, len(block_stats)))
+    sampled_sums = block_sums[indexes].sum(axis=1)
+    sampled_counts = block_counts[indexes].sum(axis=1)
+    samples = sampled_sums / np.maximum(sampled_counts, 1.0)
     low, high = np.quantile(samples, [0.025, 0.975])
     probability_better = float(np.mean(samples < 0.0))
     return PairedSurvivalComparison(
