@@ -357,6 +357,11 @@ class PlayerStateGraph:
                 scrambles = rng_execution.binomial(
                     remaining, np.clip(scramble_rate, 0.0, 0.35)
                 )
+            # carry_share is defined by the opportunity engine as player carries / team carries.
+            # Scrambles are already part of that total rushing share, so they must not be added
+            # again as an independent carry source. Cap them to the sampled team rushing total,
+            # then ensure the sampled total QB carries are at least the scramble count.
+            scrambles = np.minimum(scrambles, team_rushes)
             attempts = np.maximum(remaining - scrambles, 0)
             if fixed_execution:
                 completions = np.minimum(
@@ -396,12 +401,12 @@ class PlayerStateGraph:
                 execution.efficiency_cv,
                 fixed=fixed_execution,
             ) * efficiency_multiplier
-            designed = (
+            sampled_total_carries = (
                 np.rint(team_rushes * carry_share).astype(int)
                 if fixed_role
-                else rng_role.binomial(team_rushes, np.clip(carry_share, 0.0, 0.75))
+                else rng_role.binomial(team_rushes, np.clip(carry_share, 0.0, 1.0))
             )
-            carries = scrambles + designed
+            carries = np.minimum(np.maximum(scrambles, sampled_total_carries), team_rushes)
             rushing_yards = _efficiency_total(
                 rng_execution,
                 carries,
