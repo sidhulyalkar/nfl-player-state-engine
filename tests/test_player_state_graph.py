@@ -71,6 +71,18 @@ def _receiver_role(cutoff: datetime):
     return role_filter.posterior(as_of=cutoff)
 
 
+def _qb_role(cutoff: datetime):
+    observation = ShareObservation(
+        observed_at=_time(8),
+        available_for_prediction_at=_time(9),
+        shares={"snap_share": 0.99, "carry_share": 0.12},
+        opportunities={"snap_share": 65, "carry_share": 25},
+    )
+    role_filter = DynamicRoleFilter("qb-1", "QB", prior_strength=10.0, maturity_rows=40.0)
+    role_filter.fit([observation], prediction_cutoff=cutoff)
+    return role_filter.posterior(as_of=cutoff)
+
+
 def test_temporal_evidence_uses_availability_timestamp_not_event_time() -> None:
     old_event_late_release = TemporalEvidenceRecord(
         source_family="participation",
@@ -126,6 +138,36 @@ def test_dynamic_role_filter_reacts_to_discontinuous_usage_and_ignores_future_ro
     assert posterior.states["target_share"].q50 <= posterior.states["target_share"].q90
 
 
+def test_dynamic_role_filter_decays_stale_confidence_and_orders_late_evidence_by_event_time() -> None:
+    role_filter = DynamicRoleFilter(
+        "wr-stale",
+        "WR",
+        prior_strength=10.0,
+        half_life_weeks=2.0,
+        maturity_rows=40.0,
+    )
+    late_old_row = ShareObservation(
+        observed_at=_time(1),
+        available_for_prediction_at=_time(10),
+        shares={"target_share": 0.08},
+        opportunities={"target_share": 60},
+    )
+    recent_row = ShareObservation(
+        observed_at=_time(8),
+        available_for_prediction_at=_time(9),
+        shares={"target_share": 0.42},
+        opportunities={"target_share": 60},
+    )
+    role_filter.fit([recent_row, late_old_row], prediction_cutoff=_time(11))
+    fresh = role_filter.posterior(as_of=_time(11)).states["target_share"]
+    stale = role_filter.posterior(as_of=_time(11) + timedelta(weeks=8)).states["target_share"]
+    assert fresh.mean > 0.20
+    assert stale.mean < fresh.mean
+    assert stale.mean > 0.19
+    assert stale.effective_sample_size < fresh.effective_sample_size
+    assert stale.change_probability < fresh.change_probability
+
+
 def test_player_state_graph_generates_coherent_stats_then_exact_league_points() -> None:
     league = LeagueConfig(teams=12, scoring="ppr")
     role = _receiver_role(_time(10))
@@ -140,6 +182,7 @@ def test_player_state_graph_generates_coherent_stats_then_exact_league_points() 
     graph = PlayerStateGraph(league)
     draws = graph.simulate(snapshot, simulations=600, seed=7)
     assert (draws["receptions"] <= draws["targets"] + 1e-12).all()
+    assert (draws["receiving_tds"] <= draws["receptions"] + 1e-12).all()
     assert (draws["targets"] <= draws["routes"] + 1e-12).all()
     assert (draws["carries"] <= draws["team_rushes"] + 1e-12).all()
     assert np.isfinite(draws["league_fantasy_points"]).all()
@@ -153,6 +196,27 @@ def test_player_state_graph_generates_coherent_stats_then_exact_league_points() 
         + 6.0 * draws["rushing_tds"]
     )
     assert np.allclose(draws["league_fantasy_points"], manual)
+
+
+def test_player_state_graph_qb_outcomes_obey_attempt_completion_constraints() -> None:
+    graph = PlayerStateGraph(LeagueConfig(teams=12, scoring="ppr"))
+    snapshot = PlayerStateSnapshot(
+        player_id="qb-1",
+        position="QB",
+        role=_qb_role(_time(10)),
+        team_volume=TeamVolumeState(40.0, 5.0, 24.0, 4.0),
+        execution=ExecutionState(
+            completion_rate=0.45,
+            pass_td_rate=0.12,
+            interception_rate=0.12,
+        ),
+        p_active=1.0,
+    )
+    draws = graph.simulate(snapshot, simulations=1000, seed=17)
+    incompletions = draws["passing_attempts"] - draws["passing_completions"]
+    assert (draws["passing_completions"] <= draws["passing_attempts"] + 1e-12).all()
+    assert (draws["passing_tds"] <= draws["passing_completions"] + 1e-12).all()
+    assert (draws["interceptions"] <= incompletions + 1e-12).all()
 
 
 def test_uncertainty_decomposition_is_normalized_and_nonnegative() -> None:
@@ -268,6 +332,81 @@ def test_fantasy_season_simulator_reaches_playoff_and_championship_probabilities
     assert a["playoff_probability"] == pytest.approx(1.0)
     assert a["championship_probability"] == pytest.approx(1.0)
     assert result.simulations == 30
+    assert result.lineup_policy == "pregame_expected_value"
+
+
+def test_season_simulator_uses_pregame_lineup_not_hindsight_best_ball() -> None:
+    config = LeagueConfig(teams=2, roster_slots={"QB": 1}, playoff_weeks=())
+    rows: list[dict[str, object]] = []
+    for simulation_id, volatile_points in ((0, 20.0), (1, 0.0)):
+        rows.extend(
+            [
+                {
+                    "simulation_id": simulation_id,
+                    "week": 1,
+                    "player_id": "stable",
+                    "manager_id": "A",
+                    "position": "QB",
+                    "league_fantasy_points": 11.0,
+                },
+                {
+                    "simulation_id": simulation_id,
+                    "week": 1,
+                    "player_id": "volatile",
+                    "manager_id": "A",
+                    "position": "QB",
+                    "league_fantasy_points": volatile_points,
+                },
+                {
+                    "simulation_id": simulation_id,
+                    "week": 1,
+                    "player_id": "opponent",
+                    "manager_id": "B",
+                    "position": "QB",
+                    "league_fantasy_points": 5.0,
+                },
+            ]
+        )
+    schedule = pd.DataFrame([{"week": 1, "manager_id": "A", "opponent_id": "B"}])
+    result = FantasySeasonSimulator(config, playoff_teams=1).simulate(pd.DataFrame(rows), schedule)
+    a_lineups = result.weekly_lineups.loc[result.weekly_lineups["manager_id"].eq("A")]
+    assert a_lineups["starter_player_ids"].apply(lambda ids: ids == ("stable",)).all()
+    assert a_lineups["lineup_points"].tolist() == [11.0, 11.0]
+
+
+def test_six_team_playoff_gives_top_two_seeds_opening_round_byes() -> None:
+    config = LeagueConfig(teams=6, roster_slots={"QB": 1}, playoff_weeks=(2, 3, 4))
+    managers = ["A", "B", "C", "D", "E", "F"]
+    week_points = {
+        1: {"A": 60.0, "B": 50.0, "C": 40.0, "D": 30.0, "E": 20.0, "F": 10.0},
+        2: {"A": 0.0, "B": 0.0, "C": 40.0, "D": 30.0, "E": 20.0, "F": 50.0},
+        3: {"A": 70.0, "B": 60.0, "C": 10.0, "D": 20.0, "E": 0.0, "F": 0.0},
+        4: {"A": 80.0, "B": 70.0, "C": 0.0, "D": 0.0, "E": 0.0, "F": 0.0},
+    }
+    rows = [
+        {
+            "simulation_id": 0,
+            "week": week,
+            "player_id": f"qb-{manager}",
+            "manager_id": manager,
+            "position": "QB",
+            "league_fantasy_points": points,
+        }
+        for week, values in week_points.items()
+        for manager, points in values.items()
+    ]
+    schedule = pd.DataFrame(
+        [
+            {"week": 1, "manager_id": "A", "opponent_id": "F"},
+            {"week": 1, "manager_id": "B", "opponent_id": "E"},
+            {"week": 1, "manager_id": "C", "opponent_id": "D"},
+        ]
+    )
+    result = FantasySeasonSimulator(config, playoff_teams=6).simulate(pd.DataFrame(rows), schedule)
+    metrics = result.manager_metrics.set_index("manager_id")
+    assert metrics.loc["A", "championship_probability"] == pytest.approx(1.0)
+    assert metrics.loc["F", "championship_probability"] == pytest.approx(0.0)
+    assert result.bracket_policy == "reseed_high_vs_low_with_standard_byes"
 
 
 def test_block_bootstrap_and_evidence_tier_fail_closed_until_multi_season() -> None:
