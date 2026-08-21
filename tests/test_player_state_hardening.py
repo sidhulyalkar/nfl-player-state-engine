@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import numpy as np
 import pandas as pd
 
+from player_state_engine.fantasy.league import LeagueConfig
 from player_state_engine.player_state import (
+    DynamicRoleFilter,
     EvidenceTier,
+    ExecutionState,
     ExperimentEvidence,
     HierarchicalForecastFusion,
     PairedEffectEstimate,
+    PlayerStateGraph,
+    PlayerStateSnapshot,
     RecencyWeightedConditionalConformal,
+    ShareObservation,
+    TeamVolumeState,
     paired_block_bootstrap,
 )
 
@@ -116,3 +125,30 @@ def test_recency_calibrator_surfaces_crossed_input_repair() -> None:
     output = calibrator.transform(forecasts)
     assert bool(output.loc[0, "conformal_input_quantiles_reordered"])
     assert output.loc[0, "q10"] <= output.loc[0, "q50"] <= output.loc[0, "q90"]
+
+
+def test_qb_total_carries_respect_team_carry_share_without_double_counting_scrambles() -> None:
+    cutoff = datetime(2025, 9, 10, 16, tzinfo=UTC)
+    role_filter = DynamicRoleFilter("qb-carry", "QB", prior_strength=10.0, maturity_rows=40.0)
+    role_filter.fit(
+        [
+            ShareObservation(
+                observed_at=datetime(2025, 9, 8, 16, tzinfo=UTC),
+                available_for_prediction_at=datetime(2025, 9, 9, 16, tzinfo=UTC),
+                shares={"snap_share": 0.99, "carry_share": 0.28},
+                opportunities={"snap_share": 65, "carry_share": 28},
+            )
+        ],
+        prediction_cutoff=cutoff,
+    )
+    snapshot = PlayerStateSnapshot(
+        player_id="qb-carry",
+        position="QB",
+        role=role_filter.posterior(as_of=cutoff),
+        team_volume=TeamVolumeState(42.0, 5.0, 22.0, 3.0),
+        execution=ExecutionState(scramble_rate=0.18),
+        p_active=1.0,
+    )
+    draws = PlayerStateGraph(LeagueConfig()).simulate(snapshot, simulations=1000, seed=91)
+    assert (draws["carries"] <= draws["team_rushes"] + 1e-12).all()
+    assert (draws["passing_completions"] <= draws["passing_attempts"] + 1e-12).all()
