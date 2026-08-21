@@ -115,17 +115,19 @@ def projection_change_attribution(
     """Normalize model counterfactual effects to the observed projection change.
 
     The output is explicitly model attribution, not a causal claim. The normalization keeps
-    the displayed components additive even when counterfactual effects overlap.
+    displayed components additive when the counterfactual total is identified. If component
+    effects cancel exactly, the unexplained move is reported as a residual instead of assigning
+    it arbitrarily to whichever component happened to appear first.
     """
 
     total = float(after_median) - float(before_median)
     raw = {str(key): float(value) for key, value in raw_component_effects.items()}
     raw_total = sum(raw.values())
     if abs(raw_total) <= 1e-12:
-        contributions = {key: 0.0 for key in raw}
-        if raw:
-            first = next(iter(raw))
-            contributions[first] = total
+        contributions = dict(raw)
+        residual = total - raw_total
+        if abs(residual) > 1e-12 or not contributions:
+            contributions["unattributed_residual"] = float(residual)
     else:
         scale = total / raw_total
         contributions = {key: float(value * scale) for key, value in raw.items()}
@@ -226,8 +228,14 @@ def build_player_intelligence_card(
     expected_routes = _mean_column(draws, "routes")
     expected_targets = _mean_column(draws, "targets")
     expected_carries = _mean_column(draws, "carries")
-    expected_rz = _mean_column(draws, "team_red_zone_plays") * snapshot.role.mean(
-        "red_zone_share", 0.0
+    expected_role_multiplier = 1.0 - float(snapshot.limited_probability) * (
+        1.0 - float(snapshot.limited_role_multiplier)
+    )
+    expected_rz = (
+        _mean_column(draws, "team_red_zone_plays")
+        * snapshot.role.mean("red_zone_share", 0.0)
+        * float(snapshot.p_active)
+        * expected_role_multiplier
     )
     leading_uncertainty = _uncertainty_driver(uncertainty)
     if upside_driver is None:
