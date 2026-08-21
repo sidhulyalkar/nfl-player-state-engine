@@ -76,6 +76,9 @@ class ExperimentEvidence:
         directional_ci = (
             -self.effect.ci_high if self.effect.lower_is_better else self.effect.ci_low
         )
+        downstream_evidence_is_consistent = self.downstream_decision_passed is not False
+        if self.evidence_tier >= EvidenceTier.MULTI_SEASON_DOWNSTREAM:
+            downstream_evidence_is_consistent = self.downstream_decision_passed is True
         return bool(
             self.preregistered
             and self.evidence_tier >= EvidenceTier.MULTI_SEASON_ISOLATED
@@ -86,7 +89,7 @@ class ExperimentEvidence:
             and self._clears(self.position_consistency, self.minimum_position_consistency)
             and self._clears(self.coverage, self.minimum_coverage)
             and self._clears(self.source_availability, self.minimum_source_availability)
-            and (self.downstream_decision_passed is not False)
+            and downstream_evidence_is_consistent
         )
 
     def as_dict(self) -> dict[str, object]:
