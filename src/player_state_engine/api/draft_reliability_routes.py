@@ -7,7 +7,9 @@ from datetime import UTC, datetime
 from player_state_engine.api.draft_routes import DraftBoardService
 from player_state_engine.fantasy.decision_board import DecisionType, build_decision_board
 from player_state_engine.fantasy.draft_advisor import augment_live_draft_board_with_reliability
-from player_state_engine.fantasy.draft_survival import artifact_metadata as survival_artifact_metadata
+from player_state_engine.fantasy.draft_survival import (
+    artifact_metadata as survival_artifact_metadata,
+)
 from player_state_engine.fantasy.readiness import assess_league_readiness
 from player_state_engine.product.provenance import frame_records, projection_metadata
 
