@@ -2,6 +2,7 @@ export type NavPage =
   | 'overview'
   | 'league'
   | 'players'
+  | 'intelligence'
   | 'trade'
   | 'waivers'
   | 'lineup'
@@ -28,6 +29,7 @@ export interface PlayerRow {
   is_free_agent?: boolean;
   decision_type?: DecisionType | string;
   decision_specific_score?: number;
+  decision_percentile?: number;
   overall_rank?: number;
   position_rank?: number;
   fantasy_points_ppr_q10?: number;
@@ -44,6 +46,15 @@ export interface PlayerRow {
   availability_probability?: number;
   opportunity_confidence?: number;
   breakout_probability?: number;
+  role_growth_score?: number;
+  scheme_fit_score?: number;
+  schedule_score?: number;
+  playoff_schedule_score?: number;
+  prospect_prior_score?: number;
+  age?: number;
+  market_adp?: number;
+  market_value_gap?: number;
+  uncertainty?: number;
   waiver_upgrade?: number;
   recommended_faab?: number;
   recommended_faab_pct?: number;
@@ -268,4 +279,131 @@ export interface DataProvenance {
   sourceCoverage?: number;
   unresolvedPlayerIds?: number;
   missingInputs?: string[];
+}
+
+export interface PlayerProjectionShape {
+  q10: number | null;
+  q50: number | null;
+  q90: number | null;
+  interval_width: number | null;
+  downside_from_median: number | null;
+  upside_from_median: number | null;
+  relative_interval_width: number | null;
+}
+
+export interface PlayerDecisionMatrixRow {
+  decision: DecisionType;
+  score: number | null;
+  percentile: number | null;
+  overall_rank: number | null;
+  position_rank: number | null;
+  reasons: string | null;
+  vorp: number | null;
+  floor_vorp: number | null;
+  upside_vorp: number | null;
+  replacement_points: number | null;
+  scarcity_score: number | null;
+  market_adp: number | null;
+  market_value_gap: number | null;
+}
+
+export interface PlayerSignal {
+  key: string;
+  label: string;
+  value: number;
+  status: 'positive' | 'neutral' | 'watch' | 'risk' | string;
+}
+
+export interface PlayerIntelligenceResponse {
+  player: {
+    player_id: string;
+    player_name: string;
+    position: string | null;
+    team: string | null;
+    age: number | null;
+    owner_roster_id: string | null;
+    owner_team_name: string | null;
+    is_free_agent: boolean;
+  };
+  projection: PlayerProjectionShape;
+  replacement_margins: { q10: number | null; q50: number | null; q90: number | null };
+  decision_matrix: PlayerDecisionMatrixRow[];
+  signals: PlayerSignal[];
+  raw_model_fields: Record<string, unknown>;
+  league: {
+    teams: number;
+    scoring: string;
+    roster_slots: Record<string, number>;
+    flex_eligibility: Record<string, string[]>;
+    risk_preference: number;
+    median_scoring: boolean;
+    median_game_weight: number;
+    tight_end_premium: number;
+    faab_budget: number | null;
+  };
+  trust: Record<string, unknown>;
+  authority: {
+    production_projection_authoritative: boolean;
+    decision_board_authoritative: boolean;
+    player_state_graph_authority: string;
+    forecast_trust_is_guardrail: boolean;
+    note: string;
+  };
+}
+
+export interface ModelDiagnosticRow {
+  scope: string;
+  rows: number;
+  position?: string;
+  season?: number;
+  empirical_80_coverage?: number;
+  coverage_gap?: number;
+  calibration_status?: string;
+  q50_mae?: number;
+  median_bias?: number;
+  mean_interval_width?: number;
+  lower_miss_rate?: number;
+  upper_miss_rate?: number;
+  pinball_q10?: number;
+  pinball_q50?: number;
+  pinball_q90?: number;
+  mean_pinball?: number;
+  mean_interval_score_80?: number;
+  crossed_quantile_rate_before_repair?: number;
+}
+
+export interface ModelDiagnosticsResponse {
+  data_mode: string;
+  authority: string;
+  target_coverage: number;
+  method: string;
+  target: string;
+  minimum_rows: number;
+  artifact: ArtifactMetadata;
+  overall: ModelDiagnosticRow;
+  by_position: ModelDiagnosticRow[];
+  by_season: ModelDiagnosticRow[];
+  by_position_season: ModelDiagnosticRow[];
+}
+
+export interface ModelObservatoryResponse {
+  data_mode: string;
+  authority: {
+    production_champion: string;
+    player_state_graph: string;
+    diagnostics: string;
+    promotion_is_automatic: boolean;
+  };
+  artifact_health: {
+    available: number;
+    total: number;
+    missing: string[];
+    latest_file_modified_at?: string | null;
+  };
+  diagnostics: ModelDiagnosticsResponse;
+  benchmark: Array<Record<string, string | number | boolean | null>>;
+  conformal: Array<Record<string, string | number | boolean | null>>;
+  frozen_opportunity: Array<Record<string, string | number | boolean | null>>;
+  historical_sources: Array<Record<string, string | number | boolean | null>>;
+  historical_source_coverage: Array<Record<string, string | number | boolean | null>>;
 }
