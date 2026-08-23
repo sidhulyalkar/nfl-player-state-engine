@@ -31,15 +31,53 @@ class LeagueSnapshotStore:
         return path
 
     def load(self, league_id: str) -> LeagueSnapshot:
+        """Load a snapshot whose filename is the league id."""
+
         path = self._path(league_id)
         if not path.exists():
             raise FileNotFoundError(f"League snapshot not found: {league_id}")
         return LeagueSnapshot.model_validate_json(path.read_text(encoding="utf-8"))
 
+    def iter_snapshots(self) -> list[LeagueSnapshot]:
+        """Read valid snapshots regardless of the filename used by the sync layer."""
+
+        snapshots: list[LeagueSnapshot] = []
+        for path in sorted(self.root.glob("*.json")):
+            try:
+                snapshots.append(
+                    LeagueSnapshot.model_validate_json(path.read_text(encoding="utf-8"))
+                )
+            except (OSError, ValueError):
+                continue
+        return snapshots
+
+    def find(self, league_id: str) -> LeagueSnapshot:
+        """Find a league by identity, including connection-key-named live snapshots.
+
+        A direct ``<league_id>.json`` file remains the fast path. When live portfolio syncs use a
+        connection key as the filename, identity lookup scans valid snapshots and chooses the most
+        recently imported matching league instead of making callers duplicate filesystem logic.
+        """
+
+        direct = self._path(league_id)
+        if direct.is_file():
+            return LeagueSnapshot.model_validate_json(direct.read_text(encoding="utf-8"))
+        matches = [
+            snapshot
+            for snapshot in self.iter_snapshots()
+            if snapshot.identity.league_id == str(league_id)
+        ]
+        if not matches:
+            raise FileNotFoundError(f"League snapshot not found: {league_id}")
+        return max(matches, key=lambda snapshot: snapshot.identity.imported_at)
+
     def list(self) -> list[dict[str, object]]:
         output: list[dict[str, object]] = []
         for path in sorted(self.root.glob("*.json")):
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
             identity = payload.get("identity", {})
             output.append(
                 {
