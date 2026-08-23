@@ -5,6 +5,7 @@ import { IntelligencePortal } from './components/IntelligencePortal';
 import { ModelObservatoryPortal } from './components/ModelObservatoryPortal';
 import { PortfolioPortal } from './components/PortfolioPortal';
 import './workspace.css';
+import './shadow-workspace.css';
 
 type Surface = 'draft' | 'intelligence' | 'portfolio' | 'league' | 'model';
 
