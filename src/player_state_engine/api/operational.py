@@ -28,7 +28,6 @@ def create_app(**kwargs: Any) -> FastAPI:
     draft_service = install_draft_routes(
         app,
         store_root=kwargs.get("store_root"),
-        live_store_root=kwargs.get("live_store_root"),
         projections_path=kwargs.get("projections_path"),
     )
     install_draft_planner_routes(app, draft_service)
