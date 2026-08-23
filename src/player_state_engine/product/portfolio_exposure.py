@@ -10,20 +10,17 @@ from player_state_engine.product.store import LeagueSnapshotStore
 
 
 def _user_roster(snapshot: LeagueSnapshot) -> tuple[FantasyRoster | None, str | None]:
-    """Resolve the imported user's roster without guessing.
-
-    Imported platforms store the authenticated/external user id on LeagueIdentity and manager ids
-    on each roster. If that relationship is unavailable, the portfolio layer reports the league as
-    unresolved rather than arbitrarily selecting roster 1.
-    """
+    """Resolve the imported user's roster without guessing."""
 
     external_user_id = snapshot.identity.external_user_id
     if external_user_id:
         matches = [roster for roster in snapshot.rosters if roster.manager_id == external_user_id]
         if len(matches) == 1:
             return matches[0], "identity_external_user_id"
-    metadata_roster_id = snapshot.metadata.get("user_roster_id") or snapshot.metadata.get(
-        "selected_roster_id"
+    metadata_roster_id = (
+        snapshot.metadata.get("user_roster_id")
+        or snapshot.metadata.get("selected_roster_id")
+        or snapshot.metadata.get("external_roster_id")
     )
     if metadata_roster_id is not None:
         matches = [roster for roster in snapshot.rosters if roster.roster_id == str(metadata_roster_id)]
@@ -37,28 +34,40 @@ def _user_roster(snapshot: LeagueSnapshot) -> tuple[FantasyRoster | None, str | 
 def _canonical_key(entry: RosterEntry, snapshot: LeagueSnapshot) -> tuple[str, str]:
     if entry.canonical_player_id:
         return str(entry.canonical_player_id), "canonical"
-    # Platform ids can be compared within one platform, but are not claimed to be cross-platform IDs.
     return f"{snapshot.identity.platform}:{entry.platform_player_id}", "platform_scoped"
 
 
+def _snapshots(stores: list[LeagueSnapshotStore]) -> dict[str, LeagueSnapshot]:
+    """Collect and deduplicate leagues, preferring later stores such as the live sync root."""
+
+    snapshots: dict[str, LeagueSnapshot] = {}
+    for store in stores:
+        for row in store.list():
+            league_id = str(row["league_id"])
+            try:
+                snapshot = store.load(league_id)
+            except (FileNotFoundError, ValueError):
+                continue
+            snapshots[snapshot.identity.canonical_key] = snapshot
+    return snapshots
+
+
 def build_portfolio_exposure(
-    store: LeagueSnapshotStore,
+    store: LeagueSnapshotStore | list[LeagueSnapshotStore],
     *,
     projections: pd.DataFrame | None = None,
 ) -> dict[str, object]:
+    stores = store if isinstance(store, list) else [store]
+    snapshots = _snapshots(stores)
     leagues: list[dict[str, object]] = []
     player_records: dict[str, dict[str, object]] = {}
     team_counts: Counter[str] = Counter()
     position_counts: Counter[str] = Counter()
     unresolved_leagues: list[dict[str, str]] = []
     id_quality: Counter[str] = Counter()
-    league_ids = [str(row["league_id"]) for row in store.list()]
+    total_roster_slots = 0
 
-    for league_id in league_ids:
-        try:
-            snapshot = store.load(league_id)
-        except (FileNotFoundError, ValueError):
-            continue
+    for snapshot in snapshots.values():
         roster, resolution = _user_roster(snapshot)
         if roster is None:
             unresolved_leagues.append(
@@ -69,6 +78,7 @@ def build_portfolio_exposure(
                 }
             )
             continue
+        total_roster_slots += len(roster.players)
         leagues.append(
             {
                 "league_id": snapshot.identity.league_id,
@@ -141,7 +151,6 @@ def build_portfolio_exposure(
 
     team_rows = _concentration_rows(team_counts, resolved_league_count, "nfl_team")
     position_rows = _concentration_rows(position_counts, resolved_league_count, "position")
-    total_roster_slots = sum(team_counts.values())
     top_player_exposure = max(
         (float(row.get("exposure_rate") or 0.0) for row in output_players),
         default=0.0,
@@ -158,7 +167,8 @@ def build_portfolio_exposure(
             ),
         },
         "summary": {
-            "stored_leagues": len(league_ids),
+            "source_stores": len(stores),
+            "stored_leagues": len(snapshots),
             "resolved_user_rosters": resolved_league_count,
             "unresolved_user_rosters": len(unresolved_leagues),
             "unique_player_keys": len(output_players),
