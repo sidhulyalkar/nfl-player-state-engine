@@ -42,12 +42,7 @@ def _snapshots(stores: list[LeagueSnapshotStore]) -> dict[str, LeagueSnapshot]:
 
     snapshots: dict[str, LeagueSnapshot] = {}
     for store in stores:
-        for row in store.list():
-            league_id = str(row["league_id"])
-            try:
-                snapshot = store.load(league_id)
-            except (FileNotFoundError, ValueError):
-                continue
+        for snapshot in store.iter_snapshots():
             snapshots[snapshot.identity.canonical_key] = snapshot
     return snapshots
 
