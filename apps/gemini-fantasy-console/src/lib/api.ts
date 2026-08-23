@@ -7,9 +7,13 @@ import type {
   NFLStateSnapshot,
   PlayerIntelligenceResponse,
   PlayerRow,
+  PlayerScenarioResponse,
+  PlayerShadowResponse,
+  PortfolioExposureResponse,
   PowerRanking,
   ResearchPredictionsResponse,
   ResearchSummary,
+  ShadowEvaluationResponse,
   TeamContextResponse,
   TradeSuggestion,
 } from '../../shared/types';
@@ -48,6 +52,23 @@ export const api = {
     request<PlayerIntelligenceResponse>(
       `/v1/leagues/${encodeURIComponent(leagueId)}/players/${encodeURIComponent(playerId)}/intelligence`,
     ),
+  playerShadow: (leagueId: string, playerId: string) =>
+    request<PlayerShadowResponse>(
+      `/v1/leagues/${encodeURIComponent(leagueId)}/players/${encodeURIComponent(playerId)}/shadow`,
+    ),
+  playerScenario: (
+    leagueId: string,
+    playerId: string,
+    controls: {
+      role_multiplier: number;
+      team_volume_multiplier: number;
+      availability_probability?: number;
+    },
+  ) => request<PlayerScenarioResponse>(
+    `/v1/leagues/${encodeURIComponent(leagueId)}/players/${encodeURIComponent(playerId)}/scenario`,
+    { method: 'POST', body: JSON.stringify(controls) },
+  ),
+  portfolioExposure: () => request<PortfolioExposureResponse>('/v1/portfolio/exposure'),
   powerRankings: (leagueId: string) =>
     request<PowerRanking[]>(`/v1/leagues/${encodeURIComponent(leagueId)}/power-rankings`),
   nflState: (season: number, throughWeek?: number) =>
@@ -80,6 +101,7 @@ export const api = {
     ),
   modelObservatory: (target = 'fantasy_points_ppr', method = 'quantile_engine') =>
     request<ModelObservatoryResponse>(`/v1/model/observatory${query({ target, method })}`),
+  shadowEvaluation: () => request<ShadowEvaluationResponse>('/v1/model/shadow-evaluation'),
   teamContext: (season?: number, week?: number) =>
     request<TeamContextResponse>(`/v1/nfl/team-context${query({ season, week })}`),
   copilot: async (message: string, leagueId?: string, rosterId?: string) => {
