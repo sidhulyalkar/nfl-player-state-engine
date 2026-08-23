@@ -33,6 +33,15 @@ function loadWatchlist() {
   }
 }
 
+function writePlayerRoute(leagueId: string, playerId: string) {
+  if (leagueId === 'demo-league' || !playerId) return;
+  const url = new URL(window.location.href);
+  url.searchParams.set('workspace', 'intelligence');
+  url.searchParams.set('league', leagueId);
+  url.searchParams.set('player', playerId);
+  window.history.replaceState(null, '', url);
+}
+
 export function PlayerIntelligenceView({
   leagueId,
   players,
@@ -54,12 +63,22 @@ export function PlayerIntelligenceView({
   const [watchlist, setWatchlist] = useState<string[]>(loadWatchlist);
 
   useEffect(() => {
-    if (initialPlayerId) setSelectedId(initialPlayerId);
-  }, [initialPlayerId]);
+    if (!players.length) return;
+    setSelectedId((current) => {
+      const preferred = initialPlayerId
+        && players.some((player) => player.player_id === initialPlayerId)
+        ? initialPlayerId
+        : undefined;
+      if (preferred) return preferred;
+      if (players.some((player) => player.player_id === current)) return current;
+      return players[0]?.player_id ?? '';
+    });
+  }, [initialPlayerId, leagueId, players]);
 
   useEffect(() => {
-    if (!selectedId && players[0]) setSelectedId(players[0].player_id);
-  }, [players, selectedId]);
+    if (!selectedId || leagueId === 'demo-league') return;
+    writePlayerRoute(leagueId, selectedId);
+  }, [leagueId, selectedId]);
 
   useEffect(() => {
     if (!selectedId || leagueId === 'demo-league') {
