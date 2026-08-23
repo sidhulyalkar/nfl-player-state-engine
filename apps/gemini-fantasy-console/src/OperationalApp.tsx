@@ -3,13 +3,15 @@ import App from './App';
 import { DraftDecisionConsole } from './components/DraftDecisionConsole';
 import { IntelligencePortal } from './components/IntelligencePortal';
 import { ModelObservatoryPortal } from './components/ModelObservatoryPortal';
+import { PortfolioPortal } from './components/PortfolioPortal';
 import './workspace.css';
 
-type Surface = 'draft' | 'intelligence' | 'league' | 'model';
+type Surface = 'draft' | 'intelligence' | 'portfolio' | 'league' | 'model';
 
 const surfaces: Array<{ key: Surface; label: string; description: string }> = [
   { key: 'draft', label: 'Draft Room', description: 'Live pick decisions' },
   { key: 'intelligence', label: 'Player Intelligence', description: 'Full player dossiers' },
+  { key: 'portfolio', label: 'Portfolio', description: 'Cross-league exposure' },
   { key: 'league', label: 'League OS', description: 'Trades, waivers, lineup, NFL' },
   { key: 'model', label: 'Model Observatory', description: 'Calibration and evidence' },
 ];
@@ -26,6 +28,7 @@ export default function OperationalApp() {
     <div className="workspace-surface">
       {surface === 'draft' && <DraftDecisionConsole onOpenConsole={() => setSurface('league')} />}
       {surface === 'intelligence' && <IntelligencePortal/>}
+      {surface === 'portfolio' && <PortfolioPortal/>}
       {surface === 'league' && <div className="operational-console"><App/></div>}
       {surface === 'model' && <ModelObservatoryPortal onOpenLeagueOS={() => setSurface('league')}/>} 
     </div>
