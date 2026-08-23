@@ -34,7 +34,7 @@ export function IntelligencePortal({
 }) {
   const [leagues, setLeagues] = useState<LeagueSummary[]>([]);
   const [leagueId, setLeagueId] = useState(initialLeagueId ?? 'demo-league');
-  const [players, setPlayers] = useState<PlayerRow[]>(demoPlayers);
+  const [players, setPlayers] = useState<PlayerRow[]>(initialLeagueId ? [] : demoPlayers);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,6 +67,7 @@ export function IntelligencePortal({
     }
     let active = true;
     setLoading(true);
+    setPlayers([]);
     api.intelligencePlayers(leagueId, 'trade').then((rows) => {
       if (!active) return;
       setPlayers(rows);
