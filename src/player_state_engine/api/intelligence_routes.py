@@ -5,12 +5,15 @@ import os
 from pathlib import Path
 
 from player_state_engine.data.io import read_table
+from player_state_engine.fantasy.decision_board import DecisionType, build_decision_board
 from player_state_engine.fantasy.league import LeagueConfig
 from player_state_engine.integrations.portfolio import league_config_from_snapshot
 from player_state_engine.product.intelligence import build_player_intelligence
+from player_state_engine.product.league_picture import attach_ownership
 from player_state_engine.product.portfolio_exposure import build_portfolio_exposure
-from player_state_engine.product.provenance import projection_metadata
+from player_state_engine.product.provenance import frame_records, projection_metadata
 from player_state_engine.product.research import ResearchArtifacts
+from player_state_engine.product.schemas import LeagueSnapshot
 from player_state_engine.product.shadow_lab import (
     ScenarioControls,
     StateGraphArtifactStore,
@@ -72,13 +75,22 @@ def install_intelligence_routes(
             raise FileNotFoundError(f"Projection artifact unavailable: {projection_location}")
         return read_table(projection_location)
 
-    def load_snapshot(league_id: str):
+    def all_snapshots() -> list[LeagueSnapshot]:
+        by_key: dict[str, LeagueSnapshot] = {}
+        for snapshot_store in (store, live_store):
+            for snapshot in snapshot_store.iter_snapshots():
+                by_key[snapshot.identity.canonical_key] = snapshot
+        return list(by_key.values())
+
+    def load_snapshot(league_id: str) -> LeagueSnapshot:
         try:
             return store.find(league_id)
         except FileNotFoundError:
             return live_store.find(league_id)
 
-    def player_contract(league_id: str, player_id: str) -> tuple[dict[str, object], LeagueConfig]:
+    def league_context(
+        league_id: str,
+    ) -> tuple[LeagueSnapshot, object, LeagueConfig, dict[str, object]]:
         snapshot = load_snapshot(league_id)
         frame = projections()
         config = league_config_from_snapshot(snapshot)
@@ -87,6 +99,10 @@ def install_intelligence_routes(
         if snapshot.settings.playoff_week_start is not None:
             config.playoff_weeks = tuple(range(int(snapshot.settings.playoff_week_start), 18))
         trust = projection_metadata(frame, projection_location, snapshot=snapshot)
+        return snapshot, frame, config, trust
+
+    def player_contract(league_id: str, player_id: str) -> tuple[dict[str, object], LeagueConfig]:
+        snapshot, frame, config, trust = league_context(league_id)
         return (
             build_player_intelligence(
                 frame,
@@ -211,6 +227,46 @@ def install_intelligence_routes(
                 "authority": "research_shadow_only",
                 "reason": str(exc),
             }
+
+    @app.get("/v1/intelligence/leagues")
+    def intelligence_leagues() -> list[dict[str, object]]:
+        snapshots = sorted(
+            all_snapshots(),
+            key=lambda snapshot: (snapshot.identity.name.lower(), snapshot.identity.league_id),
+        )
+        return [
+            {
+                "league_id": snapshot.identity.league_id,
+                "name": snapshot.identity.name,
+                "platform": snapshot.identity.platform,
+                "season": snapshot.identity.season,
+                "imported_at": snapshot.identity.imported_at.isoformat(),
+                "external_roster_id": snapshot.metadata.get("external_roster_id"),
+            }
+            for snapshot in snapshots
+        ]
+
+    @app.get("/v1/leagues/{league_id}/intelligence/players")
+    def intelligence_players(
+        league_id: str,
+        decision: DecisionType = DecisionType.TRADE,
+    ) -> list[dict[str, object]]:
+        try:
+            snapshot, frame, config, trust = league_context(league_id)
+            board = attach_ownership(build_decision_board(frame, config, decision), snapshot)
+            board["data_mode"] = trust["data_mode"]
+            board["model_version"] = trust["model_version"]
+            board["projection_artifact_file_modified_at"] = trust[
+                "projection_artifact_file_modified_at"
+            ]
+            board["missing_inputs"] = [
+                list(trust["missing_inputs"]) for _ in range(len(board))
+            ]
+            return frame_records(board)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/v1/leagues/{league_id}/players/{player_id}/intelligence")
     def player_intelligence(league_id: str, player_id: str) -> dict[str, object]:
