@@ -8,6 +8,7 @@ import type {
 } from '../../shared/types';
 import { api } from '../lib/api';
 import { ModeBadge } from './ModeBadge';
+import { ShadowLabPanel } from './ShadowLabPanel';
 
 function metric(value: number | null | undefined, digits = 1) {
   return value == null || !Number.isFinite(value) ? '—' : value.toFixed(digits);
@@ -114,6 +115,7 @@ export function PlayerIntelligenceView({
   const playerTeam = profile?.player.team ?? selectedFallback?.recent_team ?? '—';
   const watched = selectedId ? watchlist.includes(selectedId) : false;
   const sortedHistory = [...history].sort((a, b) => (b.season - a.season) || (b.week - a.week));
+  const baselineAvailability = Number(profile?.raw_model_fields.availability_probability ?? NaN);
 
   return <div className="intelligence-workspace">
     <aside className="player-browser panel">
@@ -150,6 +152,12 @@ export function PlayerIntelligenceView({
           <article><Target size={18}/><span>Opportunity confidence</span><strong>{percent(Number(profile.raw_model_fields.opportunity_confidence ?? NaN))}</strong><small>role/opportunity support</small></article>
           <article><TrendingUp size={18}/><span>Outcome width</span><strong>{metric(projection?.interval_width)}</strong><small>q90 minus q10</small></article>
         </div>
+
+        {selectedId && <ShadowLabPanel
+          leagueId={leagueId}
+          playerId={selectedId}
+          baselineAvailability={Number.isFinite(baselineAvailability) ? baselineAvailability : undefined}
+        />}
 
         <section className="panel decision-matrix-panel">
           <div className="panel-heading"><div><span className="eyebrow">Rank multiverse</span><h2>Same player, six different decisions</h2><p>Every score below is recomputed server-side from the actual league contract.</p></div><Sparkles size={20}/></div>
