@@ -21,12 +21,14 @@ def create_app(**kwargs: Any) -> FastAPI:
         "game_intelligence_registry",
         "game_intelligence_benchmark_root",
         "player_state_graph_root",
+        "live_store_root",
     }
     base_kwargs = {key: value for key, value in kwargs.items() if key not in operational_only}
     app = create_base_app(**base_kwargs)
     draft_service = install_draft_routes(
         app,
         store_root=kwargs.get("store_root"),
+        live_store_root=kwargs.get("live_store_root"),
         projections_path=kwargs.get("projections_path"),
     )
     install_draft_planner_routes(app, draft_service)
@@ -34,6 +36,7 @@ def create_app(**kwargs: Any) -> FastAPI:
     install_intelligence_routes(
         app,
         store_root=kwargs.get("store_root"),
+        live_store_root=kwargs.get("live_store_root"),
         projections_path=kwargs.get("projections_path"),
         benchmark_root=kwargs.get("benchmark_root"),
         conformal_root=kwargs.get("conformal_root"),
