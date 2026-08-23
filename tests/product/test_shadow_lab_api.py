@@ -81,14 +81,25 @@ def _graph_root(root: Path) -> Path:
     return graph
 
 
-def _client(tmp_path: Path) -> TestClient:
+def _client(tmp_path: Path, *, live_only: bool = False) -> TestClient:
     paths = seed_product_demo(tmp_path)
+    store_root = tmp_path / "data/product/leagues"
+    live_store_root = tmp_path / "data/product/live_leagues"
+    live_store_root.mkdir(parents=True, exist_ok=True)
+    if live_only:
+        primary = store_root / "demo-league.json"
+        (live_store_root / "my_connection_key.json").write_text(
+            primary.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        primary.unlink()
     benchmark, conformal, opportunity, historical_sources, team_context = _write_research_artifacts(
         tmp_path / "research"
     )
     return TestClient(
         create_app(
-            store_root=tmp_path / "data/product/leagues",
+            store_root=store_root,
+            live_store_root=live_store_root,
             projections_path=paths["player_values"],
             schedules_path=paths["schedules"],
             benchmark_root=benchmark,
@@ -149,11 +160,26 @@ def test_portfolio_endpoint_excludes_ambiguous_user_roster_instead_of_guessing(t
     response = client.get("/v1/portfolio/exposure")
     assert response.status_code == 200
     payload = response.json()
+    assert payload["summary"]["source_stores"] == 2
     assert payload["summary"]["stored_leagues"] == 1
     assert payload["summary"]["resolved_user_rosters"] == 0
     assert payload["summary"]["unresolved_user_rosters"] == 1
     assert payload["players"] == []
     assert payload["authority"]["unresolved_leagues_are_excluded"] is True
+
+
+def test_intelligence_routes_find_connection_key_named_live_snapshots(tmp_path: Path) -> None:
+    client = _client(tmp_path, live_only=True)
+    intelligence = client.get("/v1/leagues/demo-league/players/demo-001/intelligence")
+    shadow = client.get("/v1/leagues/demo-league/players/demo-001/shadow")
+    portfolio = client.get("/v1/portfolio/exposure")
+
+    assert intelligence.status_code == 200
+    assert intelligence.json()["player"]["player_id"] == "demo-001"
+    assert shadow.status_code == 200
+    assert shadow.json()["comparison"]["available"] is True
+    assert portfolio.status_code == 200
+    assert portfolio.json()["summary"]["stored_leagues"] == 1
 
 
 def test_observatory_exposes_graph_health_without_granting_promotion(tmp_path: Path) -> None:
