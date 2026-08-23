@@ -170,10 +170,19 @@ def test_portfolio_endpoint_excludes_ambiguous_user_roster_instead_of_guessing(t
 
 def test_intelligence_routes_find_connection_key_named_live_snapshots(tmp_path: Path) -> None:
     client = _client(tmp_path, live_only=True)
+    leagues = client.get("/v1/intelligence/leagues")
+    board = client.get(
+        "/v1/leagues/demo-league/intelligence/players",
+        params={"decision": "trade"},
+    )
     intelligence = client.get("/v1/leagues/demo-league/players/demo-001/intelligence")
     shadow = client.get("/v1/leagues/demo-league/players/demo-001/shadow")
     portfolio = client.get("/v1/portfolio/exposure")
 
+    assert leagues.status_code == 200
+    assert [row["league_id"] for row in leagues.json()] == ["demo-league"]
+    assert board.status_code == 200
+    assert any(row["player_id"] == "demo-001" for row in board.json())
     assert intelligence.status_code == 200
     assert intelligence.json()["player"]["player_id"] == "demo-001"
     assert shadow.status_code == 200
