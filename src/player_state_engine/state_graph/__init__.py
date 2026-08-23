@@ -40,6 +40,7 @@ from player_state_engine.state_graph.season_sim import (
     SeasonSimulationSummary,
 )
 from player_state_engine.state_graph.tracking_distillation import TrackingTeacherDistiller
+from player_state_engine.state_graph.trust import ForecastTrustReport, assess_forecast_trust
 from player_state_engine.state_graph.types import (
     AvailabilityState,
     BetaPosterior,
@@ -69,6 +70,7 @@ __all__ = [
     "ExperimentRecord",
     "FantasySeasonSimulator",
     "ForecastQuantiles",
+    "ForecastTrustReport",
     "FusionKey",
     "HierarchicalForecastFusion",
     "LatentEvidenceRouter",
@@ -91,6 +93,7 @@ __all__ = [
     "TeamVolumeState",
     "TrackingTeacherDistiller",
     "UncertaintyBreakdown",
+    "assess_forecast_trust",
     "bootstrap_quantile_uncertainty",
     "build_intelligence_card",
     "compare_scenarios",

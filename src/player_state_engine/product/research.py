@@ -23,6 +23,71 @@ def _read_artifact(path: Path) -> pd.DataFrame:
     return _read_cached(str(path.resolve()), path.stat().st_mtime_ns).copy()
 
 
+def _pinball(actual: np.ndarray, prediction: np.ndarray, quantile: float) -> float:
+    residual = actual - prediction
+    loss = np.maximum(quantile * residual, (quantile - 1.0) * residual)
+    return float(np.mean(loss))
+
+
+def _diagnostic_row(data: pd.DataFrame, **labels: object) -> dict[str, object]:
+    clean = data.dropna(subset=["actual", "q10", "q50", "q90"]).copy()
+    if clean.empty:
+        return {**labels, "rows": 0}
+    actual = pd.to_numeric(clean["actual"], errors="coerce").to_numpy(dtype=float)
+    q10 = pd.to_numeric(clean["q10"], errors="coerce").to_numpy(dtype=float)
+    q50 = pd.to_numeric(clean["q50"], errors="coerce").to_numpy(dtype=float)
+    q90 = pd.to_numeric(clean["q90"], errors="coerce").to_numpy(dtype=float)
+    finite = np.isfinite(actual) & np.isfinite(q10) & np.isfinite(q50) & np.isfinite(q90)
+    actual, q10, q50, q90 = actual[finite], q10[finite], q50[finite], q90[finite]
+    if not len(actual):
+        return {**labels, "rows": 0}
+    crossed = (q10 > q50) | (q50 > q90)
+    ordered = np.sort(np.column_stack([q10, q50, q90]), axis=1)
+    q10, q50, q90 = ordered[:, 0], ordered[:, 1], ordered[:, 2]
+    coverage = float(np.mean((actual >= q10) & (actual <= q90)))
+    interval_width = q90 - q10
+    median_error = q50 - actual
+    alpha = 0.20
+    interval_score = interval_width.copy()
+    below = actual < q10
+    above = actual > q90
+    interval_score[below] += (2.0 / alpha) * (q10[below] - actual[below])
+    interval_score[above] += (2.0 / alpha) * (actual[above] - q90[above])
+    coverage_gap = coverage - 0.80
+    if abs(coverage_gap) <= 0.03:
+        calibration_status = "ON_TARGET"
+    elif coverage_gap < -0.03:
+        calibration_status = "UNDERCOVERED"
+    else:
+        calibration_status = "OVERWIDE"
+    return {
+        **labels,
+        "rows": int(len(actual)),
+        "empirical_80_coverage": coverage,
+        "coverage_gap": coverage_gap,
+        "calibration_status": calibration_status,
+        "q50_mae": float(np.mean(np.abs(median_error))),
+        "median_bias": float(np.mean(median_error)),
+        "mean_interval_width": float(np.mean(interval_width)),
+        "lower_miss_rate": float(np.mean(actual < q10)),
+        "upper_miss_rate": float(np.mean(actual > q90)),
+        "pinball_q10": _pinball(actual, q10, 0.10),
+        "pinball_q50": _pinball(actual, q50, 0.50),
+        "pinball_q90": _pinball(actual, q90, 0.90),
+        "mean_pinball": float(
+            np.mean(
+                [
+                    _pinball(actual, q10, 0.10),
+                    _pinball(actual, q50, 0.50),
+                    _pinball(actual, q90, 0.90),
+                ]
+            )
+        ),
+        "mean_interval_score_80": float(np.mean(interval_score)),
+        "crossed_quantile_rate_before_repair": float(np.mean(crossed)),
+    }
+
+
 class ResearchArtifacts:
     """Read-only adapter over frozen research artifacts used by the product API."""
 
@@ -76,17 +141,13 @@ class ResearchArtifacts:
             "historical_source_coverage": frame_records(frames["historical_source_coverage"]),
         }
 
-    def predictions(
+    def _prediction_frame(
         self,
         *,
-        source: ResearchPredictionSource = "benchmark",
-        target: str = "fantasy_points_ppr",
-        season: int | None = None,
-        week: int | None = None,
-        position: str | None = None,
-        method: str | None = None,
-        limit: int = 100,
-    ) -> dict[str, object]:
+        source: ResearchPredictionSource,
+        target: str,
+        method: str | None,
+    ) -> tuple[pd.DataFrame, Path, str, list[str], str]:
         if source == "benchmark":
             if not target.replace("_", "").isalnum():
                 raise ValueError("target may contain only letters, numbers, and underscores")
@@ -105,28 +166,47 @@ class ResearchArtifacts:
         if not path.is_file():
             raise FileNotFoundError(f"Research prediction artifact unavailable: {path}")
         data = _read_artifact(path)
-        artifact_rows = len(data)
         required = {"season", "week", "player_id", "position", "method", *q_columns}
         missing_columns = sorted(required - set(data.columns))
         if missing_columns:
             raise ValueError(f"Prediction artifact missing columns: {missing_columns}")
-
         data = data.loc[data["method"].astype(str).eq(selected_method)].copy()
-        if season is not None:
-            data = data.loc[pd.to_numeric(data["season"], errors="coerce").eq(season)]
-        if week is not None:
-            data = data.loc[pd.to_numeric(data["week"], errors="coerce").eq(week)]
-
         data["q10"] = pd.to_numeric(data[q_columns[0]], errors="coerce")
         data["q50"] = pd.to_numeric(data[q_columns[1]], errors="coerce")
         data["q90"] = pd.to_numeric(data[q_columns[2]], errors="coerce")
         data["actual"] = (
             pd.to_numeric(data[actual_column], errors="coerce") if actual_column in data else np.nan
         )
+        return data, path, actual_column, q_columns, selected_method
+
+    def predictions(
+        self,
+        *,
+        source: ResearchPredictionSource = "benchmark",
+        target: str = "fantasy_points_ppr",
+        season: int | None = None,
+        week: int | None = None,
+        position: str | None = None,
+        player_id: str | None = None,
+        method: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, object]:
+        data, path, actual_column, _q_columns, selected_method = self._prediction_frame(
+            source=source,
+            target=target,
+            method=method,
+        )
+        artifact_rows = len(data)
+        if season is not None:
+            data = data.loc[pd.to_numeric(data["season"], errors="coerce").eq(season)]
+        if week is not None:
+            data = data.loc[pd.to_numeric(data["week"], errors="coerce").eq(week)]
         data = _add_historical_ranks(data)
 
         if position:
             data = data.loc[data["position"].astype(str).str.upper().eq(position.upper())]
+        if player_id:
+            data = data.loc[data["player_id"].astype(str).eq(str(player_id))]
         data = data.sort_values(
             ["season", "week", "overall_rank"],
             ascending=[False, False, True],
@@ -146,6 +226,7 @@ class ResearchArtifacts:
                 "season": season,
                 "week": week,
                 "position": position.upper() if position else None,
+                "player_id": player_id,
                 "method": selected_method,
                 "limit": limit,
             },
@@ -153,6 +234,60 @@ class ResearchArtifacts:
             "returned": len(data),
             "missing_inputs": ([] if actual_column in data.columns else ["actual"]),
             "predictions": frame_records(data),
+        }
+
+    def diagnostics(
+        self,
+        *,
+        target: str = "fantasy_points_ppr",
+        method: str = "quantile_engine",
+        minimum_rows: int = 20,
+    ) -> dict[str, object]:
+        """Summarize frozen out-of-sample calibration without changing model authority."""
+
+        data, path, actual_column, _q_columns, selected_method = self._prediction_frame(
+            source="benchmark",
+            target=target,
+            method=method,
+        )
+        if actual_column not in data.columns:
+            raise ValueError(f"Prediction artifact missing actual outcome column: {actual_column}")
+        overall = _diagnostic_row(data, scope="overall")
+        by_position = [
+            _diagnostic_row(group, scope="position", position=str(position))
+            for position, group in data.groupby(data["position"].astype(str).str.upper(), sort=True)
+            if len(group) >= minimum_rows
+        ]
+        by_season = [
+            _diagnostic_row(group, scope="season", season=int(season))
+            for season, group in data.groupby(pd.to_numeric(data["season"], errors="coerce"), sort=True)
+            if pd.notna(season) and len(group) >= minimum_rows
+        ]
+        by_position_season = [
+            _diagnostic_row(
+                group,
+                scope="position_season",
+                position=str(position).upper(),
+                season=int(season),
+            )
+            for (position, season), group in data.groupby(
+                [data["position"].astype(str).str.upper(), pd.to_numeric(data["season"], errors="coerce")],
+                sort=True,
+            )
+            if pd.notna(season) and len(group) >= minimum_rows
+        ]
+        return {
+            "data_mode": "HISTORICAL_BACKTEST",
+            "authority": "diagnostic_only",
+            "target_coverage": 0.80,
+            "method": selected_method,
+            "target": target,
+            "minimum_rows": int(minimum_rows),
+            "artifact": artifact_metadata(path, row_count=len(data)),
+            "overall": overall,
+            "by_position": by_position,
+            "by_season": by_season,
+            "by_position_season": by_position_season,
         }
 
 

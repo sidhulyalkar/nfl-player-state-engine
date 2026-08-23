@@ -65,6 +65,13 @@ def paired_block_bootstrap(
     bootstrap_samples: int = 2000,
     seed: int = 42,
 ) -> PairedEffect:
+    """Estimate a paired row-weighted effect with clustered uncertainty.
+
+    Blocks are resampled as sums and counts so the bootstrap interval targets the same
+    row-weighted estimand as the reported point effect even when NFL weeks contain different
+    numbers of eligible player rows.
+    """
+
     missing = {champion_column, challenger_column, *block_columns} - set(frame)
     if missing:
         raise ValueError(f"Paired bootstrap missing columns: {sorted(missing)}")
@@ -77,23 +84,30 @@ def paired_block_bootstrap(
         data["_effect"] = champion - challenger
     else:
         data["_effect"] = challenger - champion
-    data = data.loc[data["_effect"].notna()]
-    grouped = data.groupby(list(block_columns), sort=False)["_effect"].mean()
-    values = grouped.to_numpy(dtype=float)
-    if len(values) < 2:
+    data = data.loc[data["_effect"].notna()].copy()
+    if data.empty:
+        raise ValueError("No finite paired effects")
+
+    block_stats = data.groupby(list(block_columns), sort=False)["_effect"].agg(["sum", "count"])
+    if len(block_stats) < 2:
         raise ValueError("Paired block bootstrap requires at least two blocks")
+    block_sums = block_stats["sum"].to_numpy(dtype=float)
+    block_counts = block_stats["count"].to_numpy(dtype=float)
+    effect = float(block_sums.sum() / max(block_counts.sum(), 1.0))
+
     rng = np.random.default_rng(seed)
-    samples = np.empty(max(200, int(bootstrap_samples)), dtype=float)
-    for index in range(len(samples)):
-        resampled = rng.choice(values, size=len(values), replace=True)
-        samples[index] = float(np.mean(resampled))
+    sample_count = max(200, int(bootstrap_samples))
+    indexes = rng.integers(0, len(block_stats), size=(sample_count, len(block_stats)))
+    sampled_sums = block_sums[indexes].sum(axis=1)
+    sampled_counts = block_counts[indexes].sum(axis=1)
+    samples = sampled_sums / np.maximum(sampled_counts, 1.0)
     low, high = np.quantile(samples, [0.025, 0.975])
     return PairedEffect(
-        effect=float(np.mean(values)),
+        effect=effect,
         ci_low=float(low),
         ci_high=float(high),
         probability_improves=float(np.mean(samples > 0.0)),
-        blocks=int(len(values)),
+        blocks=int(len(block_stats)),
         bootstrap_samples=int(len(samples)),
     )
 
@@ -110,11 +124,18 @@ def consistency_rate(
     grouped = frame.groupby(columns, dropna=False)[effect_column].mean()
     if grouped.empty:
         return float("nan")
-    return float(np.mean(grouped.to_numpy(dtype=float) > 0.0))
+    values = pd.to_numeric(grouped, errors="coerce").dropna().to_numpy(dtype=float)
+    if not len(values):
+        return float("nan")
+    return float(np.mean(values > 0.0))
 
 
 def benjamini_hochberg(p_values: dict[str, float]) -> dict[str, float]:
-    valid = [(key, float(value)) for key, value in p_values.items() if np.isfinite(value)]
+    valid = [
+        (key, float(value))
+        for key, value in p_values.items()
+        if np.isfinite(value) and 0.0 <= float(value) <= 1.0
+    ]
     valid.sort(key=lambda item: item[1])
     m = len(valid)
     if m == 0:
@@ -141,33 +162,52 @@ class PromotionPolicy:
     minimum_data_availability: float = 0.80
     maximum_fdr_q: float = 0.10
     require_negative_control: bool = True
+    require_downstream_for_downstream_tier: bool = True
 
     def evaluate(self, record: ExperimentRecord) -> ExperimentRecord:
         blockers: list[str] = []
         if record.evidence_tier < self.minimum_tier:
             blockers.append(f"evidence_tier<{int(self.minimum_tier)}")
-        if record.effect <= self.minimum_effect:
+        if not np.isfinite(record.effect) or record.effect <= self.minimum_effect:
             blockers.append("effect_below_minimum_useful_effect")
-        if record.ci_low <= self.minimum_ci_low:
+        if not np.isfinite(record.ci_low) or record.ci_low <= self.minimum_ci_low:
             blockers.append("confidence_interval_crosses_gate")
-        consistency_values = (
-            record.season_consistency,
-            record.position_consistency,
-            record.week_consistency,
-        )
-        finite_consistency = [value for value in consistency_values if np.isfinite(value)]
-        if finite_consistency and min(finite_consistency) < self.minimum_consistency:
-            blockers.append("inconsistent_slice_effect")
-        if record.coverage < self.minimum_coverage:
+
+        consistency_values = {
+            "season": record.season_consistency,
+            "position": record.position_consistency,
+            "week": record.week_consistency,
+        }
+        for label, value in consistency_values.items():
+            if not np.isfinite(value):
+                blockers.append(f"missing_{label}_consistency")
+            elif value < self.minimum_consistency:
+                blockers.append(f"inconsistent_{label}_effect")
+
+        if not np.isfinite(record.coverage) or record.coverage < self.minimum_coverage:
             blockers.append("insufficient_coverage")
-        if record.data_availability < self.minimum_data_availability:
+        if (
+            not np.isfinite(record.data_availability)
+            or record.data_availability < self.minimum_data_availability
+        ):
             blockers.append("insufficient_live_data_availability")
         if self.require_negative_control and not record.negative_control_passed:
             blockers.append("negative_control_failed")
-        if record.fdr_q_value is not None and record.fdr_q_value > self.maximum_fdr_q:
-            blockers.append("fdr_q_above_threshold")
-        record.blockers = blockers
-        record.promoted = not blockers
+
+        if (
+            self.require_downstream_for_downstream_tier
+            and record.evidence_tier >= EvidenceTier.MULTI_SEASON_DOWNSTREAM
+        ):
+            downstream = record.downstream_decision_effect
+            if downstream is None or not np.isfinite(downstream) or downstream <= 0.0:
+                blockers.append("downstream_decision_evidence_missing_or_nonpositive")
+
+        if record.fdr_q_value is not None:
+            if not np.isfinite(record.fdr_q_value) or record.fdr_q_value > self.maximum_fdr_q:
+                blockers.append("fdr_q_above_threshold")
+
+        record.blockers = list(dict.fromkeys(blockers))
+        record.promoted = not record.blockers
         return record
 
 

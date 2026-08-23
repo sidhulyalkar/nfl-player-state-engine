@@ -1,10 +1,54 @@
 import type {
+  DraftBoardPlayer,
   DraftBoardResponse,
   DraftCompareResponse,
   DraftLeagueSummary,
   DraftPlanResponse,
   RankingAuditResponse,
 } from '../../shared/draft-types';
+
+export interface DraftReliabilityFields {
+  guarded_draft_action?: string;
+  draft_reliability_score?: number;
+  draft_reliability?: 'LOW' | 'MEDIUM' | 'HIGH' | string;
+  draft_reliability_reasons?: string;
+  room_survival_to_next_pick?: number;
+  room_survival_standard_error?: number;
+  room_position_wait_value?: number;
+  room_position_wait_loss?: number;
+  room_expected_position_supply_next_pick?: number;
+  room_challenger_score?: number;
+  room_rank?: number;
+  room_rank_delta?: number;
+  room_vs_baseline_survival_gap?: number;
+  projection_freshness_status?: string;
+  projection_freshness_score?: number;
+  projection_freshness_hard_fail?: boolean;
+}
+
+export type ReliableDraftPlayer = DraftBoardPlayer & DraftReliabilityFields;
+
+export interface ReliableDraftBoardResponse extends Omit<DraftBoardResponse, 'board'> {
+  board: ReliableDraftPlayer[];
+  readiness?: {
+    score: number;
+    ready: boolean;
+    flags: string[];
+    required_positions: string[];
+    missing_positions: string[];
+    projection_rows: number;
+    unique_player_coverage: number;
+    market_adp_coverage: number;
+    exact_scoring_coverage: number;
+    valuation_coverage: number;
+  };
+  research?: {
+    room_challenger_promoted: boolean;
+    room_simulations: number;
+    baseline_survival_authoritative: boolean;
+    purpose: string;
+  };
+}
 
 export class DraftApiError extends Error {
   status: number;
@@ -64,6 +108,33 @@ export const draftApi = {
       refresh: options.refresh ?? true,
       force_refresh: options.forceRefresh ?? false,
       limit: options.limit ?? 250,
+    })}`,
+    { signal: options.signal },
+  ),
+
+  reliableBoard: (
+    leagueId: string,
+    rosterId: string,
+    options: {
+      draftSlot?: number;
+      totalRounds?: number;
+      refresh?: boolean;
+      forceRefresh?: boolean;
+      limit?: number;
+      roomSimulations?: number;
+      maxProjectionAgeHours?: number;
+      signal?: AbortSignal;
+    } = {},
+  ) => request<ReliableDraftBoardResponse>(
+    `/v1/leagues/${encodeURIComponent(leagueId)}/draft/reliable-board${query({
+      roster_id: rosterId,
+      draft_slot: options.draftSlot,
+      total_rounds: options.totalRounds,
+      refresh: options.refresh ?? true,
+      force_refresh: options.forceRefresh ?? false,
+      limit: options.limit ?? 250,
+      room_simulations: options.roomSimulations ?? 600,
+      max_projection_age_hours: options.maxProjectionAgeHours ?? 24,
     })}`,
     { signal: options.signal },
   ),

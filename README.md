@@ -6,6 +6,36 @@ Its governing rule is simple: **a new model does not gain authority because it i
 
 > Research and entertainment only. The project does not place wagers or promise profit. Predictive, fantasy, and market results should remain timestamped, auditable, and evaluated out of sample.
 
+## Fantasy modelling workspace
+
+The repository now includes a decision-first fantasy product under `apps/gemini-fantasy-console` with five persistent surfaces:
+
+1. **Draft Room** for live pick decisions, VORP, wait cost, room survival, roster construction, and candidate comparison.
+2. **Player Intelligence** for full league-aware player dossiers, six decision contexts, frozen player replay, and the research-only Player State Graph Shadow Lab.
+3. **Portfolio** for cross-league player, starter, NFL-team, and positional exposure with canonical identity diagnostics.
+4. **League OS** for trades, waivers, lineup optimization, league state, NFL state, and the broader season-management console.
+5. **Model Observatory** for calibration, sharpness, drift, graph replay, artifact health, and fail-closed promotion evidence.
+
+The application is deliberately server-owned for numerical truth. React renders Product API calculations and provenance; Python owns projections, exact supported league scoring, replacement economics, rankings, uncertainty, simulation, and promotion gates.
+
+Workspace and player state can be deep-linked:
+
+```text
+?workspace=draft
+?workspace=intelligence&league=LEAGUE_ID&player=CANONICAL_PLAYER_ID
+?workspace=portfolio
+?workspace=league
+?workspace=model
+```
+
+The Player State Graph remains a research challenger. Shadow Lab distributions and bounded scenario sensitivity never silently replace the direct production player quantile model.
+
+Start here for the product:
+
+- `apps/gemini-fantasy-console/README.md`
+- `docs/product/modelling_workspace.md`
+- `docs/product/gemini_ai_studio.md`
+
 ## Architecture
 
 ```text
@@ -312,22 +342,28 @@ A deep sequence model remains downstream of these transparent tests. The objecti
 
 ## Validation boundary
 
-Current v0.16 implementation validation includes:
+Current implementation validation includes:
 
 - Ruff passing;
 - full Python compilation passing;
-- **151 Python tests passing**;
+- **185 Python tests passing**;
 - frontend production build passing;
+- league-specific intelligence and live-store discovery tests;
+- Player State Graph opportunity-conservation and authority tests;
+- Shadow Lab scenario and scoring-contract tests, including TE-premium mismatch;
+- Portfolio canonical-identity and unresolved-roster tests;
+- fail-closed challenger promotion tests;
 - v0.15 parity tests;
 - sparse structural-support tests;
 - deterministic shadow-RNG tests;
 - requested-vs-realized accounting tests;
 - synthetic eight-cell replay tests.
 
-Those checks establish software and experimental-contract integrity. They do **not** establish historical predictive lift. The next scientific milestone is the real expanding v0.16 replay.
+These checks establish software and experimental-contract integrity. They do **not** establish historical predictive lift for an unpromoted challenger. Player State Graph promotion still requires the frozen evidence policy to clear.
 
 See:
 
+- `docs/product/modelling_workspace.md`
 - `docs/modeling/terminal_family_v016.md`
 - `docs/modeling/v016_experiment_queue.md`
 - `docs/releases/v0.16.md`

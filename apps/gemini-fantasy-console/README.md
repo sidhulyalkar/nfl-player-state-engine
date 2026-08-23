@@ -1,98 +1,169 @@
-# Fourth Down Lab: Gemini Fantasy Console
+# Fourth Down Lab: Fantasy Modelling Workspace
 
-A React 19 + Express 5 full-stack frontend for the NFL Player State Engine. It is designed for Google AI Studio, local development, or Cloud Run.
+A React 19 + Express 5 frontend for the NFL Player State Engine. It is designed for local development, Google AI Studio, or Cloud Run, with Python remaining authoritative for numerical model truth.
 
-## v0.9 Draft War Room
+The frontend is no longer a Draft War Room with a secondary console attached. It is one persistent modelling workspace with five first-class surfaces.
 
-The **Draft War Room** is the primary frontend surface. It is a live multi-league workspace for comparing 2 to 5 available players under the exact roster construction, scoring rules, current roster, replacement economy, market timing, and evidence state of the active draft.
+## The five workspaces
 
-The browser consumes authoritative Python endpoints:
+### 1. Draft Room
+
+Use this while the draft clock is running.
+
+It answers:
+
+- who is the best pick now;
+- how much league-specific value that player adds;
+- whether the player is likely to survive to the next turn;
+- what value is lost by waiting;
+- whether the recommendation is supported by fresh, complete inputs;
+- how 2 to 5 candidates compare under roster construction and two-turn planning.
+
+The default board stays compact. ADP, expert-rank disagreement, room rank, scoring provenance, and other audit fields remain behind progressive disclosure.
+
+### 2. Player Intelligence
+
+Use this when you want the full dossier for one player.
+
+For the selected league it exposes:
+
+- q10 / q50 / q90 projection geometry;
+- replacement-point margins;
+- start/sit, waiver, trade, draft, stash, and dynasty valuations;
+- overall and positional ranks for every decision type;
+- VORP, floor VORP, upside VORP, scarcity, and market context;
+- availability and opportunity signals when present;
+- raw production fields;
+- frozen exact-player historical replay;
+- the Player State Graph Shadow Lab when a real research artifact is mounted.
+
+The selected player is written into the URL, so a dossier can be refreshed or shared without re-searching for the player.
+
+Example:
+
+```text
+?workspace=intelligence&league=YOUR_LEAGUE_ID&player=CANONICAL_PLAYER_ID
+```
+
+Changing players updates the URL in place. Changing workspace surfaces creates browser history, so Back and Forward move naturally through the modelling workspace.
+
+### 3. Portfolio
+
+Use this before or during drafts when you want to understand exposure across all connected leagues.
+
+It shows:
+
+- repeated-player exposure;
+- starter exposure;
+- NFL-team concentration;
+- positional concentration;
+- which leagues contain each player;
+- canonical identity quality;
+- unresolved leagues that were excluded instead of guessed.
+
+Exposure is descriptive. The product does not assume diversification is always better than concentration.
+
+### 4. League OS
+
+Use this for the broader season-management surface:
+
+- trades;
+- waivers;
+- legal lineup optimization;
+- league strength and roster needs;
+- NFL state;
+- detailed research views already present in the original console.
+
+### 5. Model Observatory
+
+Use this to decide how much confidence to place in a model layer before trusting it operationally.
+
+It exposes:
+
+- empirical q10-q90 coverage against the nominal 80% target;
+- q50 MAE and median bias;
+- mean pinball loss;
+- predictive interval width;
+- lower-tail and upper-tail miss rates;
+- position and season calibration slices;
+- artifact health;
+- Player State Graph shadow replay;
+- explicit promotion blockers.
+
+A research challenger can look interesting here without gaining production authority.
+
+## Shadow Lab authority contract
+
+The Shadow Lab is deliberately one-way.
+
+The direct player quantile model remains the production champion. The Player State Graph is a research challenger until frozen replay earns promotion.
+
+The Shadow Lab may show:
+
+- direct-vs-graph q10 / q50 / q90 disagreement;
+- interval overlap;
+- role-state and regime context;
+- teammate target/carry allocation;
+- explicit residual opportunity for unmodeled teammates;
+- bounded role, team-volume, and availability sensitivity controls.
+
+It may not silently alter:
+
+- production projections;
+- production ranks;
+- draft actions;
+- lineup recommendations;
+- waiver or trade valuations.
+
+Scenario controls are labeled sensitivity analysis, not calibrated forecasts.
+
+## Scoring comparability
+
+A graph artifact is not assumed to be comparable to the active league merely because both are called PPR.
+
+Research runs write a `run_manifest.json` with their scoring contract. Direct-vs-graph comparison is marked decision-comparable only when the relevant scoring contract matches, including tight-end reception premium.
+
+If the manifest is missing, legacy, or mismatched, raw research output can remain visible but decision comparability fails closed.
+
+## Live league discovery
+
+The product can read league snapshots from both:
+
+```text
+data/product/leagues
+data/product/live_leagues
+```
+
+The live portfolio sync may name a file by connection key rather than by league ID. The Product API therefore resolves snapshots by the league identity embedded inside the JSON instead of assuming filename equals league ID.
+
+This same discovery behavior backs Player Intelligence and Portfolio, so a live-only Sleeper or ESPN snapshot can appear in the selector without first being copied into the primary store.
+
+Ambiguous multi-roster snapshots are excluded from cross-league exposure unless the user's roster can be resolved from imported identity or explicit snapshot metadata.
+
+## Primary Product API surfaces
 
 ```text
 GET  /v1/draft/leagues
 GET  /v1/leagues/{league_id}/draft/board
+GET  /v1/leagues/{league_id}/draft/reliable-board
 POST /v1/leagues/{league_id}/draft/compare
 POST /v1/leagues/{league_id}/draft/plan
-GET  /v1/rankings/sources
-GET  /v1/leagues/{league_id}/rankings/audit
+
+GET  /v1/intelligence/leagues
+GET  /v1/intelligence/leagues/{league_id}/players
+GET  /v1/leagues/{league_id}/players/{player_id}/intelligence
+GET  /v1/leagues/{league_id}/players/{player_id}/shadow
+POST /v1/leagues/{league_id}/players/{player_id}/scenario
+
+GET  /v1/portfolio/exposure
+
+GET  /v1/research/diagnostics
+GET  /v1/research/players/{player_id}/history
+GET  /v1/model/shadow-evaluation
+GET  /v1/model/observatory
 ```
 
-The War Room keeps these concepts separate:
-
-- football outcome projection;
-- league-specific value and replacement economics;
-- current-roster marginal value;
-- draft-room timing and survival to the next pick;
-- external expert/market disagreement;
-- research-only multi-pick lookahead.
-
-This separation is essential in 2QB, superflex, unusual roster-depth, TE-premium, and custom-scoring formats.
-
-## What v0.9 adds to the interface
-
-### Scoring provenance
-
-League scoring is no longer assumed to be exact merely because a league was imported.
-
-The UI can show whether a player is using:
-
-```text
-correlated/provided league quantiles
-component-quantile league rescore
-generic fantasy-point fallback
-```
-
-If unsupported live scoring rules or missing component projections prevent exact rescoring, the War Room displays the limitation instead of hiding it.
-
-### Dynamic scarcity and wait loss
-
-The production live draft score remains authoritative. A separately labeled challenger exposes:
-
-- remaining positive-VORP supply;
-- expected same-position picks before the user's next turn;
-- expected positional supply at the next turn;
-- probability-weighted value of likely surviving alternatives;
-- positional value lost by waiting;
-- challenger rank and delta.
-
-The challenger does not change `draft_action` unless historical replay earns promotion.
-
-### Ranking calibration
-
-External rankings and ADP are shown as **audit context**, never as the numerical source of truth.
-
-The UI may display:
-
-- external consensus rank;
-- expert rank dispersion;
-- source count;
-- model-versus-external rank delta;
-- cross-market ADP and dispersion.
-
-A large disagreement is a reason to investigate, not an instruction to average the model toward consensus.
-
-### Research two-turn lookahead
-
-The comparison tray can request `POST /draft/plan`, which estimates the current candidate plus the best value likely to survive until the next manager pick.
-
-The UI must visibly label this result **UNPROMOTED / RESEARCH**. It cannot replace the production best-pick-now recommendation until frozen historical room-state replay shows improved utility.
-
-## Live behavior
-
-While a draft is active, React conservatively polls the Product API and cancels obsolete requests. New completed picks are canonicalized, removed from the available board, and trigger fresh league value, roster need, tier cliff, survival, and wait-loss calculations. Manual force refresh is always available.
-
-The UI preserves the last valid board when a platform refresh fails and shows freshness or stale-state warnings instead of fabricating replacement data. Sleeper refreshes reuse the server-side player-map cache; ESPN is polled more conservatively.
-
-Draft survival uses the transparent normal-ADP approximation unless a trained empirical artifact clears its grouped-holdout Brier promotion gate.
-
-## Responsibilities
-
-- React renders server-returned state, comparisons, evidence, and provenance.
-- The Node server keeps `GEMINI_API_KEY` private and proxies the Python Product API.
-- Gemini performs tool selection, comparison, and explanation only.
-- Python remains authoritative for projections, exact league scoring, starter allocation, VORP, scarcity, draft survival, roster utility, simulation, and production draft actions.
-- External rankings are challenger/audit evidence only.
-- The deterministic product remains usable if Gemini is disabled.
+The browser renders server-returned calculations. Missing model metrics should remain unavailable until the Python Product API provides them.
 
 ## Local start
 
@@ -108,9 +179,62 @@ cp .env.example .env
 npm run dev
 ```
 
-Express listens on `0.0.0.0:3000` by default and mounts Vite as development middleware. In production it serves the compiled React application, including the SPA route fallback, from the same process.
+Express listens on `0.0.0.0:3000` by default and mounts Vite as development middleware. In production it serves the compiled React application, including the SPA fallback, from the same process.
 
-The frontend opens directly into the Draft War Room. Use **Full console** to move into the broader Fourth Down Lab command center.
+Open the root URL for Draft Room, or deep-link to a workspace with:
+
+```text
+?workspace=draft
+?workspace=intelligence
+?workspace=portfolio
+?workspace=league
+?workspace=model
+```
+
+## Live league configuration
+
+Use the portfolio configuration template:
+
+```text
+configs/fantasy/leagues.example.yaml
+```
+
+The repository already includes format profiles for:
+
+```text
+configs/fantasy/12_team_half_ppr_median.yaml
+configs/fantasy/12_team_half_ppr_median_2qb.yaml
+configs/fantasy/8_team_ppr_2qb_expanded.yaml
+```
+
+Profiles are pre-draft fallbacks. When Sleeper or ESPN supplies live roster positions and scoring settings, `league_config_from_snapshot()` treats the platform snapshot as authoritative for supported rules.
+
+Unsupported scoring keys remain visible in provenance rather than being silently approximated as exact.
+
+## Player State Graph research run
+
+Run the graph as a research artifact generator:
+
+```bash
+python scripts/run_player_state_graph_research.py \
+  --history path/to/point_in_time_history.parquet \
+  --forecast-rows path/to/frozen_forecast_rows.parquet \
+  --league-config configs/fantasy/8_team_ppr_2qb_expanded.yaml \
+  --output-dir artifacts/player_state_graph
+```
+
+Important outputs include:
+
+```text
+player_state_graph_summaries.parquet
+dynamic_role_states.parquet
+coherent_scored_draws.parquet
+player_intelligence_cards.json
+run_manifest.json
+report.md
+```
+
+The UI does not fabricate a graph forecast if these artifacts are unavailable.
 
 ## Ranking source ingestion
 
@@ -139,11 +263,9 @@ python scripts/normalize_ranking_export.py \
   --output data/external/rankings/fantasy_life/20260818T030000Z.parquet
 ```
 
-See `docs/data/ranking_and_news_sources.md`.
+External rankings and ADP are audit/challenger evidence. They do not numerically overwrite the production projection model.
 
 ## Ranking validation
-
-Use the format matrix before promoting a ranking challenger:
 
 ```bash
 python scripts/build_format_ranking_benchmark.py \
@@ -151,13 +273,11 @@ python scripts/build_format_ranking_benchmark.py \
   --rankings-root data/external/rankings
 ```
 
-The benchmark checks 1QB/2QB/superflex, team count, scoring, TE premium, expanded lineups, scoring exactness, external agreement, and structural monotonicity. Historical roster-utility replay is required by default for promotion.
-
-See `docs/modeling/ranking_calibration_v09.md`.
+The benchmark checks 1QB/2QB/superflex, team count, scoring, TE premium, expanded lineups, scoring exactness, external agreement, and structural monotonicity. Historical roster-utility replay remains required for promotion.
 
 ## Training the empirical draft-survival model
 
-Do not train from final-season outcomes or later ADP snapshots. Every historical row must use market information that was available before that draft.
+Every historical row must use market information that was available before that draft.
 
 ```bash
 python scripts/build_draft_survival_observations.py \
@@ -170,32 +290,22 @@ python scripts/train_draft_survival_model.py \
   --report artifacts/models/draft_survival/metrics.json
 ```
 
-## Evidence-aware product surfaces
+## Gemini responsibilities
 
-- `LIVE`, `STALE`, `HISTORICAL BACKTEST`, and `SYNTHETIC DEMO` provenance
-- model version, projection freshness, source cutoff, and missing inputs
-- scoring exactness and unsupported live-rule warnings
-- live room state, current pick, next pick, recent picks, and positional runs
-- 2-to-5-player comparison with raw projection, VORP, roster fit, timing, calibration, and research lookahead
-- server-side roster counterfactuals and legal lineup optimization
-- dynamic wait-loss and positional supply diagnostics
-- expert/market disagreement without consensus leakage into production
-- frozen historical policy replay and promotion gates
+- React renders server-owned state, comparisons, evidence, and provenance.
+- The Node server keeps `GEMINI_API_KEY` private and proxies the Python Product API.
+- Gemini performs tool selection, comparison, and explanation only.
+- Python remains authoritative for projections, exact league scoring, starter allocation, VORP, scarcity, draft survival, roster utility, simulation, and production actions.
+- The deterministic product remains usable if Gemini is disabled.
 
-Gemini explains deterministic Product API results. When `GEMINI_API_KEY` is absent, deterministic draft, lineup, waiver, trade, and ranking-calibration features remain usable.
+Do not recreate missing Python numerical formulas in TypeScript. Extend the Product API instead.
 
-## Google AI Studio
-
-Import the repository into Build mode and read:
+## Further reading
 
 ```text
-ai_studio/BUILD_PROMPT.md
-ai_studio/DRAFT_WAR_ROOM_PROMPT.md
+docs/product/modelling_workspace.md
 docs/product/gemini_ai_studio.md
+docs/modeling/player_state_graph_v2.md
 docs/modeling/ranking_calibration_v09.md
 docs/data/ranking_and_news_sources.md
 ```
-
-Add `PSE_API_BASE_URL` as a server-side environment value. Keep `GEMINI_API_KEY`, ESPN session credentials, and ranking-provider API credentials server-side only.
-
-Do not ask AI Studio or Gemini to recreate Python numerical formulas in TypeScript. If a server-side metric is unavailable, show it as unavailable and extend the Product API instead of inventing a browser implementation.

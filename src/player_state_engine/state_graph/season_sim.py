@@ -24,9 +24,10 @@ class SeasonSimulationSummary:
 class FantasySeasonSimulator:
     """Correlated rest-of-season fantasy league simulator.
 
-    Input weekly draws are expected to preserve the NFL correlation structure upstream. This
-    layer only handles league scoring outcomes: legal lineups, H2H/median wins, standings and a
-    deterministic playoff bracket for each Monte Carlo world.
+    Input weekly draws are expected to preserve the NFL correlation structure upstream. Weekly
+    starters are selected from pregame expected values and then held fixed across Monte Carlo
+    worlds. This models a managed fantasy league rather than an oracle/best-ball manager who can
+    choose a different lineup after seeing every simulated outcome.
     """
 
     config: LeagueConfig
@@ -45,46 +46,101 @@ class FantasySeasonSimulator:
                 slots.append((f"{slot}{index + 1}", eligible))
         return slots
 
-    def _lineup_score(self, roster: pd.DataFrame) -> float:
+    def _starter_player_ids(
+        self,
+        roster: pd.DataFrame,
+        *,
+        value_column: str,
+    ) -> tuple[str, ...]:
         if roster.empty:
-            return 0.0
+            return ()
         slots = self._starter_slots()
         if not slots:
-            return 0.0
+            return ()
+        required = {"player_id", "position", value_column}
+        missing = required - set(roster)
+        if missing:
+            raise ValueError(f"Lineup frame missing columns: {sorted(missing)}")
+
+        player_ids = roster["player_id"].astype(str).to_numpy()
         positions = roster["position"].astype(str).str.upper().to_numpy()
-        values = pd.to_numeric(roster["fantasy_points"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        values = pd.to_numeric(roster[value_column], errors="coerce").fillna(0.0).to_numpy(dtype=float)
         matrix = np.full((len(roster), len(slots)), -1e9, dtype=float)
         for player_index, position in enumerate(positions):
             for slot_index, (_, eligible) in enumerate(slots):
                 if position in eligible:
                     matrix[player_index, slot_index] = values[player_index]
         rows, columns = linear_sum_assignment(-matrix)
-        total = 0.0
+        selected: list[str] = []
         for row, column in zip(rows, columns, strict=True):
             if matrix[row, column] > -1e8:
-                total += float(matrix[row, column])
-        return total
+                selected.append(str(player_ids[row]))
+        return tuple(selected)
 
-    def _weekly_scores(
+    def _lineup_score(self, roster: pd.DataFrame) -> float:
+        selected = self._starter_player_ids(roster, value_column="fantasy_points")
+        if not selected:
+            return 0.0
+        values = pd.to_numeric(roster["fantasy_points"], errors="coerce").fillna(0.0)
+        player_ids = roster["player_id"].astype(str)
+        return float(values.loc[player_ids.isin(selected)].sum())
+
+    def _pregame_lineups(
         self,
+        draws: pd.DataFrame,
+        rosters: pd.DataFrame,
+        week: int,
+    ) -> dict[str, tuple[str, ...]]:
+        week_draws = draws.loc[pd.to_numeric(draws["week"], errors="coerce").eq(int(week))].copy()
+        if week_draws.empty:
+            return {str(manager): () for manager in rosters["manager_id"].astype(str).unique()}
+        expected = (
+            week_draws.assign(
+                fantasy_points=pd.to_numeric(week_draws["fantasy_points"], errors="coerce").fillna(0.0),
+                position=week_draws["position"].astype(str).str.upper(),
+                player_id=week_draws["player_id"].astype(str),
+            )
+            .groupby(["player_id", "position"], as_index=False)["fantasy_points"]
+            .mean()
+            .rename(columns={"fantasy_points": "pregame_expected_points"})
+        )
+        roster_frame = rosters.copy()
+        roster_frame["player_id"] = roster_frame["player_id"].astype(str)
+        merged = roster_frame.merge(expected, on="player_id", how="left", suffixes=("", "_draw"))
+        if "position_draw" in merged:
+            if "position" in merged:
+                merged["position"] = merged["position_draw"].fillna(merged["position"])
+            else:
+                merged["position"] = merged["position_draw"]
+        if "position" not in merged:
+            merged["position"] = "UNK"
+        merged["pregame_expected_points"] = pd.to_numeric(
+            merged["pregame_expected_points"], errors="coerce"
+        ).fillna(0.0)
+        return {
+            str(manager): self._starter_player_ids(group, value_column="pregame_expected_points")
+            for manager, group in merged.groupby(merged["manager_id"].astype(str), sort=False)
+        }
+
+    @staticmethod
+    def _weekly_scores(
         draws: pd.DataFrame,
         rosters: pd.DataFrame,
         simulation: int,
         week: int,
+        lineups: dict[str, tuple[str, ...]],
     ) -> dict[str, float]:
         world = draws.loc[
             pd.to_numeric(draws["simulation"], errors="coerce").eq(int(simulation))
             & pd.to_numeric(draws["week"], errors="coerce").eq(int(week))
-        ]
-        merged = rosters.merge(world, on="player_id", how="left", suffixes=("", "_draw"))
-        if "position_draw" in merged:
-            merged["position"] = merged["position_draw"].fillna(merged.get("position"))
-        merged["fantasy_points"] = pd.to_numeric(
-            merged.get("fantasy_points"), errors="coerce"
-        ).fillna(0.0)
+        ].copy()
+        world["player_id"] = world["player_id"].astype(str)
+        world["fantasy_points"] = pd.to_numeric(world["fantasy_points"], errors="coerce").fillna(0.0)
+        point_map = dict(zip(world["player_id"], world["fantasy_points"], strict=False))
+        managers = rosters["manager_id"].astype(str).unique()
         return {
-            str(manager): self._lineup_score(group)
-            for manager, group in merged.groupby(merged["manager_id"].astype(str), sort=False)
+            str(manager): float(sum(float(point_map.get(player_id, 0.0)) for player_id in lineups.get(str(manager), ())))
+            for manager in managers
         }
 
     def _resolved_playoff_teams(self, team_count: int) -> int:
@@ -178,18 +234,37 @@ class FantasySeasonSimulator:
             raise ValueError(f"Schedule missing columns: {sorted(missing)}")
 
         managers = sorted(rosters["manager_id"].astype(str).unique())
-        simulations = sorted(pd.to_numeric(weekly_draws["simulation"], errors="coerce").dropna().astype(int).unique())
-        all_weeks = sorted(pd.to_numeric(weekly_draws["week"], errors="coerce").dropna().astype(int).unique())
+        simulations = sorted(
+            pd.to_numeric(weekly_draws["simulation"], errors="coerce").dropna().astype(int).unique()
+        )
+        all_weeks = sorted(
+            pd.to_numeric(weekly_draws["week"], errors="coerce").dropna().astype(int).unique()
+        )
         regular_weeks = [week for week in all_weeks if week not in set(self.config.playoff_weeks)]
         playoff_count = self._resolved_playoff_teams(len(managers))
+        pregame_lineups = {
+            week: self._pregame_lineups(weekly_draws, rosters, week) for week in all_weeks
+        }
 
         accumulator = {
-            manager: {"wins": 0.0, "points": 0.0, "playoffs": 0.0, "championships": 0.0, "seed": 0.0}
+            manager: {
+                "wins": 0.0,
+                "points": 0.0,
+                "playoffs": 0.0,
+                "championships": 0.0,
+                "seed": 0.0,
+            }
             for manager in managers
         }
         for simulation in simulations:
             week_scores = {
-                week: self._weekly_scores(weekly_draws, rosters, simulation, week)
+                week: self._weekly_scores(
+                    weekly_draws,
+                    rosters,
+                    simulation,
+                    week,
+                    pregame_lineups.get(week, {}),
+                )
                 for week in all_weeks
             }
             wins = {manager: 0.0 for manager in managers}
@@ -198,7 +273,9 @@ class FantasySeasonSimulator:
                 scores = week_scores.get(week, {})
                 for manager in managers:
                     points[manager] += scores.get(manager, 0.0)
-                week_schedule = schedule.loc[pd.to_numeric(schedule["week"], errors="coerce").eq(week)]
+                week_schedule = schedule.loc[
+                    pd.to_numeric(schedule["week"], errors="coerce").eq(week)
+                ]
                 for _, matchup in week_schedule.iterrows():
                     home = str(matchup["home_manager_id"])
                     away = str(matchup["away_manager_id"])
@@ -264,7 +341,11 @@ class FantasySeasonSimulator:
     ) -> pd.DataFrame:
         before = self.simulate(weekly_draws, before_rosters, schedule).set_index("manager_id")
         after = self.simulate(weekly_draws, after_rosters, schedule).set_index("manager_id")
-        managers = list(manager_ids) if manager_ids is not None else sorted(set(before.index) | set(after.index))
+        managers = (
+            list(manager_ids)
+            if manager_ids is not None
+            else sorted(set(before.index) | set(after.index))
+        )
         rows: list[dict[str, float | str]] = []
         for manager in managers:
             if manager not in before.index or manager not in after.index:
@@ -272,11 +353,23 @@ class FantasySeasonSimulator:
             rows.append(
                 {
                     "manager_id": str(manager),
-                    "expected_wins_delta": float(after.loc[manager, "expected_wins"] - before.loc[manager, "expected_wins"]),
-                    "expected_points_delta": float(after.loc[manager, "expected_points"] - before.loc[manager, "expected_points"]),
-                    "playoff_probability_delta": float(after.loc[manager, "playoff_probability"] - before.loc[manager, "playoff_probability"]),
-                    "championship_probability_delta": float(after.loc[manager, "championship_probability"] - before.loc[manager, "championship_probability"]),
-                    "expected_seed_delta": float(after.loc[manager, "expected_seed"] - before.loc[manager, "expected_seed"]),
+                    "expected_wins_delta": float(
+                        after.loc[manager, "expected_wins"] - before.loc[manager, "expected_wins"]
+                    ),
+                    "expected_points_delta": float(
+                        after.loc[manager, "expected_points"] - before.loc[manager, "expected_points"]
+                    ),
+                    "playoff_probability_delta": float(
+                        after.loc[manager, "playoff_probability"]
+                        - before.loc[manager, "playoff_probability"]
+                    ),
+                    "championship_probability_delta": float(
+                        after.loc[manager, "championship_probability"]
+                        - before.loc[manager, "championship_probability"]
+                    ),
+                    "expected_seed_delta": float(
+                        after.loc[manager, "expected_seed"] - before.loc[manager, "expected_seed"]
+                    ),
                 }
             )
         return pd.DataFrame(rows)
