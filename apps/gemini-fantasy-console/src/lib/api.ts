@@ -41,6 +41,7 @@ function query(params: Record<string, string | number | undefined>) {
 
 export const api = {
   leagues: () => request<LeagueSummary[]>('/v1/leagues'),
+  intelligenceLeagues: () => request<LeagueSummary[]>('/v1/intelligence/leagues'),
   importSleeper: (leagueId: string, userId?: string) =>
     request<{ league: unknown }>('/v1/integrations/sleeper/import', {
       method: 'POST',
@@ -48,6 +49,10 @@ export const api = {
     }),
   players: (leagueId: string, decision: DecisionType = 'trade') =>
     request<PlayerRow[]>(`/v1/leagues/${encodeURIComponent(leagueId)}/players${query({ decision })}`),
+  intelligencePlayers: (leagueId: string, decision: DecisionType = 'trade') =>
+    request<PlayerRow[]>(
+      `/v1/leagues/${encodeURIComponent(leagueId)}/intelligence/players${query({ decision })}`,
+    ),
   playerIntelligence: (leagueId: string, playerId: string) =>
     request<PlayerIntelligenceResponse>(
       `/v1/leagues/${encodeURIComponent(leagueId)}/players/${encodeURIComponent(playerId)}/intelligence`,
