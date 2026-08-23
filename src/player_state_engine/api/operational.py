@@ -20,6 +20,7 @@ def create_app(**kwargs: Any) -> FastAPI:
         "game_intelligence_root",
         "game_intelligence_registry",
         "game_intelligence_benchmark_root",
+        "player_state_graph_root",
     }
     base_kwargs = {key: value for key, value in kwargs.items() if key not in operational_only}
     app = create_base_app(**base_kwargs)
@@ -38,6 +39,7 @@ def create_app(**kwargs: Any) -> FastAPI:
         conformal_root=kwargs.get("conformal_root"),
         opportunity_root=kwargs.get("opportunity_root"),
         historical_source_root=kwargs.get("historical_source_root"),
+        player_state_graph_root=kwargs.get("player_state_graph_root"),
     )
     install_ranking_routes(
         app,
@@ -53,7 +55,8 @@ def create_app(**kwargs: Any) -> FastAPI:
     )
     app.version = "0.16.0"
     app.description = (
-        f"{app.description} Live Draft War Room, player intelligence, model observatory, "
+        f"{app.description} Live Draft War Room, player intelligence, cross-league portfolio "
+        "exposure, Player State Graph shadow comparison and sensitivity, model observatory, "
         "ranking calibration, guarded draft reliability, guarded game-intelligence simulation, "
         "expanding frozen replay, factorial attribution, simulated-state opportunity, "
         "drive-volume, possession-transition, fourth-down decision, and terminal-family "
