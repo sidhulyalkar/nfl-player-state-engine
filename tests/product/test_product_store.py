@@ -1,3 +1,5 @@
+import pytest
+
 from player_state_engine.product.schemas import LeagueIdentity, LeagueSettings, LeagueSnapshot
 from player_state_engine.product.store import LeagueSnapshotStore
 
@@ -31,7 +33,8 @@ def test_store_finds_identity_when_sync_filename_is_connection_key(tmp_path):
         encoding="utf-8",
     )
 
-    assert store.load("real-platform-league-id") if False else True
+    with pytest.raises(FileNotFoundError):
+        store.load("real-platform-league-id")
     found = store.find("real-platform-league-id")
     assert found.identity.name == "Live League"
     assert [item.identity.league_id for item in store.iter_snapshots()] == [
