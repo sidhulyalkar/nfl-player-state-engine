@@ -28,6 +28,7 @@ def install_intelligence_routes(
     app: FastAPI,
     *,
     store_root: str | Path | None = None,
+    live_store_root: str | Path | None = None,
     projections_path: str | Path | None = None,
     benchmark_root: str | Path | None = None,
     conformal_root: str | Path | None = None,
@@ -39,6 +40,10 @@ def install_intelligence_routes(
 
     store = LeagueSnapshotStore(
         store_root or os.getenv("PSE_LEAGUE_STORE", "data/product/leagues")
+    )
+    live_store = LeagueSnapshotStore(
+        live_store_root
+        or os.getenv("PSE_LIVE_LEAGUE_STORE", "data/product/live_leagues")
     )
     projection_location = Path(
         projections_path
@@ -67,8 +72,14 @@ def install_intelligence_routes(
             raise FileNotFoundError(f"Projection artifact unavailable: {projection_location}")
         return read_table(projection_location)
 
+    def load_snapshot(league_id: str):
+        try:
+            return store.find(league_id)
+        except FileNotFoundError:
+            return live_store.find(league_id)
+
     def player_contract(league_id: str, player_id: str) -> tuple[dict[str, object], LeagueConfig]:
-        snapshot = store.load(league_id)
+        snapshot = load_snapshot(league_id)
         frame = projections()
         config = league_config_from_snapshot(snapshot)
         if snapshot.settings.faab_budget is not None:
@@ -283,7 +294,7 @@ def install_intelligence_routes(
     def portfolio_exposure() -> dict[str, object]:
         try:
             frame = projections() if projection_location.is_file() else None
-            return build_portfolio_exposure(store, projections=frame)
+            return build_portfolio_exposure([store, live_store], projections=frame)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
