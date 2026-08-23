@@ -75,15 +75,21 @@ export function PlayerIntelligenceView({
     });
   }, [initialPlayerId, leagueId, players]);
 
-  useEffect(() => {
-    if (!selectedId || leagueId === 'demo-league') return;
-    writePlayerRoute(leagueId, selectedId);
-  }, [leagueId, selectedId]);
+  const selectedIsValid = useMemo(
+    () => players.some((player) => player.player_id === selectedId),
+    [players, selectedId],
+  );
 
   useEffect(() => {
-    if (!selectedId || leagueId === 'demo-league') {
+    if (!selectedId || !selectedIsValid || leagueId === 'demo-league') return;
+    writePlayerRoute(leagueId, selectedId);
+  }, [leagueId, selectedId, selectedIsValid]);
+
+  useEffect(() => {
+    if (!selectedId || !selectedIsValid || leagueId === 'demo-league') {
       setProfile(null);
       setHistory([]);
+      setLoading(false);
       return;
     }
     let active = true;
@@ -103,7 +109,7 @@ export function PlayerIntelligenceView({
       setHistory(historyResult.status === 'fulfilled' ? historyResult.value.predictions ?? [] : []);
     }).finally(() => active && setLoading(false));
     return () => { active = false; };
-  }, [leagueId, selectedId]);
+  }, [leagueId, selectedId, selectedIsValid]);
 
   const visible = useMemo(() => {
     const term = query.trim().toLowerCase();
