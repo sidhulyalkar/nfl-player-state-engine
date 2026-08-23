@@ -351,6 +351,176 @@ export interface PlayerIntelligenceResponse {
   };
 }
 
+export interface ShadowProjection {
+  q10: number | null;
+  q50: number | null;
+  q90: number | null;
+}
+
+export interface OpportunityFamilyAudit {
+  raw_modeled_total: number;
+  normalization_applied: boolean;
+  normalization_scale: number;
+  coherent_modeled_total: number;
+  residual_unmodeled_share: number;
+  players: Array<{
+    player_id: string;
+    position?: string;
+    raw_share: number;
+    coherent_share: number;
+    is_selected_player: boolean;
+  }>;
+}
+
+export interface PlayerShadowResponse {
+  data_mode: string;
+  player_id: string;
+  graph_health: {
+    root: string;
+    available: boolean;
+    artifacts: Record<string, ArtifactMetadata>;
+  };
+  comparison: {
+    available: boolean;
+    reason?: string;
+    comparable_horizon?: boolean;
+    decision_comparable?: boolean;
+    production?: ShadowProjection;
+    challenger?: ShadowProjection;
+    disagreement?: {
+      median_delta: number | null;
+      interval_width_delta: number | null;
+      interval_overlap_ratio: number | null;
+      direction: string;
+    };
+    graph_context?: Record<string, unknown>;
+    scoring_contract?: {
+      comparable: boolean;
+      status: string;
+      note: string;
+      graph_contract?: Record<string, unknown>;
+    };
+    authority?: {
+      production: string;
+      challenger: string;
+      may_change_decision: boolean;
+    };
+  };
+  opportunity: {
+    available: boolean;
+    reason?: string;
+    authority?: string;
+    team?: string | null;
+    season?: number | null;
+    week?: number | null;
+    target_share?: OpportunityFamilyAudit | null;
+    carry_share?: OpportunityFamilyAudit | null;
+    note?: string;
+  };
+}
+
+export interface ScenarioDistribution {
+  baseline: ShadowProjection;
+  scenario: ShadowProjection;
+  median_delta: number;
+  center_factor: number;
+  uncertainty_factor: number;
+  baseline_availability: number;
+  scenario_availability: number;
+}
+
+export interface PlayerScenarioResponse {
+  semantics: string;
+  engine: string;
+  controls: {
+    role_multiplier: number;
+    team_volume_multiplier: number;
+    availability_probability: number | null;
+  };
+  production: ScenarioDistribution | null;
+  challenger: ScenarioDistribution | null;
+  scoring_contract: {
+    comparable: boolean;
+    status: string;
+    note: string;
+  };
+  authority: {
+    may_override_production: boolean;
+    note: string;
+  };
+}
+
+export interface PortfolioExposurePlayer {
+  player_key: string;
+  canonical_player_id?: string | null;
+  player_name: string;
+  position?: string | null;
+  nfl_team?: string | null;
+  league_count: number;
+  exposure_rate: number | null;
+  starter_leagues: number;
+  starter_exposure_rate: number | null;
+  identity_quality: string;
+  leagues: Array<{
+    league_id: string;
+    league_name: string;
+    team_name: string;
+    is_starter: boolean;
+    roster_slot?: string | null;
+  }>;
+  projection?: Record<string, unknown>;
+}
+
+export interface PortfolioExposureResponse {
+  data_mode: string;
+  authority: {
+    identity_aggregation: string;
+    unresolved_leagues_are_excluded: boolean;
+    projection_values: string;
+    note: string;
+  };
+  summary: {
+    stored_leagues: number;
+    resolved_user_rosters: number;
+    unresolved_user_rosters: number;
+    unique_player_keys: number;
+    total_roster_slots: number;
+    maximum_single_player_exposure: number;
+    canonical_identity_rows: number;
+    platform_scoped_identity_rows: number;
+  };
+  leagues: Array<Record<string, string | number | boolean | null>>;
+  unresolved_leagues: Array<Record<string, string>>;
+  players: PortfolioExposurePlayer[];
+  team_concentration: Array<{ nfl_team: string; roster_slots: number; slots_per_resolved_league: number }>;
+  position_concentration: Array<{ position: string; roster_slots: number; slots_per_resolved_league: number }>;
+}
+
+export interface ShadowEvaluationResponse {
+  data_mode: string;
+  authority: string;
+  reason?: string;
+  paired_rows?: number;
+  seasons?: number;
+  metrics?: {
+    champion_mean_pinball: number;
+    challenger_mean_pinball: number;
+    pinball_effect_champion_minus_challenger: number;
+    champion_q50_mae: number;
+    challenger_q50_mae: number;
+    champion_80_coverage: number;
+    challenger_80_coverage: number;
+    champion_mean_width: number;
+    challenger_mean_width: number;
+    overlap_rate: number;
+  };
+  bootstrap?: Record<string, number> | null;
+  promotion_record?: Record<string, unknown>;
+  promotion_status?: string;
+  blockers?: string[];
+  note?: string;
+}
+
 export interface ModelDiagnosticRow {
   scope: string;
   rows: number;
@@ -399,6 +569,15 @@ export interface ModelObservatoryResponse {
     total: number;
     missing: string[];
     latest_file_modified_at?: string | null;
+  };
+  player_state_graph?: {
+    health: {
+      root: string;
+      available: boolean;
+      artifacts: Record<string, ArtifactMetadata>;
+    };
+    manifest: Record<string, unknown> | null;
+    shadow_evaluation: ShadowEvaluationResponse;
   };
   diagnostics: ModelDiagnosticsResponse;
   benchmark: Array<Record<string, string | number | boolean | null>>;
