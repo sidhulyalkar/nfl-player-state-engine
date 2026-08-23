@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import App from './App';
 import { DraftDecisionConsole } from './components/DraftDecisionConsole';
 import { IntelligencePortal } from './components/IntelligencePortal';
@@ -9,6 +9,12 @@ import './shadow-workspace.css';
 
 type Surface = 'draft' | 'intelligence' | 'portfolio' | 'league' | 'model';
 
+type WorkspaceRoute = {
+  surface: Surface;
+  leagueId?: string;
+  playerId?: string;
+};
+
 const surfaces: Array<{ key: Surface; label: string; description: string }> = [
   { key: 'draft', label: 'Draft Room', description: 'Live pick decisions' },
   { key: 'intelligence', label: 'Player Intelligence', description: 'Full player dossiers' },
@@ -17,21 +23,53 @@ const surfaces: Array<{ key: Surface; label: string; description: string }> = [
   { key: 'model', label: 'Model Observatory', description: 'Calibration and evidence' },
 ];
 
+const surfaceKeys = new Set<Surface>(surfaces.map((item) => item.key));
+
+function readWorkspaceRoute(): WorkspaceRoute {
+  if (typeof window === 'undefined') return { surface: 'draft' };
+  const params = new URLSearchParams(window.location.search);
+  const requested = params.get('workspace') as Surface | null;
+  return {
+    surface: requested && surfaceKeys.has(requested) ? requested : 'draft',
+    leagueId: params.get('league') || undefined,
+    playerId: params.get('player') || undefined,
+  };
+}
+
+function writeWorkspaceSurface(surface: Surface, mode: 'push' | 'replace' = 'push') {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  url.searchParams.set('workspace', surface);
+  const method = mode === 'replace' ? 'replaceState' : 'pushState';
+  window.history[method](null, '', url);
+}
+
 export default function OperationalApp() {
-  const [surface, setSurface] = useState<Surface>('draft');
+  const [route, setRoute] = useState<WorkspaceRoute>(readWorkspaceRoute);
+
+  useEffect(() => {
+    const handlePopState = () => setRoute(readWorkspaceRoute());
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  function navigate(surface: Surface, mode: 'push' | 'replace' = 'push') {
+    writeWorkspaceSurface(surface, mode);
+    setRoute({ ...readWorkspaceRoute(), surface });
+  }
 
   return <div className="workspace-root">
     <nav className="workspace-switcher" aria-label="Modelling workspace">
       <div className="workspace-identity"><div>4D</div><span><strong>Fourth Down Lab</strong><small>modelling workspace</small></span></div>
-      <div className="workspace-tabs">{surfaces.map((item) => <button key={item.key} className={surface === item.key ? 'active' : ''} onClick={() => setSurface(item.key)}><strong>{item.label}</strong><small>{item.description}</small></button>)}</div>
+      <div className="workspace-tabs">{surfaces.map((item) => <button key={item.key} className={route.surface === item.key ? 'active' : ''} onClick={() => navigate(item.key)}><strong>{item.label}</strong><small>{item.description}</small></button>)}</div>
       <div className="workspace-status"><i/><span>Server-side model truth</span></div>
     </nav>
     <div className="workspace-surface">
-      {surface === 'draft' && <DraftDecisionConsole onOpenConsole={() => setSurface('league')} />}
-      {surface === 'intelligence' && <IntelligencePortal/>}
-      {surface === 'portfolio' && <PortfolioPortal/>}
-      {surface === 'league' && <div className="operational-console"><App/></div>}
-      {surface === 'model' && <ModelObservatoryPortal onOpenLeagueOS={() => setSurface('league')}/>} 
+      {route.surface === 'draft' && <DraftDecisionConsole onOpenConsole={() => navigate('league')} />}
+      {route.surface === 'intelligence' && <IntelligencePortal initialLeagueId={route.leagueId} initialPlayerId={route.playerId}/>} 
+      {route.surface === 'portfolio' && <PortfolioPortal/>}
+      {route.surface === 'league' && <div className="operational-console"><App/></div>}
+      {route.surface === 'model' && <ModelObservatoryPortal onOpenLeagueOS={() => navigate('league')}/>} 
     </div>
   </div>;
 }
