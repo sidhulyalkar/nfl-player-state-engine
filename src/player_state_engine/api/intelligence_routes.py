@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
+
+import pandas as pd
 
 from player_state_engine.data.io import read_table
 from player_state_engine.fantasy.decision_board import DecisionType, build_decision_board
@@ -70,7 +73,7 @@ def install_intelligence_routes(
         or os.getenv("PSE_PLAYER_STATE_GRAPH_ROOT", "artifacts/player_state_graph")
     )
 
-    def projections():
+    def projections() -> pd.DataFrame:
         if not projection_location.is_file():
             raise FileNotFoundError(f"Projection artifact unavailable: {projection_location}")
         return read_table(projection_location)
@@ -90,7 +93,7 @@ def install_intelligence_routes(
 
     def league_context(
         league_id: str,
-    ) -> tuple[LeagueSnapshot, object, LeagueConfig, dict[str, object]]:
+    ) -> tuple[LeagueSnapshot, pd.DataFrame, LeagueConfig, dict[str, object]]:
         snapshot = load_snapshot(league_id)
         frame = projections()
         config = league_config_from_snapshot(snapshot)
@@ -124,6 +127,53 @@ def install_intelligence_routes(
             return None
         return payload if isinstance(payload, dict) else None
 
+    def scoring_contract_status(
+        contract: dict[str, object],
+        config: LeagueConfig,
+    ) -> dict[str, object]:
+        graph_weights = contract.get("scoring_weights")
+        if not isinstance(graph_weights, dict):
+            return {
+                "comparable": False,
+                "status": "manifest_scoring_missing",
+                "base_weights_match": False,
+                "tight_end_premium_match": False,
+                "note": "Graph scoring weights are unavailable.",
+            }
+        try:
+            current = {str(key): float(value) for key, value in config.scoring_weights.items()}
+            candidate = {str(key): float(value) for key, value in graph_weights.items()}
+            graph_premium = float(contract.get("tight_end_premium", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return {
+                "comparable": False,
+                "status": "manifest_scoring_invalid",
+                "base_weights_match": False,
+                "tight_end_premium_match": False,
+                "note": "Graph scoring contract contains non-numeric values.",
+            }
+        base_match = current == candidate
+        premium_match = math.isclose(
+            graph_premium,
+            float(config.tight_end_premium),
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+        comparable = base_match and premium_match
+        return {
+            "comparable": comparable,
+            "status": "exact_scoring_match" if comparable else "scoring_contract_mismatch",
+            "base_weights_match": base_match,
+            "tight_end_premium_match": premium_match,
+            "graph_tight_end_premium": graph_premium,
+            "production_tight_end_premium": float(config.tight_end_premium),
+            "note": (
+                "The challenger and production distributions use the same fantasy scoring contract."
+                if comparable
+                else "Raw challenger values are visible for research, but they are not decision-comparable under this league scoring contract."
+            ),
+        }
+
     def graph_contract_status(config: LeagueConfig) -> dict[str, object]:
         manifest = graph_manifest()
         if manifest is None:
@@ -139,26 +189,7 @@ def install_intelligence_routes(
                 "status": "manifest_contract_missing",
                 "note": "Graph manifest does not contain a league contract.",
             }
-        graph_weights = contract.get("scoring_weights")
-        if not isinstance(graph_weights, dict):
-            return {
-                "comparable": False,
-                "status": "manifest_scoring_missing",
-                "note": "Graph scoring weights are unavailable.",
-            }
-        current = {str(key): float(value) for key, value in config.scoring_weights.items()}
-        candidate = {str(key): float(value) for key, value in graph_weights.items()}
-        scoring_match = current == candidate
-        return {
-            "comparable": scoring_match,
-            "status": "exact_scoring_match" if scoring_match else "scoring_contract_mismatch",
-            "graph_contract": contract,
-            "note": (
-                "The challenger and production distributions use the same scoring weights."
-                if scoring_match
-                else "Raw challenger values are visible for research, but they are not decision-comparable under this league scoring contract."
-            ),
-        }
+        return {**scoring_contract_status(contract, config), "graph_contract": contract}
 
     def weekly_projection(contract: dict[str, object]) -> dict[str, float | None]:
         raw = contract.get("raw_model_fields")
@@ -171,7 +202,7 @@ def install_intelligence_routes(
                     numeric = float(value)
                 except (TypeError, ValueError):
                     continue
-                if numeric == numeric and abs(numeric) != float("inf"):
+                if math.isfinite(numeric):
                     return numeric
             return None
 
@@ -191,15 +222,20 @@ def install_intelligence_routes(
             }
         contract = manifest.get("league_contract")
         ppr = LeagueConfig(scoring="ppr")
-        graph_weights = contract.get("scoring_weights") if isinstance(contract, dict) else None
-        if not isinstance(graph_weights, dict) or {
-            str(key): float(value) for key, value in graph_weights.items()
-        } != {str(key): float(value) for key, value in ppr.scoring_weights.items()}:
+        if not isinstance(contract, dict):
+            return {
+                "data_mode": "UNAVAILABLE",
+                "authority": "research_shadow_only",
+                "reason": "graph_scoring_contract_unavailable",
+            }
+        contract_status = scoring_contract_status(contract, ppr)
+        if not contract_status["comparable"]:
             return {
                 "data_mode": "UNAVAILABLE",
                 "authority": "research_shadow_only",
                 "reason": "graph_scoring_contract_not_comparable_to_ppr_champion",
                 "graph_contract": contract,
+                "scoring_contract": contract_status,
             }
         champion_path = (
             research.benchmark_root
