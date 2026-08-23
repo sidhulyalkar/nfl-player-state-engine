@@ -7,6 +7,7 @@ import {
 import type { ModelObservatoryResponse } from '../../shared/types';
 import { api } from '../lib/api';
 import { ModeBadge } from './ModeBadge';
+import { ShadowEvaluationPanel } from './ShadowEvaluationPanel';
 
 function metric(value: number | null | undefined, digits = 3) {
   return value == null || !Number.isFinite(value) ? '—' : value.toFixed(digits);
@@ -54,6 +55,7 @@ export function ModelDiagnosticsPanel() {
   const overall = payload?.diagnostics.overall;
   const health = payload?.artifact_health;
   const authority = payload?.authority;
+  const graphHealth = payload?.player_state_graph?.health;
 
   return <div className="model-observatory-block">
     <section className="panel model-observatory-hero wide">
@@ -67,8 +69,10 @@ export function ModelDiagnosticsPanel() {
       <section className="metric-card"><div className="metric-icon"><Gauge size={20}/></div><span>Empirical 80% coverage</span><strong>{percent(overall?.empirical_80_coverage)}</strong><small>{overall?.calibration_status?.replaceAll('_', ' ').toLowerCase() ?? 'diagnostic loading'}</small></section>
       <section className="metric-card"><div className="metric-icon"><TrendingUp size={20}/></div><span>q50 MAE</span><strong>{metric(overall?.q50_mae, 2)}</strong><small>held-out median error</small></section>
       <section className="metric-card"><div className="metric-icon"><Database size={20}/></div><span>Mean pinball</span><strong>{metric(overall?.mean_pinball)}</strong><small>q10 / q50 / q90 average</small></section>
-      <section className="metric-card"><div className="metric-icon"><CheckCircle2 size={20}/></div><span>Research artifacts</span><strong>{health ? `${health.available}/${health.total}` : '—'}</strong><small>{health?.missing?.length ? `${health.missing.length} missing` : 'mounted and readable'}</small></section>
+      <section className="metric-card"><div className="metric-icon"><CheckCircle2 size={20}/></div><span>Research artifacts</span><strong>{health ? `${health.available}/${health.total}` : '—'}</strong><small>{graphHealth?.available ? 'state graph mounted' : health?.missing?.length ? `${health.missing.length} missing` : 'core research mounted'}</small></section>
     </div>
+
+    <ShadowEvaluationPanel evaluation={payload?.player_state_graph?.shadow_evaluation}/>
 
     <div className="observatory-chart-grid wide">
       <section className="panel chart-panel">
