@@ -29,6 +29,7 @@ class EvidenceArtifactStore:
         self.slice_metrics_path = self.root / "slice_metrics.csv"
         self.paired_comparisons_path = self.root / "paired_comparisons.csv"
         self.experiment_ledger_path = self.root / "experiment_ledger.csv"
+        self.negative_controls_path = self.root / "negative_controls.csv"
         self.manifest_path = self.root / "run_manifest.json"
 
     def _manifest(self) -> dict[str, object] | None:
@@ -46,12 +47,10 @@ class EvidenceArtifactStore:
             "slice_metrics": self.slice_metrics_path,
             "paired_comparisons": self.paired_comparisons_path,
             "experiment_ledger": self.experiment_ledger_path,
+            "negative_controls": self.negative_controls_path,
             "manifest": self.manifest_path,
         }
-        metadata = {
-            name: artifact_metadata(path)
-            for name, path in paths.items()
-        }
+        metadata = {name: artifact_metadata(path) for name, path in paths.items()}
         available_count = sum(bool(item.get("available")) for item in metadata.values())
         return {
             "available": available_count == len(paths),
@@ -85,12 +84,19 @@ class EvidenceArtifactStore:
             if self.experiment_ledger_path.is_file()
             else pd.DataFrame()
         )
+        negative_controls = (
+            _read(self.negative_controls_path)
+            if self.negative_controls_path.is_file()
+            else pd.DataFrame()
+        )
         if target:
-            for frame in (method_summary, slice_metrics, paired):
+            for frame in (method_summary, slice_metrics, paired, negative_controls):
                 if "target" in frame:
                     frame.drop(frame.index[~frame["target"].astype(str).eq(target)], inplace=True)
             if "experiment_id" in ledger:
-                ledger = ledger.loc[ledger["experiment_id"].astype(str).str.startswith(f"{target}:")]
+                ledger = ledger.loc[
+                    ledger["experiment_id"].astype(str).str.startswith(f"{target}:")
+                ]
 
         manifest = self._manifest()
         return {
@@ -103,6 +109,7 @@ class EvidenceArtifactStore:
             "slice_metrics": frame_records(slice_metrics),
             "paired_comparisons": frame_records(paired),
             "experiment_ledger": frame_records(ledger),
+            "negative_controls": frame_records(negative_controls),
             "promotion": {
                 "automatic": False,
                 "production_champion": "direct_player_quantile_model",
