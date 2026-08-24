@@ -31,13 +31,13 @@ This matters because NFL schedules include Thursday, Saturday, Sunday, and Monda
 
 ## No-hindsight contract
 
-A checkpoint is valid only when every timestamped source in the snapshot satisfies:
+Every source declared in a checkpoint must have an explicit `available_at` timestamp and must satisfy:
 
 ```text
 source.available_at <= prediction_cutoff
 ```
 
-A later source is rejected.
+A source without a timestamp is rejected. A source first available after the cutoff is also rejected. Unknown provenance is therefore not treated as safe provenance.
 
 Decision context containing hindsight fields such as `actual`, `realized`, `regret`, `outcome`, or `settled` is rejected.
 
@@ -80,7 +80,7 @@ A snapshot contains:
 - season, week and checkpoint;
 - exact prediction cutoff and capture time;
 - league key when applicable;
-- input source names, artifact hashes and availability times;
+- input source names, artifact hashes and required availability times;
 - model metadata;
 - safe point-in-time decision audit context;
 - one row per player with production q10/q50/q90;
@@ -140,7 +140,9 @@ python scripts/record_shadow_checkpoint.py \
 
 The operator hashes the production and challenger artifacts automatically.
 
-Additional timestamped inputs can be supplied through `--source-manifest`. A manifest must contain a `sources` list of objects with `name` and, when known, `available_at`, `sha256`, `path`, and/or `source_url`.
+Additional inputs can be supplied through `--source-manifest`. A manifest must contain a `sources` list of objects. Every object requires `name` and `available_at`; `sha256`, `path`, and `source_url` are optional provenance fields.
+
+The core ledger enforces the same timestamp rule even when called outside the CLI, so there is no lower-level path that can admit an explicitly declared source without `available_at`.
 
 ### Settle a checkpoint
 
@@ -164,7 +166,7 @@ GET /v1/model/shadow-season/snapshots?season=2026&week=1&checkpoint=WEDNESDAY
 GET /v1/model/shadow-season/snapshots/{snapshot_id}
 ```
 
-There is intentionally no HTTP write endpoint for shadow history.
+There is intentionally no HTTP write endpoint for shadow history. Settlement detail reads also verify the settlement digest and its reference to the immutable snapshot digest.
 
 ## Artifact layout
 
