@@ -110,10 +110,32 @@ def _blockers(value: object) -> list[str]:
     return [item for item in text.split("|") if item]
 
 
+def _finite_bootstrap_p_value(raw_p: object, bootstrap_samples: int | None) -> float | None:
+    """Convert a bootstrap tail fraction into a finite-sample plus-one p-value.
+
+    A finite bootstrap should never publish p=0 merely because every sampled effect landed on
+    the favorable side. When the resample count is known, reconstruct the unfavorable sample
+    count and apply the standard plus-one correction `(count + 1) / (B + 1)`.
+    """
+
+    try:
+        p_value = float(raw_p)
+    except (TypeError, ValueError):
+        return None
+    if not isfinite(p_value) or not 0.0 <= p_value <= 1.0:
+        return None
+    if bootstrap_samples is None or int(bootstrap_samples) <= 0:
+        return p_value
+    sample_count = int(bootstrap_samples)
+    unfavorable = min(sample_count, max(0, int(round(p_value * sample_count))))
+    return float((unfavorable + 1) / (sample_count + 1))
+
+
 def apply_run_fdr(
     bundle: EvidenceBundle,
     *,
     maximum_fdr_q: float = 0.10,
+    bootstrap_samples: int | None = None,
 ) -> EvidenceBundle:
     """Apply one Benjamini-Hochberg family across every comparison in a run.
 
@@ -130,14 +152,11 @@ def apply_run_fdr(
         return bundle
 
     p_values: dict[str, float] = {}
-    for row in paired.itertuples(index=False):
-        experiment_id = str(row.experiment_id)
-        raw_p = getattr(row, "p_value", None)
-        try:
-            p_value = float(raw_p)
-        except (TypeError, ValueError):
-            continue
-        if isfinite(p_value) and 0.0 <= p_value <= 1.0:
+    for index, row in paired.iterrows():
+        experiment_id = str(row["experiment_id"])
+        p_value = _finite_bootstrap_p_value(row.get("p_value"), bootstrap_samples)
+        paired.at[index, "p_value"] = p_value
+        if p_value is not None:
             p_values[experiment_id] = p_value
     q_values = benjamini_hochberg(p_values)
 
@@ -158,6 +177,10 @@ def apply_run_fdr(
         paired.at[index, "blockers"] = "|".join(blockers)
         paired.at[index, "promotion_status"] = "blocked" if blockers else "eligible"
 
+    paired_p_values = {
+        str(row["experiment_id"]): row.get("p_value")
+        for _, row in paired.iterrows()
+    }
     if not ledger.empty and "experiment_id" in ledger:
         for index, row in ledger.iterrows():
             experiment_id = str(row["experiment_id"])
@@ -166,7 +189,9 @@ def apply_run_fdr(
                 for blocker in _blockers(row.get("blockers"))
                 if blocker not in {"fdr_q_above_threshold", "missing_fdr_evidence"}
             ]
+            p_value = paired_p_values.get(experiment_id)
             q_value = q_values.get(experiment_id)
+            ledger.at[index, "p_value"] = p_value
             ledger.at[index, "fdr_q_value"] = q_value
             if q_value is None or not isfinite(q_value):
                 blockers.append("missing_fdr_evidence")
@@ -367,7 +392,7 @@ def build_run_bundle(
             [bundle.experiment_ledger for bundle in bundles], ignore_index=True
         ),
     )
-    apply_run_fdr(combined_bundle)
+    apply_run_fdr(combined_bundle, bootstrap_samples=bootstrap_samples)
     negative_controls = (
         pd.concat(negative_control_frames, ignore_index=True)
         if negative_control_frames
@@ -503,6 +528,7 @@ def run(args: argparse.Namespace) -> None:
         "multiple_testing": {
             "method": "benjamini_hochberg",
             "family": "all_challenger_vs_target_champion_comparisons_in_run",
+            "p_value": "finite_sample_plus_one_bootstrap_tail",
             "maximum_fdr_q": 0.10,
         },
         "negative_control": {
