@@ -67,6 +67,9 @@ def main() -> None:
     parser.add_argument("--max-ece-regression", type=float, default=0.02)
     parser.add_argument("--min-format-rows", type=int, default=50)
     parser.add_argument("--max-format-brier-regression", type=float, default=0.005)
+    parser.add_argument("--min-draft-consistency", type=float, default=0.60)
+    parser.add_argument("--bootstrap-samples", type=int, default=2000)
+    parser.add_argument("--random-state", type=int, default=42)
     parser.add_argument(
         "--allow-unverified-market",
         action="store_true",
@@ -88,7 +91,10 @@ def main() -> None:
         max_ece_regression=args.max_ece_regression,
         min_format_rows=args.min_format_rows,
         max_format_brier_regression=args.max_format_brier_regression,
+        min_draft_consistency=args.min_draft_consistency,
+        bootstrap_samples=args.bootstrap_samples,
         require_verified_market=not args.allow_unverified_market,
+        random_state=args.random_state,
     )
 
     artifact = result.artifact
@@ -108,6 +114,9 @@ def main() -> None:
                 "max_ece_regression": float(args.max_ece_regression),
                 "min_format_rows": int(args.min_format_rows),
                 "max_format_brier_regression": float(args.max_format_brier_regression),
+                "min_draft_consistency": float(args.min_draft_consistency),
+                "bootstrap_samples": int(args.bootstrap_samples),
+                "random_state": int(args.random_state),
                 "require_verified_market": not bool(args.allow_unverified_market),
             },
             "observations": {
