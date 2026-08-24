@@ -55,6 +55,18 @@ def _content_digest(payload: Mapping[str, object]) -> str:
     return _sha256_text(_canonical_json(clean))
 
 
+def _semantic_digest(
+    payload: Mapping[str, object],
+    *,
+    ignore_fields: Sequence[str],
+) -> str:
+    clean = dict(payload)
+    clean.pop("content_sha256", None)
+    for field in ignore_fields:
+        clean.pop(field, None)
+    return _sha256_text(_canonical_json(clean))
+
+
 def _with_digest(payload: Mapping[str, object]) -> dict[str, object]:
     result = dict(payload)
     result["content_sha256"] = _content_digest(result)
@@ -634,6 +646,11 @@ class ShadowSeasonStore:
             existing = self._load(path, label="existing shadow snapshot")
             if existing["content_sha256"] == snapshot["content_sha256"]:
                 return False
+            if _semantic_digest(existing, ignore_fields=("captured_at",)) == _semantic_digest(
+                snapshot,
+                ignore_fields=("captured_at",),
+            ):
+                return False
             raise ValueError(
                 f"Immutable shadow checkpoint conflict for {snapshot['snapshot_id']}: {path}"
             )
@@ -676,6 +693,11 @@ class ShadowSeasonStore:
         if path.exists():
             existing = self._load(path, label="existing shadow settlement")
             if existing["content_sha256"] == settlement["content_sha256"]:
+                return False
+            if _semantic_digest(existing, ignore_fields=("settled_at",)) == _semantic_digest(
+                settlement,
+                ignore_fields=("settled_at",),
+            ):
                 return False
             raise ValueError(f"Immutable shadow settlement conflict for {snapshot_id}: {path}")
         self._atomic_write(path, settlement)
