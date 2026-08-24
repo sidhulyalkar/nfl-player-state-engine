@@ -32,7 +32,11 @@ def _production() -> pd.DataFrame:
     )
 
 
-def _snapshot(*, q50_delta: float = 0.0) -> dict[str, object]:
+def _snapshot(
+    *,
+    q50_delta: float = 0.0,
+    captured_minutes: int = 5,
+) -> dict[str, object]:
     frame = _production()
     frame.loc[0, "production_q50"] += q50_delta
     cutoff = datetime(2026, 9, 9, 18, 0, tzinfo=UTC)
@@ -42,7 +46,7 @@ def _snapshot(*, q50_delta: float = 0.0) -> dict[str, object]:
         week=1,
         checkpoint="WEDNESDAY",
         prediction_cutoff=cutoff,
-        captured_at=cutoff + timedelta(minutes=5),
+        captured_at=cutoff + timedelta(minutes=captured_minutes),
         league_key="sleeper:test",
         sources=[
             {
@@ -56,8 +60,19 @@ def _snapshot(*, q50_delta: float = 0.0) -> dict[str, object]:
     )
 
 
-def test_snapshot_rejects_future_source_and_hindsight_decision_context() -> None:
+def test_snapshot_rejects_untimed_future_and_hindsight_inputs() -> None:
     cutoff = datetime(2026, 9, 9, 18, 0, tzinfo=UTC)
+    with pytest.raises(ValueError, match="missing available_at"):
+        build_shadow_snapshot(
+            _production(),
+            season=2026,
+            week=1,
+            checkpoint="WEDNESDAY",
+            prediction_cutoff=cutoff,
+            captured_at=cutoff + timedelta(minutes=1),
+            sources=[{"name": "untimed_news"}],
+        )
+
     with pytest.raises(ValueError, match="became available after prediction cutoff"):
         build_shadow_snapshot(
             _production(),
@@ -86,13 +101,20 @@ def test_snapshot_rejects_future_source_and_hindsight_decision_context() -> None
         )
 
 
-def test_snapshot_store_is_idempotent_and_conflicts_fail_closed(tmp_path) -> None:
+def test_snapshot_store_is_retry_idempotent_and_conflicts_fail_closed(tmp_path) -> None:
     store = ShadowSeasonStore(tmp_path)
-    snapshot = _snapshot()
+    snapshot = _snapshot(captured_minutes=5)
     assert store.save_snapshot(snapshot) is True
     assert store.save_snapshot(snapshot) is False
 
-    changed = _snapshot(q50_delta=0.5)
+    retry = _snapshot(captured_minutes=6)
+    assert retry["snapshot_id"] == snapshot["snapshot_id"]
+    assert retry["content_sha256"] != snapshot["content_sha256"]
+    assert store.save_snapshot(retry) is False
+    persisted = store.load_snapshot(str(snapshot["snapshot_id"]))
+    assert persisted["captured_at"] == snapshot["captured_at"]
+
+    changed = _snapshot(q50_delta=0.5, captured_minutes=7)
     assert changed["snapshot_id"] == snapshot["snapshot_id"]
     assert changed["content_sha256"] != snapshot["content_sha256"]
     with pytest.raises(ValueError, match="Immutable shadow checkpoint conflict"):
@@ -157,17 +179,35 @@ def test_settlement_is_append_only_companion_and_summary_is_calibrated(tmp_path)
     assert store.save_snapshot(snapshot) is True
 
     actuals = pd.DataFrame({"player_id": ["p1", "p2"], "actual": [14.0, 8.0]})
-    settlement = build_shadow_settlement(snapshot, actuals)
+    settlement = build_shadow_settlement(
+        snapshot,
+        actuals,
+        settled_at=cutoff + timedelta(days=5),
+    )
     assert settlement["snapshot_content_sha256"] == original_digest
     assert settlement["metrics"]["production"]["n"] == 2
     assert settlement["metrics"]["production"]["q50_mae"] == pytest.approx(2.0)
     assert settlement["metrics"]["challenger"]["n"] == 2
     assert store.save_settlement(settlement) is True
     assert store.save_settlement(settlement) is False
+
+    settlement_retry = build_shadow_settlement(
+        snapshot,
+        actuals,
+        settled_at=cutoff + timedelta(days=5, minutes=10),
+    )
+    assert settlement_retry["content_sha256"] != settlement["content_sha256"]
+    assert store.save_settlement(settlement_retry) is False
+    persisted_settlement = store.load_settlement(str(snapshot["snapshot_id"]))
+    assert persisted_settlement["settled_at"] == settlement["settled_at"]
     assert store.load_snapshot(str(snapshot["snapshot_id"]))["content_sha256"] == original_digest
 
     changed_actuals = pd.DataFrame({"player_id": ["p1", "p2"], "actual": [30.0, 8.0]})
-    changed_settlement = build_shadow_settlement(snapshot, changed_actuals)
+    changed_settlement = build_shadow_settlement(
+        snapshot,
+        changed_actuals,
+        settled_at=cutoff + timedelta(days=6),
+    )
     with pytest.raises(ValueError, match="Immutable shadow settlement conflict"):
         store.save_settlement(changed_settlement)
 
