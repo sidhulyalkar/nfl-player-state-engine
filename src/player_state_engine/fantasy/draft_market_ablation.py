@@ -47,6 +47,12 @@ def prepare_supply_features(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _validate_supply_support(train: pd.DataFrame, test: pd.DataFrame) -> None:
+    missing = sorted(
+        (set(SUPPLY_FEATURES) - set(train.columns))
+        | (set(SUPPLY_FEATURES) - set(test.columns))
+    )
+    if missing:
+        raise ValueError(f"Supply ablation requires timestamp-safe market fields: {missing}")
     for name in SUPPLY_FEATURES:
         train_values = pd.to_numeric(train[name], errors="coerce")
         test_values = pd.to_numeric(test[name], errors="coerce")
