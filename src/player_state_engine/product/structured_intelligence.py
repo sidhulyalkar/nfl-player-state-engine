@@ -9,6 +9,7 @@ import pandas as pd
 from player_state_engine.intelligence.activation import IntelligenceActivationRegistry
 from player_state_engine.intelligence.structured import (
     ClaimDomain,
+    StructuredClaim,
     StructuredClaimLedger,
     build_state_evidence_snapshots,
     effective_claims_as_of,
@@ -24,6 +25,15 @@ def _utc(value: datetime | str | pd.Timestamp | None) -> datetime:
     if timestamp.tzinfo is None:
         raise ValueError("as_of timestamp must include a timezone")
     return timestamp.tz_convert("UTC").to_pydatetime()
+
+
+def _filter_domain(
+    claims: list[StructuredClaim],
+    domain: ClaimDomain | None,
+) -> list[StructuredClaim]:
+    if domain is None:
+        return claims
+    return [claim for claim in claims if claim.domain == domain]
 
 
 class StructuredIntelligenceArtifactStore:
@@ -101,30 +111,32 @@ class StructuredIntelligenceArtifactStore:
                 "reason": "structured_intelligence_integrity_failure",
                 "states": [],
             }
-        claims = self.ledger.claims(
-            as_of_utc=as_of,
-            player_id=player_id,
-            domain=domain,
+
+        all_claims = self.ledger.claims(as_of_utc=as_of, player_id=player_id)
+        visible_claims = _filter_domain(all_claims, domain)
+        effective_claims = effective_claims_as_of(all_claims, as_of_utc=as_of)
+        visible_effective_claims = _filter_domain(effective_claims, domain)
+        states = build_state_evidence_snapshots(visible_effective_claims, as_of_utc=as_of)
+        records = (
+            json.loads(states.to_json(orient="records", date_format="iso"))
+            if not states.empty
+            else []
         )
-        states = build_state_evidence_snapshots(claims, as_of_utc=as_of)
-        if player_id is not None and not states.empty:
-            states = states.loc[states["player_id"].astype(str).eq(str(player_id))].copy()
-        records = json.loads(states.to_json(orient="records", date_format="iso")) if not states.empty else []
         conflict_values = (
             pd.to_numeric(states["conflict_score"], errors="coerce")
             if "conflict_score" in states
             else pd.Series(dtype=float)
         )
         return {
-            "data_mode": "STRUCTURED_EVIDENCE" if claims else "UNAVAILABLE",
+            "data_mode": "STRUCTURED_EVIDENCE" if visible_claims else "UNAVAILABLE",
             "authority": "research_evidence_only",
             "automatic_promotion": False,
             "as_of_utc": as_of.isoformat(),
             "filters": {"player_id": player_id, "domain": domain},
             "health": health,
             "activation": health.get("activation"),
-            "claim_count": len(claims),
-            "effective_claim_count": len(effective_claims_as_of(claims, as_of_utc=as_of)),
+            "claim_count": len(visible_claims),
+            "effective_claim_count": len(visible_effective_claims),
             "state_count": len(records),
             "summary": {
                 "mean_conflict_score": (
@@ -159,18 +171,16 @@ class StructuredIntelligenceArtifactStore:
                 "health": health,
                 "claims": [],
             }
-        claims = self.ledger.claims(
-            as_of_utc=as_of,
-            player_id=player_id,
-            domain=domain,
-        )
+
+        all_claims = self.ledger.claims(as_of_utc=as_of, player_id=player_id)
+        visible_claims = _filter_domain(all_claims, domain)
         ordered = sorted(
-            claims,
+            visible_claims,
             key=lambda claim: (claim.available_at_utc, claim.claim_id),
             reverse=True,
         )
         effective_ids = {
-            claim.claim_id for claim in effective_claims_as_of(claims, as_of_utc=as_of)
+            claim.claim_id for claim in effective_claims_as_of(all_claims, as_of_utc=as_of)
         }
         records = []
         for claim in ordered[:limit]:
@@ -178,12 +188,12 @@ class StructuredIntelligenceArtifactStore:
             record["effective_at_cutoff"] = claim.claim_id in effective_ids
             records.append(record)
         return {
-            "data_mode": "STRUCTURED_EVIDENCE" if claims else "UNAVAILABLE",
+            "data_mode": "STRUCTURED_EVIDENCE" if visible_claims else "UNAVAILABLE",
             "authority": "research_evidence_only",
             "automatic_promotion": False,
             "as_of_utc": as_of.isoformat(),
             "filters": {"player_id": player_id, "domain": domain},
-            "total_matches": len(claims),
+            "total_matches": len(visible_claims),
             "returned": len(records),
             "health": health,
             "claims": records,
