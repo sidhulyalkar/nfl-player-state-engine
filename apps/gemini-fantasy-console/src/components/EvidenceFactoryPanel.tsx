@@ -1,0 +1,89 @@
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle2, Database, FlaskConical, ShieldCheck } from 'lucide-react';
+import type { EvidenceFactoryResponse, EvidencePairComparisonRow } from '../lib/evidenceTypes';
+import { api } from '../lib/api';
+
+function metric(value: number | null | undefined, digits = 3) {
+  return value == null || !Number.isFinite(value) ? '—' : value.toFixed(digits);
+}
+
+function pct(value: number | null | undefined, digits = 1) {
+  return value == null || !Number.isFinite(value) ? '—' : `${(value * 100).toFixed(digits)}%`;
+}
+
+function blockers(row: EvidencePairComparisonRow) {
+  if (!row.blockers) return [];
+  return row.blockers.split('|').filter(Boolean);
+}
+
+export function EvidenceFactoryPanel() {
+  const [payload, setPayload] = useState<EvidenceFactoryResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    api.evidenceFactory().then((result) => {
+      if (!active) return;
+      setPayload(result);
+      setError(null);
+    }).catch((reason) => {
+      if (!active) return;
+      setError(reason instanceof Error ? reason.message : 'Evidence Factory unavailable.');
+    });
+    return () => { active = false; };
+  }, []);
+
+  const comparisons = payload?.paired_comparisons ?? [];
+  const sorted = useMemo(
+    () => [...comparisons].sort(
+      (a, b) => b.pinball_effect_champion_minus_challenger - a.pinball_effect_champion_minus_challenger,
+    ),
+    [comparisons],
+  );
+  const best = sorted[0];
+  const eligible = comparisons.filter((row) => row.promotion_status === 'eligible').length;
+  const graphStatus = payload?.manifest?.graph;
+  const graphIncluded = Boolean(graphStatus && graphStatus.included === true);
+
+  if (error) {
+    return <section className="panel observatory-error wide"><AlertTriangle size={18}/><div><strong>Evidence Factory unavailable.</strong><span>{error}</span></div></section>;
+  }
+
+  if (!payload) {
+    return <section className="panel shadow-evaluation-panel wide"><Database size={18}/><div><span className="eyebrow">Evidence Factory</span><h2>Loading frozen model ledger</h2><p>Reading canonical player-week comparisons and promotion blockers.</p></div></section>;
+  }
+
+  if (payload.data_mode === 'UNAVAILABLE') {
+    return <section className="panel shadow-evaluation-panel wide unavailable"><AlertTriangle size={19}/><div><span className="eyebrow">Evidence Factory</span><h2>No frozen evidence bundle mounted</h2><p>Run <code>scripts/run_evidence_factory.py</code> and mount its artifact directory. The product will not invent comparison results.</p></div></section>;
+  }
+
+  return <section className="panel shadow-evaluation-panel wide evidence-factory-panel">
+    <div className="panel-heading">
+      <div><span className="eyebrow">Evidence Factory · fantasy points PPR</span><h2>One scoreboard for every model family</h2><p>All effects are paired on identical frozen player-weeks. Positive pinball effect favors the challenger, but promotion remains fail closed.</p></div>
+      <span className="promotion-state blocked"><ShieldCheck size={16}/> RESEARCH EVIDENCE ONLY</span>
+    </div>
+
+    <div className="shadow-eval-metrics">
+      <article><span>Methods</span><strong>{payload.method_summary?.length ?? 0}</strong><small>same metric contract</small></article>
+      <article><span>Paired challengers</span><strong>{comparisons.length}</strong><small>vs quantile engine</small></article>
+      <article className={best && best.pinball_effect_champion_minus_challenger > 0 ? 'positive' : ''}><span>Best paired effect</span><strong>{metric(best?.pinball_effect_champion_minus_challenger)}</strong><small>{best?.challenger?.replaceAll('_', ' ') ?? 'no challenger mounted'}</small></article>
+      <article><span>Promotion eligible</span><strong>{eligible}</strong><small>normally zero at isolated tier</small></article>
+      <article><span>Artifact health</span><strong>{payload.health.available_count}/{payload.health.expected_count}</strong><small>{payload.health.available ? 'complete bundle' : `${payload.health.missing.length} missing`}</small></article>
+      <article><span>Graph comparison</span><strong>{graphIncluded ? 'INCLUDED' : 'GUARDED'}</strong><small>{graphIncluded ? 'exact PPR contract' : 'missing or scoring mismatch'}</small></article>
+    </div>
+
+    <div className="shadow-eval-bottom">
+      <div className="shadow-eval-compare"><FlaskConical size={18}/><div><strong>Frozen identity contract</strong><span>Target + method + player + season + week must be unique. Realized outcomes must agree before pairing.</span></div><div><strong>Run provenance</strong><span>{payload.manifest?.git_sha ? `Git ${payload.manifest.git_sha.slice(0, 12)}` : 'Git SHA unavailable'} · SHA-256 inputs recorded in the manifest</span></div></div>
+      <div className="blocker-panel"><strong>Promotion contract</strong><p>{payload.promotion?.note ?? 'Historical comparison is evidence, not production authority.'}</p></div>
+    </div>
+
+    {sorted.length > 0 && <div className="evidence-comparison-list">
+      {sorted.map((row) => <article className="shadow-eval-compare" key={row.experiment_id}>
+        <div><strong>{row.challenger.replaceAll('_', ' ')}</strong><span>{row.paired_rows} paired rows · {row.paired_seasons} seasons · overlap {pct(row.overlap_rate)}</span></div>
+        <div><strong>Effect {metric(row.pinball_effect_champion_minus_challenger)}</strong><span>CI {metric(row.ci_low)} to {metric(row.ci_high)} · improve {pct(row.probability_improves)}</span></div>
+        <div><strong>Coverage {pct(row.challenger_80_coverage)}</strong><span>MAE {metric(row.challenger_q50_mae, 2)} · width {metric(row.challenger_mean_width_80, 2)}</span></div>
+        <div className="blocker-panel"><strong>{row.promotion_status === 'eligible' ? <><CheckCircle2 size={14}/> Eligible</> : 'Blocked'}</strong><div>{blockers(row).slice(0, 4).map((blocker) => <span key={blocker}>{blocker.replaceAll('_', ' ')}</span>)}</div></div>
+      </article>)}
+    </div>}
+  </section>;
+}
