@@ -5,7 +5,7 @@ import hashlib
 import json
 import os
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -30,6 +30,21 @@ DEFAULT_TARGETS = (
     "receiving_yards",
     "rushing_yards",
     "passing_yards",
+)
+NEGATIVE_CONTROL_COLUMNS = (
+    "target",
+    "method",
+    "control_method",
+    "rows",
+    "singleton_groups",
+    "groups",
+    "real_mean_pinball",
+    "control_mean_pinball",
+    "effect_control_minus_real",
+    "ci_low",
+    "ci_high",
+    "probability_real_improves",
+    "passed",
 )
 
 
@@ -160,7 +175,8 @@ def _negative_controls_for_target(
     methods = sorted(set(combined["method"].astype(str)))
     rows: list[dict[str, object]] = []
     passed: set[str] = set()
-    for offset, method in enumerate(method for method in methods if method != champion_method):
+    challengers = [method for method in methods if method != champion_method]
+    for offset, method in enumerate(challengers):
         control, diagnostics = identity_permutation_control(
             combined,
             method=method,
@@ -180,7 +196,7 @@ def _negative_controls_for_target(
         rows.append({"target": target, **result.to_dict()})
         if result.passed:
             passed.add(method)
-    return pd.DataFrame(rows), passed
+    return pd.DataFrame(rows, columns=NEGATIVE_CONTROL_COLUMNS), passed
 
 
 def build_run_bundle(
@@ -239,7 +255,7 @@ def build_run_bundle(
     negative_controls = (
         pd.concat(negative_control_frames, ignore_index=True)
         if negative_control_frames
-        else pd.DataFrame()
+        else pd.DataFrame(columns=NEGATIVE_CONTROL_COLUMNS)
     )
     return combined_bundle, negative_controls, input_records, graph_status
 
@@ -347,7 +363,7 @@ def run(args: argparse.Namespace) -> None:
 
     manifest = {
         "schema_version": 2,
-        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "created_at_utc": datetime.now(UTC).isoformat(),
         "authority": "research_evidence_only",
         "git_sha": git_sha(),
         "champion_method": args.champion_method,
