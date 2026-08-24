@@ -125,7 +125,7 @@ The primary effect is:
 champion mean pinball - challenger mean pinball
 ```
 
-Positive values favor the challenger.
+Positive values favor the challenger **within that target**. Raw effect magnitudes are not comparable across targets with different units or scales. The Product UI therefore does not rank fantasy-point, carry, target, reception, or yardage effects against one another.
 
 Uncertainty is estimated with the existing paired season/week block bootstrap. Blocks are sampled as sums and counts so the bootstrap targets the same row-weighted estimand as the headline effect.
 
@@ -334,8 +334,8 @@ When the artifacts are missing, the endpoint returns `UNAVAILABLE` instead of fa
 
 The React Model Observatory reads the same read-only API. Its Evidence Factory panel shows:
 
-- method and challenger counts;
-- best paired effect;
+- distinct method and paired-challenger counts;
+- number of target-local pairs with positive effect direction, without ranking raw effect magnitudes across target units;
 - identity-control pass count;
 - target champion count;
 - artifact health;
@@ -343,13 +343,13 @@ The React Model Observatory reads the same read-only API. Its Evidence Factory p
 - graph scoring guard status;
 - challenger and actual target champion;
 - paired effect and confidence interval;
-- Benjamini-Hochberg q-value;
+- finite-sample p-value and Benjamini-Hochberg q-value;
 - paired data availability;
 - calibration and sharpness;
 - identity-control pass/fail;
 - promotion blockers.
 
-The UI cannot promote a model or substitute browser-side calculations for the Python evidence ledger.
+The UI orders comparisons deterministically by target and method. It cannot promote a model, rank incompatible target units, or substitute browser-side calculations for the Python evidence ledger.
 
 ## CI artifact smoke
 
