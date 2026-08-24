@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -46,6 +46,14 @@ class FeatureActivation(BaseModel):
     automatic_promotion: bool = False
     metadata: dict[str, object] = Field(default_factory=dict)
 
+    @field_validator("evidence_tier", "experiment_id", "approved_by", "note", mode="before")
+    @classmethod
+    def normalize_optional_text(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        cleaned = " ".join(str(value).split())
+        return cleaned or None
+
     @field_validator("approved_at_utc", mode="before")
     @classmethod
     def normalize_approved_at(cls, value: object) -> datetime | None:
@@ -76,6 +84,13 @@ class IntelligenceActivationRegistry:
 
     def __init__(self, entries: list[FeatureActivation] | None = None) -> None:
         supplied = entries or []
+        families = [entry.family for entry in supplied]
+        duplicates = sorted({family for family in families if families.count(family) > 1})
+        if duplicates:
+            raise ValueError(
+                "duplicate intelligence activation families are not allowed: "
+                + ", ".join(duplicates)
+            )
         by_family = {entry.family: entry for entry in supplied}
         self.entries: dict[FeatureFamily, FeatureActivation] = {
             family: by_family.get(family, FeatureActivation(family=family))
