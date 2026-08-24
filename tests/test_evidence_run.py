@@ -8,6 +8,7 @@ import pytest
 from player_state_engine.evaluation.evidence_factory import EvidenceBundle
 from player_state_engine.evaluation.evidence_run import (
     DEFAULT_CHAMPION_OVERRIDES,
+    _finite_bootstrap_p_value,
     apply_run_fdr,
     build_run_bundle,
     parse_champion_overrides,
@@ -70,6 +71,13 @@ def test_explicit_champion_override_extends_defaults() -> None:
 def test_invalid_champion_override_fails_closed() -> None:
     with pytest.raises(ValueError, match="expected TARGET=METHOD"):
         parse_champion_overrides(["carries"])
+
+
+def test_finite_bootstrap_p_value_never_publishes_zero() -> None:
+    assert _finite_bootstrap_p_value(0.0, 200) == pytest.approx(1 / 201)
+    assert _finite_bootstrap_p_value(0.10, 100) == pytest.approx(11 / 101)
+    assert _finite_bootstrap_p_value(0.10, None) == pytest.approx(0.10)
+    assert _finite_bootstrap_p_value(float("nan"), 100) is None
 
 
 def test_run_wide_fdr_overrides_target_local_q_values() -> None:
@@ -155,4 +163,5 @@ def test_run_bundle_uses_position_specific_carries_as_champion(tmp_path: Path) -
     assert set(bundle.experiment_ledger["champion"]) == {"position_specific_quantile"}
     assert set(controls["method"]) == {"position_prior", "quantile_engine", "rolling_5"}
     assert bundle.paired_comparisons["fdr_q_value"].notna().all()
+    assert (bundle.paired_comparisons["p_value"] > 0.0).all()
     assert graph_status["included"] is False
