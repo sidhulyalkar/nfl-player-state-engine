@@ -58,6 +58,22 @@ export interface EvidenceExperimentRow {
   blockers: string | string[];
 }
 
+export interface EvidenceNegativeControlRow {
+  target: string;
+  method: string;
+  control_method: string;
+  rows: number;
+  singleton_groups: number;
+  groups: number;
+  real_mean_pinball: number;
+  control_mean_pinball: number;
+  effect_control_minus_real: number;
+  ci_low: number | null;
+  ci_high: number | null;
+  probability_real_improves: number | null;
+  passed: boolean;
+}
+
 export interface EvidenceFactoryResponse {
   data_mode: string;
   authority: string;
@@ -77,11 +93,13 @@ export interface EvidenceFactoryResponse {
     targets?: string[];
     created_at_utc?: string;
     graph?: Record<string, unknown>;
+    negative_control?: Record<string, unknown>;
   } | null;
   method_summary?: EvidenceMethodSummaryRow[];
   slice_metrics?: Array<Record<string, string | number | boolean | null>>;
   paired_comparisons?: EvidencePairComparisonRow[];
   experiment_ledger?: EvidenceExperimentRow[];
+  negative_controls?: EvidenceNegativeControlRow[];
   promotion?: {
     automatic: boolean;
     production_champion: string;
