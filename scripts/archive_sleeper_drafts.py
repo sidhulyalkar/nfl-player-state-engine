@@ -25,6 +25,14 @@ def main() -> None:
         action="store_true",
         help="Archive pre_draft/drafting rooms too. Completed drafts are the default evidence set.",
     )
+    parser.add_argument(
+        "--include-mocks",
+        action="store_true",
+        help=(
+            "Archive drafts without a league_id. Mock rooms are excluded by default because their "
+            "behavior may not transfer to real league drafts."
+        ),
+    )
     args = parser.parse_args()
 
     client = SleeperDraftClient()
@@ -46,7 +54,18 @@ def main() -> None:
                     {"season": int(season), "draft_id": draft_id, "reason": f"status:{status}"}
                 )
                 continue
+            if listed.get("league_id") in {None, ""} and not args.include_mocks:
+                skipped.append(
+                    {"season": int(season), "draft_id": draft_id, "reason": "mock_or_unlinked"}
+                )
+                continue
+
             draft = client.get_draft(draft_id)
+            if draft.get("league_id") in {None, ""} and not args.include_mocks:
+                skipped.append(
+                    {"season": int(season), "draft_id": draft_id, "reason": "mock_or_unlinked"}
+                )
+                continue
             picks = client.get_draft_picks(draft_id)
             traded = client.get_draft_traded_picks(draft_id)
             manifest = archive_sleeper_draft(
@@ -67,6 +86,7 @@ def main() -> None:
                     "draft_id": manifest.get("draft_id"),
                     "league_id": manifest.get("league_id"),
                     "status": manifest.get("status"),
+                    "draft_type": manifest.get("draft_type"),
                     "draft_started_at": manifest.get("draft_started_at"),
                 }
             )
@@ -79,6 +99,8 @@ def main() -> None:
         "requested_seasons": sorted(set(args.seasons)),
         "retrieved_at": retrieved_at.isoformat(),
         "output_root": str(args.output_root),
+        "include_incomplete": bool(args.include_incomplete),
+        "include_mocks": bool(args.include_mocks),
         "archived_drafts": archived,
         "skipped_drafts": skipped,
     }
