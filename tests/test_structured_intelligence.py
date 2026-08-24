@@ -253,6 +253,27 @@ def test_enabled_family_requires_manual_evidence_metadata() -> None:
     assert output.loc[0, "intelligence_feature_family"] == "structured_news"
 
 
+def test_enabled_family_rejects_whitespace_only_authority_metadata() -> None:
+    with pytest.raises(ValueError, match="manual evidence metadata"):
+        FeatureActivation(
+            family="structured_news",
+            status="enabled",
+            evidence_tier="   ",
+            experiment_id=" \n ",
+            approved_by="  ",
+            approved_at_utc=datetime(2026, 10, 1, tzinfo=UTC),
+        )
+
+
+def test_activation_registry_rejects_duplicate_family_entries() -> None:
+    entries = [
+        FeatureActivation(family="structured_news", status="disabled"),
+        FeatureActivation(family="structured_news", status="shadow"),
+    ]
+    with pytest.raises(ValueError, match="duplicate intelligence activation families"):
+        IntelligenceActivationRegistry(entries)
+
+
 def test_automatic_intelligence_promotion_is_forbidden() -> None:
     with pytest.raises(ValueError, match="cannot be promoted automatically"):
         FeatureActivation(
