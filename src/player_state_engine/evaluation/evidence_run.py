@@ -532,8 +532,8 @@ def run(args: argparse.Namespace) -> None:
             "maximum_fdr_q": 0.10,
         },
         "negative_control": {
-            "type": "within_season_position_identity_permutation",
-            "pass_rule": "real forecast beats identity-permuted control with paired 95% CI above zero",
+            "type": "within_season_week_position_identity_permutation",
+            "pass_rule": "real forecast beats same-week identity-permuted control with paired 95% CI above zero",
         },
         "inputs": input_records,
         "graph": graph_status,
