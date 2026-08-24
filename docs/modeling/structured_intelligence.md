@@ -2,13 +2,13 @@
 
 ## Purpose
 
-Structured Intelligence turns public football information into timestamped, auditable evidence without granting narrative text direct authority over production forecasts.
+Structured Intelligence turns football information into timestamped, auditable evidence without granting narrative text or official status feeds direct authority over production forecasts.
 
 The repository already contains collectors and conservative extractors for official availability, structured news, and public player context. This layer defines the missing contract between extraction and modeling:
 
 ```text
-public document
-  -> typed extracted claim
+official event / public document
+  -> typed source evidence
   -> canonical provenance-preserving claim
   -> immutable claim ledger
   -> point-in-time evidence resolution
@@ -30,7 +30,7 @@ The activation registry is fail-closed:
 - `shadow`: the family may participate in frozen experiments or live shadow evaluation, but cannot affect production decisions;
 - `enabled`: requires explicit experiment, evidence-tier, reviewer, and approval-time metadata.
 
-Automatic promotion is forbidden.
+Automatic promotion is forbidden. Duplicate family declarations are rejected, and whitespace-only approval metadata does not satisfy the enablement contract.
 
 ## Canonical claim
 
@@ -75,7 +75,7 @@ All timestamps are normalized to UTC.
 
 ### Availability basis
 
-A claim can use one of two explicit point-in-time conventions:
+Public-document claims can use one of two explicit point-in-time conventions:
 
 `collected`
 : The claim becomes usable when this system actually collected it. This is the conservative live default.
@@ -85,9 +85,29 @@ A claim can use one of two explicit point-in-time conventions:
 
 The basis is stored in every claim. The code never silently substitutes published time for collection time.
 
+Normalized official availability evidence uses its `observed_at_utc` timestamp as the authored, collected, and available timestamp. The manifest records this source-family convention separately from public-document availability.
+
+## Stage 1 official availability adapter
+
+`OfficialAvailabilityEvidence` already represents first-party evidence for:
+
+- practice participation;
+- game designation;
+- inactive list;
+- injured reserve and PUP;
+- transactions;
+- depth-chart role;
+- explicit coach workload expectations.
+
+`official_claims.py` converts these rows into the same canonical `StructuredClaim` contract used by structured news.
+
+Official claims retain `OFFICIAL` evidence class but are still evidence rather than guaranteed outcomes. An official `out` or inactive designation is a strong availability claim; a depth-chart event maps to role evidence; an explicit workload fraction maps to opportunity evidence.
+
+Blank official evidence IDs fail closed so malformed first-party rows cannot collide under deterministic claim IDs.
+
 ## Evidence classes
 
-The canonical layer preserves the existing news hierarchy:
+The canonical layer preserves the existing hierarchy:
 
 1. `OFFICIAL`
 2. `DIRECT_OBSERVATION`
@@ -157,27 +177,31 @@ artifacts/structured_intelligence/
   run_manifest.json
 ```
 
-## Structured news operator
+## Unified operator
 
-Build the canonical structured-news ledger from an archived `PublicDocument` JSONL file:
+Build one canonical ledger from archived public documents, normalized official evidence, or both:
 
 ```bash
 python scripts/build_structured_intelligence_ledger.py \
   --documents data/external/intelligence/documents.jsonl \
+  --official-evidence data/processed/official_availability.parquet \
   --as-of 2026-09-09T18:00:00Z \
   --availability-basis collected \
   --output-root artifacts/structured_intelligence
 ```
 
+At least one input family is required.
+
 The operator:
 
-1. hashes the source document archive;
-2. runs the existing conservative news extractor;
-3. converts extracted `NewsClaim` objects into canonical structured claims;
-4. persists claims immutably;
-5. resolves only claims available at the requested cutoff;
-6. writes an evidence snapshot;
-7. records ledger health and activation state in `run_manifest.json`.
+1. hashes every supplied input artifact;
+2. runs the existing conservative news extractor for public documents;
+3. canonicalizes Stage 1 official availability events;
+4. converts all evidence into the shared structured claim ledger;
+5. persists claims immutably;
+6. resolves only claims available at the requested cutoff;
+7. writes a combined evidence snapshot;
+8. records per-family input hashes, availability conventions, claim counts, ledger health, and activation state in `run_manifest.json`.
 
 It never enables an intelligence feature family.
 
@@ -201,7 +225,25 @@ An `enabled` family must provide:
 - manual approver identity/label;
 - approval timestamp.
 
+Duplicate family records are rejected rather than resolved by last-write-wins behavior.
+
 This metadata proves that activation was deliberate. It does not prove the experiment was scientifically correct, so promotion decisions must still follow the repository's frozen evaluation protocol.
+
+## Read-only API
+
+The operational app exposes:
+
+```text
+GET /v1/model/structured-intelligence
+GET /v1/model/structured-intelligence/health
+GET /v1/model/structured-intelligence/claims
+```
+
+The summary endpoint supports explicit `as_of`, `player_id`, and typed `domain` filters. It reports resolved state evidence, contradiction summaries, ledger health, and activation state.
+
+The claims endpoint exposes eligible canonical claims and marks whether each claim is effective at the requested cutoff after correction/retraction semantics.
+
+There is intentionally no write, correction, or activation HTTP route. Those operations remain explicit research/operator workflows.
 
 ## Relationship to the 2026 Shadow Season
 
@@ -217,7 +259,7 @@ structured claim available before cutoff
   -> realized outcome settlement later
 ```
 
-No source published or collected after the prediction cutoff may be backfilled into the checkpoint.
+No source published, observed, or collected after the prediction cutoff may be backfilled into the checkpoint.
 
 ## Required experiments before activation
 
@@ -257,6 +299,6 @@ This layer does not:
 - overwrite historical claims after corrections;
 - promote a feature because it improves one aggregate metric;
 - bypass the Evidence Factory or 2026 live shadow protocol;
-- give narrative evidence direct production authority.
+- give narrative or official evidence direct production authority.
 
 Its job is narrower: make football information testable, timestamped, reversible through explicit corrections, and scientifically accountable.
