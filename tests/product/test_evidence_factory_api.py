@@ -107,9 +107,13 @@ def _write_artifacts(root: Path) -> Path:
     (root / "run_manifest.json").write_text(
         json.dumps(
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "authority": "research_evidence_only",
-                "champion_method": "quantile_engine",
+                "default_champion_method": "quantile_engine",
+                "champion_methods": {
+                    "fantasy_points_ppr": "quantile_engine",
+                    "carries": "position_specific_quantile",
+                },
                 "git_sha": "abc123",
             }
         ),
@@ -137,6 +141,9 @@ def test_evidence_artifact_store_exposes_health_and_fail_closed_authority(tmp_pa
     assert len(payload["negative_controls"]) == 1
     assert payload["negative_controls"][0]["passed"] is True
     assert payload["promotion"]["automatic"] is False
+    assert payload["promotion"]["production_champion"] == "target_aware_direct_quantile_stack"
+    assert payload["promotion"]["default_champion_method"] == "quantile_engine"
+    assert payload["promotion"]["champion_methods"]["carries"] == "position_specific_quantile"
 
 
 def test_evidence_factory_route_filters_targets(tmp_path: Path) -> None:
@@ -155,6 +162,7 @@ def test_evidence_factory_route_filters_targets(tmp_path: Path) -> None:
     assert payload["paired_comparisons"] == []
     assert payload["experiment_ledger"] == []
     assert payload["negative_controls"] == []
+    assert payload["promotion"]["champion_methods"]["carries"] == "position_specific_quantile"
 
 
 def test_evidence_factory_route_reports_unavailable_without_fabricating_results(tmp_path: Path) -> None:
