@@ -102,6 +102,23 @@ class EvidenceArtifactStore:
                 ]
 
         manifest = self._manifest()
+        champion_methods: dict[str, str] = {}
+        default_champion_method = "quantile_engine"
+        if manifest is not None:
+            raw_champions = manifest.get("champion_methods")
+            if isinstance(raw_champions, dict):
+                champion_methods = {
+                    str(key): str(value)
+                    for key, value in raw_champions.items()
+                    if str(key).strip() and str(value).strip()
+                }
+            raw_default = manifest.get(
+                "default_champion_method",
+                manifest.get("champion_method", default_champion_method),
+            )
+            if raw_default is not None and str(raw_default).strip():
+                default_champion_method = str(raw_default)
+
         return {
             "data_mode": "HISTORICAL_BACKTEST",
             "authority": "research_evidence_only",
@@ -115,10 +132,13 @@ class EvidenceArtifactStore:
             "negative_controls": frame_records(negative_controls),
             "promotion": {
                 "automatic": False,
-                "production_champion": "direct_player_quantile_model",
+                "production_champion": "target_aware_direct_quantile_stack",
+                "default_champion_method": default_champion_method,
+                "champion_methods": champion_methods,
                 "note": (
                     "Evidence Factory outputs summarize frozen comparisons. They do not change model "
-                    "authority without the configured promotion evidence gates."
+                    "authority without the configured promotion evidence gates. Production authority "
+                    "is resolved per target from the run manifest."
                 ),
             },
         }
