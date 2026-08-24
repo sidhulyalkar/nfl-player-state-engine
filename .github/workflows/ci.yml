@@ -37,6 +37,30 @@ jobs:
             scripts/run_evidence_factory.py
       - name: Compile Python sources and all scripts
         run: python -m compileall -q src scripts tests
+      - name: Smoke Evidence Factory against frozen benchmark artifacts
+        run: |
+          python scripts/run_evidence_factory.py \
+            --targets fantasy_points_ppr carries \
+            --bootstrap-samples 200 \
+            --output-dir /tmp/evidence_factory_smoke
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          import pandas as pd
+
+          root = Path('/tmp/evidence_factory_smoke')
+          manifest = json.loads((root / 'run_manifest.json').read_text(encoding='utf-8'))
+          comparisons = pd.read_csv(root / 'paired_comparisons.csv')
+          assert manifest['authority'] == 'research_evidence_only'
+          assert manifest['promotion']['automatic'] is False
+          assert manifest['champion_methods']['fantasy_points_ppr'] == 'quantile_engine'
+          assert manifest['champion_methods']['carries'] == 'position_specific_quantile'
+          assert set(comparisons.loc[comparisons['target'].eq('carries'), 'champion']) == {
+              'position_specific_quantile'
+          }
+          assert comparisons['fdr_q_value'].notna().all()
+          PY
       - run: pytest
 
   frontend:
