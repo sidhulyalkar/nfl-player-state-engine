@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 import numpy as np
 import pandas as pd
@@ -17,7 +17,6 @@ from player_state_engine.state_graph.experiments import (
 
 CANONICAL_KEYS = ("target", "method", "player_id", "season", "week")
 PAIR_KEYS = ("target", "player_id", "season", "week")
-QUANTILES = (0.10, 0.50, 0.90)
 
 
 @dataclass(slots=True)
@@ -43,6 +42,16 @@ def _column_for_quantile(frame: pd.DataFrame, target: str, quantile: int) -> str
     )
 
 
+def _canonical_identity_column(frame: pd.DataFrame, column: str) -> pd.Series:
+    values = pd.to_numeric(frame[column], errors="coerce")
+    numeric = values.to_numpy(dtype=float)
+    if not bool(np.isfinite(numeric).all()):
+        raise ValueError(f"Prediction artifact has non-finite {column} identity values")
+    if not bool(np.equal(numeric, np.floor(numeric)).all()):
+        raise ValueError(f"Prediction artifact has non-integer {column} identity values")
+    return values.astype("Int64")
+
+
 def canonicalize_predictions(
     frame: pd.DataFrame,
     *,
@@ -66,6 +75,12 @@ def canonicalize_predictions(
         raise ValueError(f"Prediction artifact missing actual outcome column: {actual_column}")
     if method is None and "method" not in frame:
         raise ValueError("Prediction artifact needs a method column or an explicit method override")
+    if not str(target).strip():
+        raise ValueError("Prediction target cannot be blank")
+
+    raw_player_ids = frame["player_id"]
+    if bool(raw_player_ids.isna().any()) or bool(raw_player_ids.astype(str).str.strip().eq("").any()):
+        raise ValueError("Prediction artifact has missing player_id identity values")
 
     q10_column = _column_for_quantile(frame, target, 10)
     q50_column = _column_for_quantile(frame, target, 50)
@@ -74,10 +89,12 @@ def canonicalize_predictions(
     output = pd.DataFrame(index=frame.index)
     output["target"] = str(target)
     output["method"] = str(method) if method is not None else frame["method"].astype(str)
+    if bool(output["method"].str.strip().isin({"", "nan", "None", "<NA>"}).any()):
+        raise ValueError("Prediction artifact has missing method identity values")
     output["source"] = str(source)
-    output["player_id"] = frame["player_id"].astype(str)
-    output["season"] = pd.to_numeric(frame["season"], errors="coerce")
-    output["week"] = pd.to_numeric(frame["week"], errors="coerce")
+    output["player_id"] = raw_player_ids.astype(str)
+    output["season"] = _canonical_identity_column(frame, "season")
+    output["week"] = _canonical_identity_column(frame, "week")
     output["position"] = (
         frame["position"].astype(str).str.upper() if "position" in frame else "UNKNOWN"
     )
@@ -90,9 +107,8 @@ def canonicalize_predictions(
     output["q50"] = pd.to_numeric(frame[q50_column], errors="coerce")
     output["q90"] = pd.to_numeric(frame[q90_column], errors="coerce")
 
-    numeric_columns = ["season", "week", "actual", "q10", "q50", "q90"]
     finite = np.ones(len(output), dtype=bool)
-    for column in numeric_columns:
+    for column in ("actual", "q10", "q50", "q90"):
         finite &= np.isfinite(pd.to_numeric(output[column], errors="coerce").to_numpy(dtype=float))
     output["valid_prediction"] = finite
     output["crossed_quantiles"] = (output["q10"] > output["q50"]) | (
@@ -105,9 +121,9 @@ def canonicalize_predictions(
         + "|"
         + output["player_id"].astype(str)
         + "|"
-        + output["season"].astype("Int64").astype(str)
+        + output["season"].astype(str)
         + "|"
-        + output["week"].astype("Int64").astype(str)
+        + output["week"].astype(str)
     )
 
     duplicates = output.duplicated(list(CANONICAL_KEYS), keep=False)
