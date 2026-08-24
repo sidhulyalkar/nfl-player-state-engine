@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -54,6 +55,37 @@ def test_canonicalize_predictions_rejects_duplicate_player_week_method() -> None
 
     with pytest.raises(ValueError, match="Duplicate canonical prediction rows"):
         canonicalize_predictions(raw, target="fantasy_points_ppr")
+
+
+@pytest.mark.parametrize(
+    ("column", "value", "message"),
+    [
+        ("season", np.inf, "non-finite season"),
+        ("week", 1.5, "non-integer week"),
+        ("player_id", None, "missing player_id"),
+        ("method", "", "missing method"),
+    ],
+)
+def test_canonicalize_predictions_rejects_invalid_identity_values(
+    column: str,
+    value: object,
+    message: str,
+) -> None:
+    raw = _raw_predictions("quantile_engine")
+    raw.loc[0, column] = value
+
+    with pytest.raises(ValueError, match=message):
+        canonicalize_predictions(raw, target="fantasy_points_ppr")
+
+
+def test_nonfinite_forecast_values_are_retained_as_invalid_not_silently_dropped() -> None:
+    raw = _raw_predictions("quantile_engine")
+    raw.loc[0, "fantasy_points_ppr_q50"] = np.nan
+
+    result = canonicalize_predictions(raw, target="fantasy_points_ppr")
+
+    assert len(result) == len(raw)
+    assert int((~result["valid_prediction"]).sum()) == 1
 
 
 def test_paired_comparison_uses_identical_player_weeks_and_remains_fail_closed() -> None:
