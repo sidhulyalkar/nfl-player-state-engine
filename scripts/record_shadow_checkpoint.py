@@ -35,7 +35,12 @@ def _json_object(path: Path | None) -> dict[str, object]:
     return payload
 
 
-def _decision_records(path: Path | None, *, cutoff: pd.Timestamp, league_key: str | None) -> list[dict[str, object]]:
+def _decision_records(
+    path: Path | None,
+    *,
+    cutoff: pd.Timestamp,
+    league_key: str | None,
+) -> list[dict[str, object]]:
     if path is None:
         return []
     rows: list[dict[str, object]] = []
@@ -45,7 +50,9 @@ def _decision_records(path: Path | None, *, cutoff: pd.Timestamp, league_key: st
         payload = json.loads(line)
         if not isinstance(payload, dict):
             raise ValueError(f"Decision audit line is not an object: {path}")
-        recorded = pd.Timestamp(payload.get("recorded_at"))
+        if payload.get("recorded_at") is None:
+            raise ValueError(f"Decision audit line is missing recorded_at: {path}")
+        recorded = pd.Timestamp(payload["recorded_at"])
         if recorded.tzinfo is None:
             recorded = recorded.tz_localize("UTC")
         else:
@@ -66,7 +73,11 @@ def main() -> None:
     parser.add_argument("--season", type=int, default=2026)
     parser.add_argument("--week", type=int, required=True)
     parser.add_argument("--checkpoint", choices=SHADOW_CHECKPOINTS, required=True)
-    parser.add_argument("--prediction-cutoff", required=True, help="ISO-8601 UTC-aware cutoff")
+    parser.add_argument(
+        "--prediction-cutoff",
+        required=True,
+        help="ISO-8601 UTC-aware cutoff",
+    )
     parser.add_argument(
         "--projection-available-at",
         required=True,
@@ -81,7 +92,9 @@ def main() -> None:
     parser.add_argument("--model-metadata", type=Path, default=None)
     parser.add_argument("--source-manifest", type=Path, default=None)
     parser.add_argument(
-        "--output-root", type=Path, default=Path("artifacts/shadow_season")
+        "--output-root",
+        type=Path,
+        default=Path("artifacts/shadow_season"),
     )
     args = parser.parse_args()
 
@@ -132,6 +145,7 @@ def main() -> None:
                 "path": str(args.challenger),
             }
         )
+
     source_manifest = _json_object(args.source_manifest)
     extra_sources = source_manifest.get("sources", [])
     if extra_sources:
@@ -139,6 +153,16 @@ def main() -> None:
             isinstance(item, dict) for item in extra_sources
         ):
             raise ValueError("source manifest 'sources' must be a list of objects")
+        missing_timestamps = [
+            str(item.get("name") or f"source[{index}]")
+            for index, item in enumerate(extra_sources)
+            if item.get("available_at") is None
+        ]
+        if missing_timestamps:
+            raise ValueError(
+                "Every auxiliary shadow source requires available_at; missing for "
+                f"{missing_timestamps}"
+            )
         sources.extend(extra_sources)
 
     snapshot = build_shadow_snapshot(
