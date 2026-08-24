@@ -1,0 +1,118 @@
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import subprocess
+from pathlib import Path
+
+import pandas as pd
+
+from player_state_engine.fantasy.draft_market_ablation import evaluate_supply_feature_ablation
+
+
+def _read_table(path: Path) -> pd.DataFrame:
+    if path.suffix.lower() in {".parquet", ".pq"}:
+        return pd.read_parquet(path)
+    return pd.read_csv(path)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _git_sha() -> str | None:
+    if os.getenv("GITHUB_SHA"):
+        return os.environ["GITHUB_SHA"]
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return result.stdout.strip() or None
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Compare timestamp-safe draft-room supply features with the existing chronological "
+            "draft-survival feature family. This runner is research-only and never promotes a model."
+        )
+    )
+    parser.add_argument("--observations", type=Path, required=True)
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("artifacts/draft_market/supply_ablation.json"),
+    )
+    parser.add_argument("--min-rows", type=int, default=250)
+    parser.add_argument("--min-drafts", type=int, default=5)
+    parser.add_argument("--test-fraction", type=float, default=0.20)
+    parser.add_argument("--min-holdout-drafts", type=int, default=5)
+    parser.add_argument("--min-brier-improvement", type=float, default=0.001)
+    parser.add_argument("--max-ece-regression", type=float, default=0.02)
+    parser.add_argument("--min-format-rows", type=int, default=50)
+    parser.add_argument("--max-format-brier-regression", type=float, default=0.005)
+    parser.add_argument("--min-draft-consistency", type=float, default=0.60)
+    parser.add_argument("--bootstrap-samples", type=int, default=2000)
+    parser.add_argument("--random-state", type=int, default=42)
+    parser.add_argument(
+        "--allow-unverified-market",
+        action="store_true",
+        help="Research-only override for incomplete point-in-time market provenance.",
+    )
+    args = parser.parse_args()
+
+    observations = _read_table(args.observations)
+    report = evaluate_supply_feature_ablation(
+        observations,
+        min_rows=args.min_rows,
+        min_drafts=args.min_drafts,
+        test_fraction=args.test_fraction,
+        min_holdout_drafts=args.min_holdout_drafts,
+        min_brier_improvement=args.min_brier_improvement,
+        max_ece_regression=args.max_ece_regression,
+        min_format_rows=args.min_format_rows,
+        max_format_brier_regression=args.max_format_brier_regression,
+        min_draft_consistency=args.min_draft_consistency,
+        bootstrap_samples=args.bootstrap_samples,
+        require_verified_market=not args.allow_unverified_market,
+        random_state=args.random_state,
+    )
+    report["operator_config"] = {
+        "min_rows": int(args.min_rows),
+        "min_drafts": int(args.min_drafts),
+        "test_fraction": float(args.test_fraction),
+        "min_holdout_drafts": int(args.min_holdout_drafts),
+        "min_brier_improvement": float(args.min_brier_improvement),
+        "max_ece_regression": float(args.max_ece_regression),
+        "min_format_rows": int(args.min_format_rows),
+        "max_format_brier_regression": float(args.max_format_brier_regression),
+        "min_draft_consistency": float(args.min_draft_consistency),
+        "bootstrap_samples": int(args.bootstrap_samples),
+        "random_state": int(args.random_state),
+        "require_verified_market": not bool(args.allow_unverified_market),
+    }
+    report["input"] = {
+        "path": str(args.observations),
+        "bytes": args.observations.stat().st_size,
+        "sha256": _sha256(args.observations),
+    }
+    report["git_sha"] = _git_sha()
+
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(json.dumps(report, indent=2, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()
