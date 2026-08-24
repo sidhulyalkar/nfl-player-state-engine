@@ -53,30 +53,54 @@ def _next_pick_for_slot(current_pick: int, teams: int, slot: int, max_pick: int)
     return None
 
 
-def _first_present(frame: pd.DataFrame, columns: tuple[str, ...]) -> str | None:
+def _coalesce_datetime_aliases(
+    frame: pd.DataFrame,
+    columns: tuple[str, ...],
+    *,
+    label: str,
+) -> tuple[pd.Series, pd.Series]:
+    """Resolve timestamp aliases row by row and refuse contradictory provenance."""
+
+    values = pd.Series(pd.NaT, index=frame.index, dtype="datetime64[ns, UTC]")
+    sources = pd.Series(pd.NA, index=frame.index, dtype="string")
+    conflict = pd.Series(False, index=frame.index, dtype=bool)
+
     for column in columns:
-        if column in frame and frame[column].notna().any():
-            return column
-    return None
+        if column not in frame:
+            continue
+        parsed = pd.to_datetime(frame[column], errors="coerce", utc=True)
+        conflict |= values.notna() & parsed.notna() & (values != parsed)
+        fill = values.isna() & parsed.notna()
+        values.loc[fill] = parsed.loc[fill]
+        sources.loc[fill] = column
+
+    if bool(conflict.any()):
+        identity_columns = [column for column in ("draft_id", "player_id") if column in frame]
+        examples = frame.loc[conflict, identity_columns].head(5).to_dict("records")
+        raise ValueError(
+            f"Conflicting {label} timestamp aliases detected; refusing ambiguous provenance. "
+            f"Examples: {examples}"
+        )
+    return values, sources
 
 
 def _canonicalize_market_timestamps(data: pd.DataFrame) -> pd.DataFrame:
     output = data.copy()
-    draft_column = _first_present(output, DRAFT_TIME_COLUMNS)
-    market_column = _first_present(output, MARKET_TIME_COLUMNS)
+    draft_time, draft_source = _coalesce_datetime_aliases(
+        output,
+        DRAFT_TIME_COLUMNS,
+        label="draft-start",
+    )
+    market_time, market_source = _coalesce_datetime_aliases(
+        output,
+        MARKET_TIME_COLUMNS,
+        label="market-snapshot",
+    )
+    output["draft_started_at"] = draft_time
+    output["market_snapshot_at"] = market_time
+    output["draft_timestamp_source"] = draft_source
+    output["market_timestamp_source"] = market_source
 
-    if draft_column is not None:
-        output["draft_started_at"] = pd.to_datetime(output[draft_column], errors="coerce", utc=True)
-    elif "draft_started_at" not in output:
-        output["draft_started_at"] = pd.NaT
-
-    if market_column is not None:
-        output["market_snapshot_at"] = pd.to_datetime(output[market_column], errors="coerce", utc=True)
-    elif "market_snapshot_at" not in output:
-        output["market_snapshot_at"] = pd.NaT
-
-    draft_time = pd.to_datetime(output["draft_started_at"], errors="coerce", utc=True)
-    market_time = pd.to_datetime(output["market_snapshot_at"], errors="coerce", utc=True)
     comparable = draft_time.notna() & market_time.notna()
     future_market = comparable & (market_time > draft_time)
     if bool(future_market.any()):
