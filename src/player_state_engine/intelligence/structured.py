@@ -6,7 +6,7 @@ import math
 import os
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -333,6 +333,35 @@ class StructuredClaimLedger:
         }
 
 
+def effective_claims_as_of(
+    claims: Iterable[StructuredClaim],
+    *,
+    as_of_utc: datetime | str | pd.Timestamp,
+) -> list[StructuredClaim]:
+    """Apply corrections only after they become available, preserving historical truth."""
+
+    cutoff = _utc(as_of_utc)
+    eligible = sorted(
+        (claim for claim in claims if claim.available_at_utc <= cutoff),
+        key=lambda claim: (claim.available_at_utc, claim.claim_id),
+    )
+    suppressed: set[str] = set()
+    active: dict[str, StructuredClaim] = {}
+    for claim in eligible:
+        if claim.supersedes_claim_id:
+            suppressed.add(claim.supersedes_claim_id)
+            active.pop(claim.supersedes_claim_id, None)
+        if claim.status == "asserted":
+            active[claim.claim_id] = claim
+        else:
+            active.pop(claim.claim_id, None)
+    return [
+        claim
+        for claim in active.values()
+        if claim.claim_id not in suppressed and claim.status == "asserted"
+    ]
+
+
 def build_state_evidence_snapshots(
     claims: Iterable[StructuredClaim],
     *,
@@ -342,15 +371,12 @@ def build_state_evidence_snapshots(
 
     Opposing evidence is never discarded. `conflict_score` is zero when all weighted evidence has
     the same sign and reaches one when positive and negative support are equally balanced.
+    Corrections only affect cutoffs after the correcting claim itself became available.
     """
 
     cutoff = _utc(as_of_utc)
     grouped: dict[tuple[str, str], list[StructuredClaim]] = defaultdict(list)
-    for claim in claims:
-        if claim.available_at_utc > cutoff:
-            continue
-        if claim.status != "asserted":
-            continue
+    for claim in effective_claims_as_of(claims, as_of_utc=cutoff):
         grouped[(claim.player_id, claim.latent_state)].append(claim)
 
     rows: list[dict[str, object]] = []
