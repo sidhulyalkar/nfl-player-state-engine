@@ -25,6 +25,7 @@ jobs:
             scripts/build_game_intelligence.py \
             scripts/build_draft_survival_observations.py \
             scripts/train_draft_survival_model.py \
+            scripts/run_draft_market_supply_ablation.py \
             scripts/run_play_call_benchmark.py \
             scripts/run_game_simulation_replay.py \
             scripts/weekly_game_intelligence_refresh.py \
