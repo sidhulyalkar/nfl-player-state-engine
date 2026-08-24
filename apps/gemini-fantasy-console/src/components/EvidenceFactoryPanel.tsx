@@ -40,17 +40,23 @@ export function EvidenceFactoryPanel() {
 
   const comparisons = payload?.paired_comparisons ?? [];
   const controls = payload?.negative_controls ?? [];
-  const sorted = useMemo(
-    () => [...comparisons].sort(
-      (a, b) => b.pinball_effect_champion_minus_challenger - a.pinball_effect_champion_minus_challenger,
-    ),
+  const ordered = useMemo(
+    () => [...comparisons].sort((a, b) => {
+      const targetOrder = a.target.localeCompare(b.target);
+      if (targetOrder !== 0) return targetOrder;
+      const challengerOrder = a.challenger.localeCompare(b.challenger);
+      return challengerOrder !== 0 ? challengerOrder : a.champion.localeCompare(b.champion);
+    }),
     [comparisons],
   );
   const controlsByComparison = useMemo(
     () => new Map(controls.map((row) => [`${row.target}|${row.method}`, row])),
     [controls],
   );
-  const best = sorted[0];
+  const methodCount = new Set((payload?.method_summary ?? []).map((row) => row.method)).size;
+  const positivePairs = comparisons.filter(
+    (row) => row.pinball_effect_champion_minus_challenger > 0,
+  ).length;
   const eligible = comparisons.filter((row) => row.promotion_status === 'eligible').length;
   const controlsPassed = controls.filter((row) => row.passed).length;
   const graphStatus = payload?.manifest?.graph;
@@ -74,30 +80,30 @@ export function EvidenceFactoryPanel() {
 
   return <section className="panel shadow-evaluation-panel wide evidence-factory-panel">
     <div className="panel-heading">
-      <div><span className="eyebrow">Evidence Factory · frozen player-week benchmark</span><h2>One scoreboard, target-aware champions</h2><p>All effects are paired on identical evaluable player-weeks. Positive pinball effect favors the challenger, but every target is compared with its configured production champion and promotion remains fail closed.</p></div>
+      <div><span className="eyebrow">Evidence Factory · frozen player-week benchmark</span><h2>Comparable evidence, target-aware champions</h2><p>Each effect is meaningful only within its own target and paired champion. Different target units are never ranked against one another, and promotion remains fail closed.</p></div>
       <span className="promotion-state blocked"><ShieldCheck size={16}/> RESEARCH EVIDENCE ONLY</span>
     </div>
 
     <div className="shadow-eval-metrics">
-      <article><span>Methods</span><strong>{payload.method_summary?.length ?? 0}</strong><small>same metric contract</small></article>
+      <article><span>Distinct methods</span><strong>{methodCount}</strong><small>across mounted targets</small></article>
       <article><span>Paired challengers</span><strong>{comparisons.length}</strong><small>vs each target champion</small></article>
-      <article className={best && best.pinball_effect_champion_minus_challenger > 0 ? 'positive' : ''}><span>Best paired effect</span><strong>{metric(best?.pinball_effect_champion_minus_challenger)}</strong><small>{best ? `${label(best.challenger)} · ${label(best.target)}` : 'no challenger mounted'}</small></article>
+      <article className={positivePairs > 0 ? 'positive' : ''}><span>Positive pairs</span><strong>{positivePairs}/{comparisons.length}</strong><small>direction only, not cross-target rank</small></article>
       <article className={controls.length > 0 && controlsPassed === controls.length ? 'positive' : ''}><span>Identity controls</span><strong>{controlsPassed}/{controls.length}</strong><small>real mapping beats permutation</small></article>
       <article><span>Target champions</span><strong>{championCount || '—'}</strong><small>production authority is target-specific</small></article>
-      <article><span>Artifact health</span><strong>{payload.health.available_count}/{payload.health.expected_count}</strong><small>{payload.health.available ? 'complete bundle' : `${payload.health.missing.length} missing`}</small></article>
+      <article><span>Promotion eligible</span><strong>{eligible}</strong><small>normally zero at isolated tier</small></article>
     </div>
 
     <div className="shadow-eval-bottom">
       <div className="shadow-eval-compare"><FlaskConical size={18}/><div><strong>Frozen identity contract</strong><span>Target + method + player + season + week must be unique. Realized outcomes must agree before pairing.</span></div><div><strong>Identity negative control</strong><span>Forecast triplets are reassigned within season and position. The real player mapping must beat that control with its paired 95% interval above zero.</span></div></div>
-      <div className="blocker-panel"><strong>Run provenance</strong><p>{payload.manifest?.git_sha ? `Git ${payload.manifest.git_sha.slice(0, 12)}` : 'Git SHA unavailable'} · SHA-256 inputs and outputs recorded · Benjamini-Hochberg FDR applied. Graph: {graphIncluded ? 'included under exact PPR scoring' : graphReason}.</p></div>
+      <div className="blocker-panel"><strong>Run provenance</strong><p>{payload.manifest?.git_sha ? `Git ${payload.manifest.git_sha.slice(0, 12)}` : 'Git SHA unavailable'} · artifacts {payload.health.available_count}/{payload.health.expected_count} · SHA-256 inputs and outputs recorded · run-wide Benjamini-Hochberg FDR applied. Graph: {graphIncluded ? 'included under exact PPR scoring' : graphReason}.</p></div>
     </div>
 
-    {sorted.length > 0 && <div className="evidence-comparison-list">
-      {sorted.map((row) => {
+    {ordered.length > 0 && <div className="evidence-comparison-list">
+      {ordered.map((row) => {
         const control = controlsByComparison.get(`${row.target}|${row.challenger}`);
         return <article className="shadow-eval-compare" key={row.experiment_id}>
           <div><strong>{label(row.challenger)}</strong><span>{label(row.target)} · champion {label(row.champion)} · {row.paired_rows} paired rows across {row.paired_seasons} seasons</span></div>
-          <div><strong>Effect {metric(row.pinball_effect_champion_minus_challenger)}</strong><span>CI {metric(row.ci_low)} to {metric(row.ci_high)} · FDR q {metric(row.fdr_q_value)} · improve {pct(row.probability_improves)}</span></div>
+          <div><strong>Effect {metric(row.pinball_effect_champion_minus_challenger)}</strong><span>CI {metric(row.ci_low)} to {metric(row.ci_high)} · p {metric(row.p_value)} · FDR q {metric(row.fdr_q_value)}</span></div>
           <div><strong>Coverage {pct(row.challenger_80_coverage)}</strong><span>MAE {metric(row.challenger_q50_mae, 2)} · width {metric(row.challenger_mean_width_80, 2)} · data {pct(row.data_availability)} · identity control {control ? (control.passed ? 'PASS' : 'FAIL') : '—'}</span></div>
           <div className="blocker-panel"><strong>{row.promotion_status === 'eligible' ? <><CheckCircle2 size={14}/> Eligible</> : 'Blocked'}</strong><div>{blockers(row).slice(0, 4).map((blocker) => <span key={blocker}>{label(blocker)}</span>)}</div></div>
         </article>;
