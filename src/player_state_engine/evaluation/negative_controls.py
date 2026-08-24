@@ -53,14 +53,15 @@ def identity_permutation_control(
     method: str,
     target: str,
     seed: int = 42,
-    group_columns: tuple[str, ...] = ("season", "position"),
+    group_columns: tuple[str, ...] = ("season", "week", "position"),
 ) -> tuple[pd.DataFrame, dict[str, int]]:
-    """Destroy player identity while preserving coarse forecast marginals.
+    """Destroy player identity while preserving contemporaneous forecast marginals.
 
-    Within each season/position slice, q10/q50/q90 triplets are cyclically shifted by a
-    deterministic non-zero offset. This preserves the challenger's marginal distribution and
-    quantile geometry while breaking the mapping from a player's state to that player's outcome.
-    Singleton groups cannot be permuted and are reported explicitly.
+    Within each season/week/position slice, q10/q50/q90 triplets are cyclically shifted by a
+    deterministic non-zero offset. This preserves the challenger's same-week positional forecast
+    distribution and quantile geometry while breaking the mapping from an individual player's
+    state to that player's outcome. Singleton groups cannot be permuted and are reported
+    explicitly rather than being treated as successful negative-control evidence.
     """
 
     required = {
