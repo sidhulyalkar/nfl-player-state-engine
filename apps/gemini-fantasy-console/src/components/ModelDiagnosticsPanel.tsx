@@ -10,6 +10,7 @@ import { EvidenceFactoryPanel } from './EvidenceFactoryPanel';
 import { LiveShadowSeasonPanel } from './LiveShadowSeasonPanel';
 import { ModeBadge } from './ModeBadge';
 import { ShadowEvaluationPanel } from './ShadowEvaluationPanel';
+import { StructuredIntelligencePanel } from './StructuredIntelligencePanel';
 
 function metric(value: number | null | undefined, digits = 3) {
   return value == null || !Number.isFinite(value) ? '—' : value.toFixed(digits);
@@ -76,6 +77,7 @@ export function ModelDiagnosticsPanel() {
 
     <EvidenceFactoryPanel/>
     <LiveShadowSeasonPanel/>
+    <StructuredIntelligencePanel/>
     <ShadowEvaluationPanel evaluation={payload?.player_state_graph?.shadow_evaluation}/>
 
     <div className="observatory-chart-grid wide">
