@@ -88,15 +88,44 @@ It exposes:
 - position and season calibration slices;
 - artifact health;
 - Player State Graph shadow replay;
+- the frozen multi-season Evidence Factory;
+- target-aware production champions;
+- paired data availability;
+- identity-permutation negative controls;
+- run-wide Benjamini-Hochberg FDR q-values;
 - explicit promotion blockers.
 
 A research challenger can look interesting here without gaining production authority.
+
+## Evidence Factory authority contract
+
+The Evidence Factory is the frozen comparison layer behind the Observatory. It does not choose a new production model merely because one row has lower loss.
+
+Production authority is target-aware. The default direct champion is `quantile_engine`, while carries currently resolves to `position_specific_quantile` because the production `HybridQuantileModelBundle` routes carries through position-specific heads. The historical pooled carry engine remains visible as evidence rather than being relabeled as the current champion.
+
+For every challenger, the Evidence Factory can show:
+
+- the target and actual production champion used for the pair;
+- paired player-week count and held-out seasons;
+- mean-pinball effect and paired bootstrap confidence interval;
+- q50 MAE, 80% interval coverage, and interval width;
+- paired data availability against evaluable outcomes;
+- season, position, and week consistency;
+- identity-permutation negative-control result;
+- one-sided bootstrap p-value and run-wide FDR q-value;
+- the exact blockers that prevent promotion.
+
+The full run reapplies Benjamini-Hochberg correction across every challenger-vs-target-champion comparison in the run. The UI renders those server-owned q-values and does not recompute them in TypeScript.
+
+Missing Evidence Factory artifacts return `UNAVAILABLE`. The browser does not invent placeholder benchmark results.
+
+See `docs/modeling/evidence_factory.md` for the complete experiment contract and reproduction procedure.
 
 ## Shadow Lab authority contract
 
 The Shadow Lab is deliberately one-way.
 
-The direct player quantile model remains the production champion. The Player State Graph is a research challenger until frozen replay earns promotion.
+The target-aware direct player quantile stack remains production-authoritative. The Player State Graph is a research challenger until frozen replay earns promotion.
 
 The Shadow Lab may show:
 
@@ -160,6 +189,8 @@ GET  /v1/portfolio/exposure
 GET  /v1/research/diagnostics
 GET  /v1/research/players/{player_id}/history
 GET  /v1/model/shadow-evaluation
+GET  /v1/model/evidence-factory
+GET  /v1/model/evidence-factory?target=fantasy_points_ppr
 GET  /v1/model/observatory
 ```
 
@@ -236,6 +267,19 @@ report.md
 
 The UI does not fabricate a graph forecast if these artifacts are unavailable.
 
+## Evidence Factory run
+
+Build the canonical frozen evidence ledger from the stored historical benchmark and optional graph artifacts:
+
+```bash
+python scripts/run_evidence_factory.py \
+  --benchmark-root artifacts/reports/benchmark_real \
+  --graph-root artifacts/player_state_graph \
+  --output-dir artifacts/evidence_factory
+```
+
+The output bundle includes canonical predictions, method and slice metrics, paired comparisons, the experiment ledger, identity-permutation controls, a SHA-256 provenance manifest, and a Markdown report. Carries resolves to the position-specific production head by default.
+
 ## Ranking source ingestion
 
 Official FantasyPros snapshots can be archived when `PSE_FANTASYPROS_API_KEY` is configured:
@@ -295,7 +339,7 @@ python scripts/train_draft_survival_model.py \
 - React renders server-owned state, comparisons, evidence, and provenance.
 - The Node server keeps `GEMINI_API_KEY` private and proxies the Python Product API.
 - Gemini performs tool selection, comparison, and explanation only.
-- Python remains authoritative for projections, exact league scoring, starter allocation, VORP, scarcity, draft survival, roster utility, simulation, and production actions.
+- Python remains authoritative for projections, exact league scoring, starter allocation, VORP, scarcity, draft survival, roster utility, simulation, evidence statistics, and production actions.
 - The deterministic product remains usable if Gemini is disabled.
 
 Do not recreate missing Python numerical formulas in TypeScript. Extend the Product API instead.
@@ -305,6 +349,7 @@ Do not recreate missing Python numerical formulas in TypeScript. Extend the Prod
 ```text
 docs/product/modelling_workspace.md
 docs/product/gemini_ai_studio.md
+docs/modeling/evidence_factory.md
 docs/modeling/player_state_graph_v2.md
 docs/modeling/ranking_calibration_v09.md
 docs/data/ranking_and_news_sources.md
