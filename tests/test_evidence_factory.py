@@ -72,6 +72,9 @@ def test_canonicalize_predictions_rejects_invalid_identity_values(
     message: str,
 ) -> None:
     raw = _raw_predictions("quantile_engine")
+    # pandas 3 rejects lossy scalar writes into integer columns before the validator can run.
+    # Widen the deliberately corrupted fixture so this test exercises our contract instead.
+    raw[column] = raw[column].astype(object)
     raw.loc[0, column] = value
 
     with pytest.raises(ValueError, match=message):
@@ -116,7 +119,9 @@ def test_paired_comparison_uses_identical_player_weeks_and_remains_fail_closed()
 
 
 def test_paired_comparison_rejects_disagreeing_realized_outcomes() -> None:
-    champion = canonicalize_predictions(_raw_predictions("quantile_engine"), target="fantasy_points_ppr")
+    champion = canonicalize_predictions(
+        _raw_predictions("quantile_engine"), target="fantasy_points_ppr"
+    )
     challenger_raw = _raw_predictions("player_state_graph")
     challenger_raw.loc[0, "actual"] = 999.0
     challenger = canonicalize_predictions(challenger_raw, target="fantasy_points_ppr")
@@ -128,6 +133,29 @@ def test_paired_comparison_rejects_disagreeing_realized_outcomes() -> None:
             champion_method="quantile_engine",
             challenger_method="player_state_graph",
         )
+
+
+def test_paired_availability_uses_evaluable_outcome_universe() -> None:
+    champion = canonicalize_predictions(
+        _raw_predictions("quantile_engine"), target="fantasy_points_ppr"
+    )
+    challenger_raw = _raw_predictions("partial_challenger")
+    challenger_raw.loc[:2, "fantasy_points_ppr_q50"] = np.nan
+    challenger = canonicalize_predictions(challenger_raw, target="fantasy_points_ppr")
+
+    comparison, record = compare_methods(
+        pd.concat([champion, challenger], ignore_index=True),
+        target="fantasy_points_ppr",
+        champion_method="quantile_engine",
+        challenger_method="partial_challenger",
+        bootstrap_samples=300,
+    )
+
+    assert comparison["paired_rows"] == 5
+    assert comparison["data_availability"] == pytest.approx(5 / 8)
+    assert record.data_availability == pytest.approx(5 / 8)
+    assert "insufficient_live_data_availability" in record.blockers
+    assert record.promoted is False
 
 
 def test_evidence_bundle_compares_all_available_baselines_to_champion() -> None:
@@ -164,8 +192,39 @@ def test_evidence_bundle_compares_all_available_baselines_to_champion() -> None:
     assert len(bundle.experiment_ledger) == 2
 
 
+def test_evidence_bundle_propagates_multiple_testing_q_values() -> None:
+    champion = canonicalize_predictions(
+        _raw_predictions("quantile_engine", offset=2.0), target="fantasy_points_ppr"
+    )
+    challenger_a = canonicalize_predictions(
+        _raw_predictions("challenger_a", offset=0.0), target="fantasy_points_ppr"
+    )
+    challenger_b = canonicalize_predictions(
+        _raw_predictions("challenger_b", offset=1.0), target="fantasy_points_ppr"
+    )
+
+    bundle = build_evidence_bundle(
+        [champion, challenger_a, challenger_b],
+        champion_method="quantile_engine",
+        bootstrap_samples=400,
+        seed=19,
+    )
+
+    comparisons = bundle.paired_comparisons.set_index("experiment_id")
+    ledger = bundle.experiment_ledger.set_index("experiment_id")
+    assert comparisons["p_value"].notna().all()
+    assert comparisons["fdr_q_value"].notna().all()
+    assert ledger["fdr_q_value"].notna().all()
+    for experiment_id in comparisons.index:
+        assert comparisons.loc[experiment_id, "fdr_q_value"] == pytest.approx(
+            ledger.loc[experiment_id, "fdr_q_value"]
+        )
+
+
 def test_interval_undercoverage_is_an_explicit_promotion_blocker() -> None:
-    champion = canonicalize_predictions(_raw_predictions("quantile_engine"), target="fantasy_points_ppr")
+    champion = canonicalize_predictions(
+        _raw_predictions("quantile_engine"), target="fantasy_points_ppr"
+    )
     challenger_raw = _raw_predictions("narrow_challenger")
     challenger_raw["fantasy_points_ppr_q10"] = challenger_raw["actual"] + 1.0
     challenger_raw["fantasy_points_ppr_q50"] = challenger_raw["actual"] + 1.5
