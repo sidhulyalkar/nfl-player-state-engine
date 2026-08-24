@@ -13,6 +13,9 @@ from player_state_engine.api.game_intelligence_routes import install_game_intell
 from player_state_engine.api.intelligence_routes import install_intelligence_routes
 from player_state_engine.api.ranking_routes import install_ranking_routes
 from player_state_engine.api.shadow_season_routes import install_shadow_season_routes
+from player_state_engine.api.structured_intelligence_routes import (
+    install_structured_intelligence_routes,
+)
 
 
 def create_app(**kwargs: Any) -> FastAPI:
@@ -26,6 +29,8 @@ def create_app(**kwargs: Any) -> FastAPI:
         "live_store_root",
         "evidence_factory_root",
         "shadow_season_root",
+        "structured_intelligence_root",
+        "intelligence_activation_registry",
     }
     base_kwargs = {key: value for key, value in kwargs.items() if key not in operational_only}
     app = create_base_app(**base_kwargs)
@@ -55,6 +60,11 @@ def create_app(**kwargs: Any) -> FastAPI:
         app,
         artifact_root=kwargs.get("shadow_season_root"),
     )
+    install_structured_intelligence_routes(
+        app,
+        artifact_root=kwargs.get("structured_intelligence_root"),
+        activation_registry_path=kwargs.get("intelligence_activation_registry"),
+    )
     install_ranking_routes(
         app,
         store_root=kwargs.get("store_root"),
@@ -71,10 +81,11 @@ def create_app(**kwargs: Any) -> FastAPI:
     app.description = (
         f"{app.description} Live Draft War Room, player intelligence, cross-league portfolio "
         "exposure, Player State Graph shadow comparison and sensitivity, frozen Evidence Factory, "
-        "immutable 2026 live shadow-season evidence, model observatory, ranking calibration, "
-        "guarded draft reliability, guarded game-intelligence simulation, expanding frozen replay, "
-        "factorial attribution, simulated-state opportunity, drive-volume, possession-transition, "
-        "fourth-down decision, and terminal-family research surfaces."
+        "immutable 2026 live shadow-season evidence, structured intelligence evidence ledger, "
+        "model observatory, ranking calibration, guarded draft reliability, guarded "
+        "game-intelligence simulation, expanding frozen replay, factorial attribution, "
+        "simulated-state opportunity, drive-volume, possession-transition, fourth-down decision, "
+        "and terminal-family research surfaces."
     )
     return app
 
