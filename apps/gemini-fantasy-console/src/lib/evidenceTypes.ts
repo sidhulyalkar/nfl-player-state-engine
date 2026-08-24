@@ -91,6 +91,9 @@ export interface EvidenceFactoryResponse {
     available_count: number;
     expected_count: number;
     missing: string[];
+    integrity_verified?: boolean;
+    integrity_failures?: string[];
+    artifacts?: Record<string, Record<string, unknown>>;
   };
   manifest?: {
     schema_version?: number;
