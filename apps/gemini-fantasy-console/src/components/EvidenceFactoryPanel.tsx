@@ -35,6 +35,7 @@ export function EvidenceFactoryPanel() {
   }, []);
 
   const comparisons = payload?.paired_comparisons ?? [];
+  const controls = payload?.negative_controls ?? [];
   const sorted = useMemo(
     () => [...comparisons].sort(
       (a, b) => b.pinball_effect_champion_minus_challenger - a.pinball_effect_champion_minus_challenger,
@@ -43,8 +44,12 @@ export function EvidenceFactoryPanel() {
   );
   const best = sorted[0];
   const eligible = comparisons.filter((row) => row.promotion_status === 'eligible').length;
+  const controlsPassed = controls.filter((row) => row.passed).length;
   const graphStatus = payload?.manifest?.graph;
   const graphIncluded = Boolean(graphStatus && graphStatus['included'] === true);
+  const graphReason = typeof graphStatus?.['reason'] === 'string'
+    ? graphStatus['reason'].replaceAll('_', ' ')
+    : 'graph status unavailable';
 
   if (error) {
     return <section className="panel observatory-error wide"><AlertTriangle size={18}/><div><strong>Evidence Factory unavailable.</strong><span>{error}</span></div></section>;
@@ -68,14 +73,14 @@ export function EvidenceFactoryPanel() {
       <article><span>Methods</span><strong>{payload.method_summary?.length ?? 0}</strong><small>same metric contract</small></article>
       <article><span>Paired challengers</span><strong>{comparisons.length}</strong><small>vs quantile engine</small></article>
       <article className={best && best.pinball_effect_champion_minus_challenger > 0 ? 'positive' : ''}><span>Best paired effect</span><strong>{metric(best?.pinball_effect_champion_minus_challenger)}</strong><small>{best?.challenger?.replaceAll('_', ' ') ?? 'no challenger mounted'}</small></article>
+      <article className={controls.length > 0 && controlsPassed === controls.length ? 'positive' : ''}><span>Identity controls</span><strong>{controlsPassed}/{controls.length}</strong><small>real mapping beats permutation</small></article>
       <article><span>Promotion eligible</span><strong>{eligible}</strong><small>normally zero at isolated tier</small></article>
       <article><span>Artifact health</span><strong>{payload.health.available_count}/{payload.health.expected_count}</strong><small>{payload.health.available ? 'complete bundle' : `${payload.health.missing.length} missing`}</small></article>
-      <article><span>Graph comparison</span><strong>{graphIncluded ? 'INCLUDED' : 'GUARDED'}</strong><small>{graphIncluded ? 'exact PPR contract' : 'missing or scoring mismatch'}</small></article>
     </div>
 
     <div className="shadow-eval-bottom">
-      <div className="shadow-eval-compare"><FlaskConical size={18}/><div><strong>Frozen identity contract</strong><span>Target + method + player + season + week must be unique. Realized outcomes must agree before pairing.</span></div><div><strong>Run provenance</strong><span>{payload.manifest?.git_sha ? `Git ${payload.manifest.git_sha.slice(0, 12)}` : 'Git SHA unavailable'} · SHA-256 inputs recorded in the manifest</span></div></div>
-      <div className="blocker-panel"><strong>Promotion contract</strong><p>{payload.promotion?.note ?? 'Historical comparison is evidence, not production authority.'}</p></div>
+      <div className="shadow-eval-compare"><FlaskConical size={18}/><div><strong>Frozen identity contract</strong><span>Target + method + player + season + week must be unique. Realized outcomes must agree before pairing.</span></div><div><strong>Identity negative control</strong><span>Forecast triplets are reassigned within season and position. The real player mapping must beat that control with its paired 95% interval above zero.</span></div></div>
+      <div className="blocker-panel"><strong>Run provenance</strong><p>{payload.manifest?.git_sha ? `Git ${payload.manifest.git_sha.slice(0, 12)}` : 'Git SHA unavailable'} · SHA-256 inputs and outputs recorded. Graph: {graphIncluded ? 'included under exact PPR scoring' : graphReason}.</p></div>
     </div>
 
     {sorted.length > 0 && <div className="evidence-comparison-list">
@@ -86,5 +91,6 @@ export function EvidenceFactoryPanel() {
         <div className="blocker-panel"><strong>{row.promotion_status === 'eligible' ? <><CheckCircle2 size={14}/> Eligible</> : 'Blocked'}</strong><div>{blockers(row).slice(0, 4).map((blocker) => <span key={blocker}>{blocker.replaceAll('_', ' ')}</span>)}</div></div>
       </article>)}
     </div>}
+    <p className="shadow-eval-note">{payload.promotion?.note ?? 'Historical comparison is evidence, not production authority.'}</p>
   </section>;
 }
