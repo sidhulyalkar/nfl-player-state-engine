@@ -7,7 +7,6 @@ import os
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -135,7 +134,6 @@ def normalize_production_forecasts(
     production_method: str = "direct_player_quantile_model",
 ) -> pd.DataFrame:
     """Normalize a live production projection artifact without importing hindsight fields."""
-
     if frame.empty:
         raise ValueError("Shadow snapshot requires a non-empty production projection frame")
     if "player_id" not in frame:
@@ -162,7 +160,9 @@ def normalize_production_forecasts(
         players = out.loc[crossed, "player_id"].head(10).tolist()
         raise ValueError(f"Production quantiles cross for players: {players}")
     if out["player_id"].duplicated().any():
-        duplicates = out.loc[out["player_id"].duplicated(keep=False), "player_id"].unique().tolist()
+        duplicates = (
+            out.loc[out["player_id"].duplicated(keep=False), "player_id"].unique().tolist()
+        )
         raise ValueError(f"Shadow snapshot contains duplicate player_id rows: {duplicates[:10]}")
 
     optional_numeric = {
@@ -188,17 +188,17 @@ def attach_research_challenger(
     challenger_method: str = "player_state_graph",
 ) -> pd.DataFrame:
     """Attach research-only challenger quantiles without changing production fields."""
-
     if production.empty:
         raise ValueError("Production shadow frame is empty")
     result = production.copy()
-    for column in (
+    challenger_fields = (
         "challenger_q10",
         "challenger_q50",
         "challenger_q90",
         "challenger_probability_active",
         "challenger_role_change_probability",
-    ):
+    )
+    for column in challenger_fields:
         result[column] = np.nan
     result["challenger_method"] = None
     result["challenger_authority"] = "research_only"
@@ -213,7 +213,7 @@ def attach_research_challenger(
     if graph["player_id"].duplicated().any():
         raise ValueError("Challenger frame must contain at most one row per player_id")
 
-    for target, aliases in {
+    aliases_by_target = {
         "challenger_q10": ("challenger_q10", "q10"),
         "challenger_q50": ("challenger_q50", "q50"),
         "challenger_q90": ("challenger_q90", "q90"),
@@ -225,30 +225,21 @@ def attach_research_challenger(
             "challenger_role_change_probability",
             "role_change_probability",
         ),
-    }.items():
+    }
+    for target, aliases in aliases_by_target.items():
         values, _ = _coalesce_numeric_aliases(graph, aliases, target=target)
         graph[target] = values
 
-    selected = graph[
-        [
-            "player_id",
-            "challenger_q10",
-            "challenger_q50",
-            "challenger_q90",
-            "challenger_probability_active",
-            "challenger_role_change_probability",
-        ]
-    ].copy()
-    merged = result.drop(
-        columns=[
-            "challenger_q10",
-            "challenger_q50",
-            "challenger_q90",
-            "challenger_probability_active",
-            "challenger_role_change_probability",
-        ]
-    ).merge(selected, on="player_id", how="left", validate="one_to_one")
-    has_challenger = merged[["challenger_q10", "challenger_q50", "challenger_q90"]].notna().all(axis=1)
+    selected = graph[["player_id", *challenger_fields]].copy()
+    merged = result.drop(columns=list(challenger_fields)).merge(
+        selected,
+        on="player_id",
+        how="left",
+        validate="one_to_one",
+    )
+    has_challenger = merged[
+        ["challenger_q10", "challenger_q50", "challenger_q90"]
+    ].notna().all(axis=1)
     crossed = has_challenger & (
         (merged["challenger_q10"] > merged["challenger_q50"])
         | (merged["challenger_q50"] > merged["challenger_q90"])
@@ -267,7 +258,9 @@ def _assert_no_hindsight(value: object, *, path: str = "decision") -> None:
         for key, child in value.items():
             key_text = str(key).lower()
             if any(token in key_text for token in _HINDSIGHT_TOKENS):
-                raise ValueError(f"Shadow snapshot decision context contains hindsight field {path}.{key}")
+                raise ValueError(
+                    f"Shadow snapshot decision context contains hindsight field {path}.{key}"
+                )
             _assert_no_hindsight(child, path=f"{path}.{key}")
     elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         for index, child in enumerate(value):
@@ -284,9 +277,10 @@ def _normalize_sources(
         name = str(raw.get("name") or "").strip()
         if not name:
             raise ValueError("Shadow source record is missing name")
-        available_at_raw = raw.get("available_at")
-        available_at = _utc_timestamp(available_at_raw) if available_at_raw is not None else None
-        if available_at is not None and available_at > prediction_cutoff:
+        if raw.get("available_at") is None:
+            raise ValueError(f"Shadow source {name!r} is missing available_at")
+        available_at = _utc_timestamp(raw["available_at"])
+        if available_at > prediction_cutoff:
             raise ValueError(
                 f"Source {name!r} became available after prediction cutoff: "
                 f"{available_at.isoformat()} > {prediction_cutoff.isoformat()}"
@@ -294,11 +288,9 @@ def _normalize_sources(
         normalized.append(
             {
                 "name": name,
-                "available_at": available_at.isoformat() if available_at is not None else None,
-                "age_hours_at_cutoff": (
-                    float((prediction_cutoff - available_at).total_seconds() / 3600.0)
-                    if available_at is not None
-                    else None
+                "available_at": available_at.isoformat(),
+                "age_hours_at_cutoff": float(
+                    (prediction_cutoff - available_at).total_seconds() / 3600.0
                 ),
                 "sha256": _optional_text(raw.get("sha256")),
                 "path": _optional_text(raw.get("path")),
@@ -339,11 +331,10 @@ def build_shadow_snapshot(
     model_metadata: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Build one immutable, no-hindsight live shadow checkpoint."""
-
     checkpoint_name = str(checkpoint).strip().upper()
     if checkpoint_name not in SHADOW_CHECKPOINTS:
         raise ValueError(f"checkpoint must be one of {SHADOW_CHECKPOINTS}")
-    if int(week) < 1 or int(week) > 18:
+    if not 1 <= int(week) <= 18:
         raise ValueError("shadow-season week must be between 1 and 18")
     if int(season) < 2020:
         raise ValueError("shadow-season season is invalid")
@@ -357,7 +348,8 @@ def build_shadow_snapshot(
         raise ValueError("Shadow snapshot forecasts must contain one row per player_id")
 
     cutoff = _utc_timestamp(prediction_cutoff)
-    captured = _utc_timestamp(captured_at or datetime.now(UTC))
+    captured_value = captured_at if captured_at is not None else datetime.now(UTC)
+    captured = _utc_timestamp(captured_value)
     if captured < cutoff:
         raise ValueError("captured_at cannot precede prediction_cutoff")
 
@@ -365,39 +357,35 @@ def build_shadow_snapshot(
     _assert_no_hindsight(decisions)
     normalized_sources = _normalize_sources(sources, prediction_cutoff=cutoff)
 
-    safe_columns = [
-        column
-        for column in (
-            "player_id",
-            "player_name",
-            "position",
-            "team",
-            "opponent",
-            "production_q10",
-            "production_q50",
-            "production_q90",
-            "production_q10_source",
-            "production_q50_source",
-            "production_q90_source",
-            "production_method",
-            "availability_probability",
-            "reliability_score",
-            "decision_score",
-            "decision_rank",
-            "decision_action",
-            "challenger_q10",
-            "challenger_q50",
-            "challenger_q90",
-            "challenger_probability_active",
-            "challenger_role_change_probability",
-            "challenger_method",
-            "challenger_authority",
-            "challenger_may_change_decision",
-        )
-        if column in forecasts
-    ]
-    safe = forecasts.loc[:, safe_columns].copy()
-    for column in (
+    allowed_columns = (
+        "player_id",
+        "player_name",
+        "position",
+        "team",
+        "opponent",
+        "production_q10",
+        "production_q50",
+        "production_q90",
+        "production_q10_source",
+        "production_q50_source",
+        "production_q90_source",
+        "production_method",
+        "availability_probability",
+        "reliability_score",
+        "decision_score",
+        "decision_rank",
+        "decision_action",
+        "challenger_q10",
+        "challenger_q50",
+        "challenger_q90",
+        "challenger_probability_active",
+        "challenger_role_change_probability",
+        "challenger_method",
+        "challenger_authority",
+        "challenger_may_change_decision",
+    )
+    safe = forecasts.loc[:, [column for column in allowed_columns if column in forecasts]].copy()
+    numeric_columns = (
         "production_q10",
         "production_q50",
         "production_q90",
@@ -410,13 +398,17 @@ def build_shadow_snapshot(
         "challenger_q90",
         "challenger_probability_active",
         "challenger_role_change_probability",
-    ):
+    )
+    for column in numeric_columns:
         if column in safe:
             safe[column] = pd.to_numeric(safe[column], errors="coerce")
     production_crossed = (safe["production_q10"] > safe["production_q50"]) | (
         safe["production_q50"] > safe["production_q90"]
     )
-    if production_crossed.any() or safe[["production_q10", "production_q50", "production_q90"]].isna().any(axis=None):
+    production_missing = safe[
+        ["production_q10", "production_q50", "production_q90"]
+    ].isna().any(axis=None)
+    if production_crossed.any() or production_missing:
         raise ValueError("Shadow snapshot production quantiles must be finite and non-crossing")
 
     records = json.loads(safe.to_json(orient="records", date_format="iso"))
@@ -455,7 +447,11 @@ def _pinball(actual: float, prediction: float, quantile: float) -> float:
     return float(quantile * error if error >= 0 else (quantile - 1.0) * error)
 
 
-def _metrics_from_rows(rows: Sequence[Mapping[str, object]], *, prefix: str) -> dict[str, object]:
+def _metrics_from_rows(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    prefix: str,
+) -> dict[str, object]:
     q10_name = f"{prefix}_q10"
     q50_name = f"{prefix}_q50"
     q90_name = f"{prefix}_q90"
@@ -469,18 +465,27 @@ def _metrics_from_rows(rows: Sequence[Mapping[str, object]], *, prefix: str) -> 
             usable.append((float(actual), float(q10), float(q50), float(q90)))
     if not usable:
         return {"n": 0}
+
     array = np.asarray(usable, dtype=float)
     actual = array[:, 0]
     q10 = array[:, 1]
     q50 = array[:, 2]
     q90 = array[:, 3]
-    pinball_q10 = np.asarray([_pinball(a, p, 0.10) for a, p in zip(actual, q10, strict=True)])
-    pinball_q50 = np.asarray([_pinball(a, p, 0.50) for a, p in zip(actual, q50, strict=True)])
-    pinball_q90 = np.asarray([_pinball(a, p, 0.90) for a, p in zip(actual, q90, strict=True)])
+    pinball_q10 = np.asarray(
+        [_pinball(a, p, 0.10) for a, p in zip(actual, q10, strict=True)]
+    )
+    pinball_q50 = np.asarray(
+        [_pinball(a, p, 0.50) for a, p in zip(actual, q50, strict=True)]
+    )
+    pinball_q90 = np.asarray(
+        [_pinball(a, p, 0.90) for a, p in zip(actual, q90, strict=True)]
+    )
     return {
         "n": int(len(array)),
         "q50_mae": float(np.mean(np.abs(actual - q50))),
-        "mean_pinball": float(np.mean(np.column_stack([pinball_q10, pinball_q50, pinball_q90]))),
+        "mean_pinball": float(
+            np.mean(np.column_stack([pinball_q10, pinball_q50, pinball_q90]))
+        ),
         "q10_pinball": float(pinball_q10.mean()),
         "q50_pinball": float(pinball_q50.mean()),
         "q90_pinball": float(pinball_q90.mean()),
@@ -501,16 +506,17 @@ def build_shadow_settlement(
     source_metadata: Mapping[str, object] | None = None,
     require_complete: bool = True,
 ) -> dict[str, object]:
-    """Create an append-only settlement companion without mutating the original checkpoint."""
-
+    """Create an append-only settlement companion without mutating the checkpoint."""
     _verify_digest(snapshot, label="shadow snapshot")
     if actuals.empty:
         raise ValueError("Shadow settlement actuals are empty")
     if "player_id" not in actuals or actual_column not in actuals:
         raise ValueError(f"Shadow settlement requires player_id and {actual_column}")
-    actual_frame = actuals[["player_id", actual_column] + [
+
+    optional_actual_columns = [
         column for column in ("active", "games_played", "source") if column in actuals
-    ]].copy()
+    ]
+    actual_frame = actuals[["player_id", actual_column, *optional_actual_columns]].copy()
     actual_frame["player_id"] = actual_frame["player_id"].astype(str)
     actual_frame[actual_column] = pd.to_numeric(actual_frame[actual_column], errors="coerce")
     if actual_frame["player_id"].duplicated().any():
@@ -522,38 +528,40 @@ def build_shadow_settlement(
     forecast_rows = list(snapshot.get("forecasts") or [])
     missing_players: list[str] = []
     settled_rows: list[dict[str, object]] = []
-    for forecast in forecast_rows:
+    for forecast_raw in forecast_rows:
+        forecast = dict(forecast_raw)
         player_id = str(forecast.get("player_id"))
         actual_row = actual_by_player.get(player_id)
         if actual_row is None:
             missing_players.append(player_id)
             continue
-        actual_value = float(actual_row[actual_column])
-        row = {
-            "player_id": player_id,
-            "player_name": forecast.get("player_name"),
-            "position": forecast.get("position"),
-            "team": forecast.get("team"),
-            "actual": actual_value,
-            "production_q10": forecast.get("production_q10"),
-            "production_q50": forecast.get("production_q50"),
-            "production_q90": forecast.get("production_q90"),
-            "challenger_q10": forecast.get("challenger_q10"),
-            "challenger_q50": forecast.get("challenger_q50"),
-            "challenger_q90": forecast.get("challenger_q90"),
-            "active": actual_row.get("active"),
-            "games_played": actual_row.get("games_played"),
-        }
-        settled_rows.append(row)
+        settled_rows.append(
+            {
+                "player_id": player_id,
+                "player_name": forecast.get("player_name"),
+                "position": forecast.get("position"),
+                "team": forecast.get("team"),
+                "actual": float(actual_row[actual_column]),
+                "production_q10": forecast.get("production_q10"),
+                "production_q50": forecast.get("production_q50"),
+                "production_q90": forecast.get("production_q90"),
+                "challenger_q10": forecast.get("challenger_q10"),
+                "challenger_q50": forecast.get("challenger_q50"),
+                "challenger_q90": forecast.get("challenger_q90"),
+                "active": actual_row.get("active"),
+                "games_played": actual_row.get("games_played"),
+            }
+        )
     if require_complete and missing_players:
         raise ValueError(
             f"Shadow settlement is missing actuals for {len(missing_players)} forecast players: "
             f"{missing_players[:10]}"
         )
 
-    production_metrics = _metrics_from_rows(settled_rows, prefix="production")
-    challenger_metrics = _metrics_from_rows(settled_rows, prefix="challenger")
-    settlement_id = _sha256_text(f"{snapshot['snapshot_id']}|settlement|v{SHADOW_SCHEMA_VERSION}")[:24]
+    settlement_id = _sha256_text(
+        f"{snapshot['snapshot_id']}|settlement|v{SHADOW_SCHEMA_VERSION}"
+    )[:24]
+    settled_value = settled_at if settled_at is not None else datetime.now(UTC)
     payload = {
         "schema_version": SHADOW_SCHEMA_VERSION,
         "record_type": "shadow_settlement",
@@ -564,7 +572,7 @@ def build_shadow_settlement(
         "week": snapshot["week"],
         "checkpoint": snapshot["checkpoint"],
         "league_key": snapshot.get("league_key"),
-        "settled_at": _utc_iso(settled_at or datetime.now(UTC)),
+        "settled_at": _utc_iso(settled_value),
         "data_mode": "SETTLED_LIVE_SHADOW",
         "authority": "evaluation_only",
         "source_metadata": dict(source_metadata or {}),
@@ -573,8 +581,8 @@ def build_shadow_settlement(
         "missing_player_ids": missing_players,
         "complete": not missing_players,
         "metrics": {
-            "production": production_metrics,
-            "challenger": challenger_metrics,
+            "production": _metrics_from_rows(settled_rows, prefix="production"),
+            "challenger": _metrics_from_rows(settled_rows, prefix="challenger"),
         },
         "rows": settled_rows,
     }
@@ -605,7 +613,10 @@ class ShadowSeasonStore:
     def _atomic_write(path: Path, payload: Mapping[str, object]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+        temporary.write_text(
+            json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n",
+            encoding="utf-8",
+        )
         os.replace(temporary, path)
 
     @staticmethod
@@ -630,18 +641,36 @@ class ShadowSeasonStore:
         return True
 
     def load_snapshot(self, snapshot_id: str) -> dict[str, object]:
-        matches = list(self.snapshot_root.rglob(f"{snapshot_id}.json")) if self.snapshot_root.exists() else []
+        matches = (
+            list(self.snapshot_root.rglob(f"{snapshot_id}.json"))
+            if self.snapshot_root.exists()
+            else []
+        )
         if not matches:
             raise FileNotFoundError(f"Shadow snapshot unavailable: {snapshot_id}")
         if len(matches) > 1:
             raise ValueError(f"Shadow snapshot_id is not unique: {snapshot_id}")
         return self._load(matches[0], label="shadow snapshot")
 
+    def load_settlement(self, snapshot_id: str) -> dict[str, object]:
+        path = self.settlement_path(snapshot_id)
+        if not path.is_file():
+            raise FileNotFoundError(f"Shadow settlement unavailable: {snapshot_id}")
+        settlement = self._load(path, label="shadow settlement")
+        snapshot = self.load_snapshot(snapshot_id)
+        if str(settlement.get("snapshot_content_sha256")) != str(
+            snapshot.get("content_sha256")
+        ):
+            raise ValueError("Settlement references a different snapshot digest")
+        return settlement
+
     def save_settlement(self, settlement: Mapping[str, object]) -> bool:
         _verify_digest(settlement, label="shadow settlement")
         snapshot_id = str(settlement["snapshot_id"])
         snapshot = self.load_snapshot(snapshot_id)
-        if str(settlement.get("snapshot_content_sha256")) != str(snapshot.get("content_sha256")):
+        if str(settlement.get("snapshot_content_sha256")) != str(
+            snapshot.get("content_sha256")
+        ):
             raise ValueError("Settlement references a different snapshot digest")
         path = self.settlement_path(snapshot_id)
         if path.exists():
@@ -656,13 +685,16 @@ class ShadowSeasonStore:
         root = self.snapshot_root / str(season) if season is not None else self.snapshot_root
         if not root.exists():
             return []
-        return [self._load(path, label="shadow snapshot") for path in sorted(root.rglob("*.json"))]
+        return [
+            self._load(path, label="shadow snapshot")
+            for path in sorted(root.rglob("*.json"))
+        ]
 
     def settlements(self) -> list[dict[str, object]]:
         if not self.settlement_root.exists():
             return []
         return [
-            self._load(path, label="shadow settlement")
+            self.load_settlement(path.stem)
             for path in sorted(self.settlement_root.glob("*.json"))
         ]
 
@@ -676,19 +708,22 @@ class ShadowSeasonStore:
             failures.append(f"snapshot_integrity:{exc}")
         try:
             settlements = self.settlements()
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
+        except (OSError, ValueError, json.JSONDecodeError, FileNotFoundError) as exc:
             failures.append(f"settlement_integrity:{exc}")
+
         snapshot_digests = {
             str(snapshot["snapshot_id"]): str(snapshot["content_sha256"])
             for snapshot in snapshots
         }
         for settlement in settlements:
-            snapshot_id = str(settlement.get("snapshot_id"))
             if season is not None and int(settlement.get("season", -1)) != int(season):
                 continue
+            snapshot_id = str(settlement.get("snapshot_id"))
             if snapshot_id not in snapshot_digests:
                 failures.append(f"orphan_settlement:{snapshot_id}")
-            elif str(settlement.get("snapshot_content_sha256")) != snapshot_digests[snapshot_id]:
+            elif str(settlement.get("snapshot_content_sha256")) != snapshot_digests[
+                snapshot_id
+            ]:
                 failures.append(f"settlement_snapshot_digest_mismatch:{snapshot_id}")
         return {
             "root": self.root.as_posix(),
@@ -735,15 +770,20 @@ class ShadowSeasonStore:
                     "checkpoint": checkpoint,
                     "snapshots": len(checkpoint_snapshots),
                     "settled_snapshots": len(checkpoint_settlements),
-                    "forecast_rows": sum(int(snapshot.get("forecast_count", 0)) for snapshot in checkpoint_snapshots),
+                    "forecast_rows": sum(
+                        int(snapshot.get("forecast_count", 0))
+                        for snapshot in checkpoint_snapshots
+                    ),
                     "settled_rows": len(rows),
                     "production": _metrics_from_rows(rows, prefix="production"),
                     "challenger": _metrics_from_rows(rows, prefix="challenger"),
                 }
             )
 
-        positions = sorted({str(row.get("position")) for row in all_rows if row.get("position")})
-        by_position = []
+        positions = sorted(
+            {str(row.get("position")) for row in all_rows if row.get("position")}
+        )
+        by_position: list[dict[str, object]] = []
         for position in positions:
             rows = [row for row in all_rows if str(row.get("position")) == position]
             by_position.append(
