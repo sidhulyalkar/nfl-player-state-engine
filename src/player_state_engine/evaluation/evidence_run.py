@@ -31,6 +31,7 @@ DEFAULT_TARGETS = (
     "rushing_yards",
     "passing_yards",
 )
+DEFAULT_CHAMPION_OVERRIDES = {"carries": "position_specific_quantile"}
 NEGATIVE_CONTROL_COLUMNS = (
     "target",
     "method",
@@ -78,6 +79,20 @@ def git_sha() -> str | None:
     except (OSError, subprocess.CalledProcessError):
         return None
     return result.stdout.strip() or None
+
+
+def parse_champion_overrides(values: list[str] | None) -> dict[str, str]:
+    overrides = dict(DEFAULT_CHAMPION_OVERRIDES)
+    for raw in values or []:
+        target, separator, method = raw.partition("=")
+        target = target.strip()
+        method = method.strip()
+        if not separator or not target or not method:
+            raise ValueError(
+                f"Invalid champion override {raw!r}; expected TARGET=METHOD, for example carries=position_specific_quantile"
+            )
+        overrides[target] = method
+    return overrides
 
 
 def graph_scoring_status(manifest: dict[str, object]) -> dict[str, object]:
@@ -173,6 +188,10 @@ def _negative_controls_for_target(
 ) -> tuple[pd.DataFrame, set[str]]:
     combined = pd.concat(frames, ignore_index=True, sort=False)
     methods = sorted(set(combined["method"].astype(str)))
+    if champion_method not in methods:
+        raise ValueError(
+            f"Configured champion {champion_method!r} is unavailable for target {target!r}; available methods: {methods}"
+        )
     rows: list[dict[str, object]] = []
     passed: set[str] = set()
     challengers = [method for method in methods if method != champion_method]
@@ -205,16 +224,29 @@ def build_run_bundle(
     graph_root: Path,
     targets: tuple[str, ...],
     champion_method: str,
+    champion_overrides: dict[str, str] | None,
     bootstrap_samples: int,
     seed: int,
     calibration_tolerance: float,
-) -> tuple[EvidenceBundle, pd.DataFrame, list[dict[str, object]], dict[str, object]]:
+) -> tuple[
+    EvidenceBundle,
+    pd.DataFrame,
+    list[dict[str, object]],
+    dict[str, object],
+    dict[str, str],
+]:
     graph_frame, graph_records, graph_status = load_graph(graph_root)
     input_records = list(graph_records)
     bundles: list[EvidenceBundle] = []
     negative_control_frames: list[pd.DataFrame] = []
+    overrides = champion_overrides or {}
+    champion_methods = {
+        target: overrides.get(target, champion_method)
+        for target in targets
+    }
 
     for target_offset, target in enumerate(targets):
+        target_champion = champion_methods[target]
         frames, records = load_benchmark_target(benchmark_root, target)
         input_records.extend(records)
         if target == "fantasy_points_ppr" and graph_frame is not None:
@@ -222,7 +254,7 @@ def build_run_bundle(
         control_report, passed_methods = _negative_controls_for_target(
             frames,
             target=target,
-            champion_method=champion_method,
+            champion_method=target_champion,
             bootstrap_samples=bootstrap_samples,
             seed=seed + target_offset * 10_007,
         )
@@ -231,7 +263,7 @@ def build_run_bundle(
         bundles.append(
             build_evidence_bundle(
                 frames,
-                champion_method=champion_method,
+                champion_method=target_champion,
                 bootstrap_samples=bootstrap_samples,
                 seed=seed + target_offset * 20_011,
                 negative_control_methods=passed_methods,
@@ -257,7 +289,7 @@ def build_run_bundle(
         if negative_control_frames
         else pd.DataFrame(columns=NEGATIVE_CONTROL_COLUMNS)
     )
-    return combined_bundle, negative_controls, input_records, graph_status
+    return combined_bundle, negative_controls, input_records, graph_status, champion_methods
 
 
 def persist_bundle(
@@ -297,6 +329,7 @@ def write_report(
     negative_controls: pd.DataFrame,
     output_dir: Path,
     graph_status: dict[str, object],
+    champion_methods: dict[str, str],
 ) -> Path:
     path = output_dir / "report.md"
     summary = bundle.method_summary.sort_values(["target", "mean_pinball"], kind="mergesort")
@@ -306,11 +339,15 @@ def write_report(
     lines = [
         "# Evidence Factory frozen benchmark",
         "",
-        "All comparisons are paired on identical frozen player-weeks. Positive paired pinball effect means the challenger beat the production champion on mean quantile loss.",
+        "All comparisons are paired on identical frozen player-weeks. Positive paired pinball effect means the challenger beat that target's configured production champion on mean quantile loss.",
         "",
         "## Authority",
         "",
-        "This artifact is evidence, not automatic model promotion. The direct quantile model remains production-authoritative unless the fail-closed promotion policy clears all required tiers and blockers.",
+        "This artifact is evidence, not automatic model promotion. The direct target-aware quantile stack remains production-authoritative unless the fail-closed promotion policy clears all required tiers and blockers.",
+        "",
+        "## Target champions",
+        "",
+        f"```json\n{json.dumps(champion_methods, indent=2, sort_keys=True)}\n```",
         "",
         "## Method summary",
         "",
@@ -334,7 +371,7 @@ def write_report(
         "",
         "## Interpretation",
         "",
-        "A lower loss alone is insufficient. Read interval coverage, sharpness, season/position/week consistency, overlap, negative controls, downstream decision evidence, and evidence tier together.",
+        "A lower loss alone is insufficient. Read interval coverage, sharpness, season/position/week consistency, paired data availability, FDR, negative controls, downstream decision evidence, and evidence tier together.",
         "",
     ]
     path.write_text("\n".join(lines), encoding="utf-8")
@@ -344,17 +381,25 @@ def write_report(
 def run(args: argparse.Namespace) -> None:
     targets = tuple(args.targets or DEFAULT_TARGETS)
     output_dir = Path(args.output_dir)
-    bundle, negative_controls, input_records, graph_status = build_run_bundle(
+    champion_overrides = parse_champion_overrides(args.champion_override)
+    bundle, negative_controls, input_records, graph_status, champion_methods = build_run_bundle(
         benchmark_root=Path(args.benchmark_root),
         graph_root=Path(args.graph_root),
         targets=targets,
         champion_method=args.champion_method,
+        champion_overrides=champion_overrides,
         bootstrap_samples=args.bootstrap_samples,
         seed=args.seed,
         calibration_tolerance=args.calibration_tolerance,
     )
     outputs = persist_bundle(bundle, negative_controls, output_dir)
-    report_path = write_report(bundle, negative_controls, output_dir, graph_status)
+    report_path = write_report(
+        bundle,
+        negative_controls,
+        output_dir,
+        graph_status,
+        champion_methods,
+    )
     outputs["report"] = {
         "path": str(report_path),
         "bytes": report_path.stat().st_size,
@@ -362,15 +407,20 @@ def run(args: argparse.Namespace) -> None:
     }
 
     manifest = {
-        "schema_version": 2,
+        "schema_version": 3,
         "created_at_utc": datetime.now(UTC).isoformat(),
         "authority": "research_evidence_only",
-        "git_sha": git_sha(),
-        "champion_method": args.champion_method,
+        "default_champion_method": args.champion_method,
+        "champion_methods": champion_methods,
         "targets": list(targets),
         "bootstrap_samples": int(args.bootstrap_samples),
         "seed": int(args.seed),
         "calibration_tolerance": float(args.calibration_tolerance),
+        "multiple_testing": {
+            "method": "benjamini_hochberg",
+            "family": "challenger_vs_target_champion_comparisons",
+            "maximum_fdr_q": 0.10,
+        },
         "negative_control": {
             "type": "within_season_position_identity_permutation",
             "pass_rule": "real forecast beats identity-permuted control with paired 95% CI above zero",
@@ -397,6 +447,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default="artifacts/evidence_factory")
     parser.add_argument("--targets", nargs="+")
     parser.add_argument("--champion-method", default="quantile_engine")
+    parser.add_argument(
+        "--champion-override",
+        action="append",
+        default=[],
+        metavar="TARGET=METHOD",
+        help=(
+            "Override the production champion for one target. Carries defaults to "
+            "position_specific_quantile because the current hybrid production bundle routes "
+            "that target through position-specific heads."
+        ),
+    )
     parser.add_argument("--bootstrap-samples", type=int, default=2000)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--calibration-tolerance", type=float, default=0.05)
