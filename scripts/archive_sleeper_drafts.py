@@ -11,7 +11,7 @@ from player_state_engine.integrations.sleeper_drafts import SleeperDraftClient
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Archive historical Sleeper draft outcomes as immutable raw evidence."
+        description="Archive completed historical Sleeper draft outcomes as immutable raw evidence."
     )
     parser.add_argument("--user", required=True, help="Sleeper username or numeric user ID")
     parser.add_argument("--seasons", type=int, nargs="+", required=True)
@@ -21,16 +21,11 @@ def main() -> None:
         default=Path("data/external/drafts/sleeper"),
     )
     parser.add_argument(
-        "--include-incomplete",
-        action="store_true",
-        help="Archive pre_draft/drafting rooms too. Completed drafts are the default evidence set.",
-    )
-    parser.add_argument(
         "--include-mocks",
         action="store_true",
         help=(
-            "Archive drafts without a league_id. Mock rooms are excluded by default because their "
-            "behavior may not transfer to real league drafts."
+            "Archive completed drafts without a league_id. Mock rooms are excluded by default "
+            "because their behavior may not transfer to real league drafts."
         ),
     )
     args = parser.parse_args()
@@ -48,24 +43,30 @@ def main() -> None:
             if not draft_id:
                 skipped.append({"season": int(season), "reason": "missing_draft_id"})
                 continue
-            status = str(listed.get("status") or "unknown")
-            if status != "complete" and not args.include_incomplete:
+            listed_status = str(listed.get("status") or "unknown")
+            if listed_status != "complete":
                 skipped.append(
-                    {"season": int(season), "draft_id": draft_id, "reason": f"status:{status}"}
-                )
-                continue
-            if listed.get("league_id") in {None, ""} and not args.include_mocks:
-                skipped.append(
-                    {"season": int(season), "draft_id": draft_id, "reason": "mock_or_unlinked"}
+                    {
+                        "season": int(season),
+                        "draft_id": draft_id,
+                        "reason": f"status:{listed_status}",
+                    }
                 )
                 continue
 
             draft = client.get_draft(draft_id)
+            status = str(draft.get("status") or listed_status)
+            if status != "complete":
+                skipped.append(
+                    {"season": int(season), "draft_id": draft_id, "reason": f"status:{status}"}
+                )
+                continue
             if draft.get("league_id") in {None, ""} and not args.include_mocks:
                 skipped.append(
                     {"season": int(season), "draft_id": draft_id, "reason": "mock_or_unlinked"}
                 )
                 continue
+
             picks = client.get_draft_picks(draft_id)
             traded = client.get_draft_traded_picks(draft_id)
             manifest = archive_sleeper_draft(
@@ -99,7 +100,7 @@ def main() -> None:
         "requested_seasons": sorted(set(args.seasons)),
         "retrieved_at": retrieved_at.isoformat(),
         "output_root": str(args.output_root),
-        "include_incomplete": bool(args.include_incomplete),
+        "completed_drafts_only": True,
         "include_mocks": bool(args.include_mocks),
         "archived_drafts": archived,
         "skipped_drafts": skipped,
