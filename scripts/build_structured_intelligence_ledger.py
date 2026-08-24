@@ -6,10 +6,14 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from player_state_engine.data.io import write_table
+import pandas as pd
+
+from player_state_engine.data.io import read_table, write_table
 from player_state_engine.intelligence.activation import IntelligenceActivationRegistry
+from player_state_engine.intelligence.availability import OfficialAvailabilityEvidence
 from player_state_engine.intelligence.io import load_documents_jsonl
 from player_state_engine.intelligence.news import extract_news_claims
+from player_state_engine.intelligence.official_claims import canonicalize_official_availability
 from player_state_engine.intelligence.structured import (
     StructuredClaimLedger,
     build_state_evidence_snapshots,
@@ -32,22 +36,44 @@ def _utc_iso(value: str) -> str:
     return timestamp.astimezone(UTC).isoformat()
 
 
+def _load_official_evidence(path: Path | None) -> list[OfficialAvailabilityEvidence]:
+    if path is None:
+        return []
+    if not path.is_file():
+        raise FileNotFoundError(f"official evidence unavailable: {path}")
+    frame = read_table(path)
+    records = frame.where(pd.notna(frame), None).to_dict(orient="records")
+    return [OfficialAvailabilityEvidence.model_validate(record) for record in records]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Build an immutable structured-intelligence claim ledger and point-in-time research "
-            "evidence snapshot from archived public documents."
+            "evidence snapshot from archived official and/or public documents."
         )
     )
-    parser.add_argument("--documents", type=Path, required=True)
+    parser.add_argument(
+        "--documents",
+        type=Path,
+        default=None,
+        help="Optional archived PublicDocument JSONL for structured-news extraction.",
+    )
+    parser.add_argument(
+        "--official-evidence",
+        type=Path,
+        default=None,
+        help="Optional CSV/Parquet of normalized OfficialAvailabilityEvidence rows.",
+    )
     parser.add_argument("--as-of", required=True, help="UTC-aware ISO-8601 evidence cutoff")
     parser.add_argument(
         "--availability-basis",
         choices=("collected", "published"),
         default="collected",
         help=(
-            "When a claim becomes usable. 'collected' is the conservative live default; "
-            "'published' must be an explicit historical-replay choice."
+            "When public-document claims become usable. 'collected' is the conservative live "
+            "default; 'published' must be an explicit historical-replay choice. Official evidence "
+            "always uses its normalized observed_at timestamp."
         ),
     )
     parser.add_argument(
@@ -63,11 +89,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not args.documents.is_file():
+    if args.documents is None and args.official_evidence is None:
+        raise ValueError("at least one of --documents or --official-evidence is required")
+    if args.documents is not None and not args.documents.is_file():
         raise FileNotFoundError(f"document archive unavailable: {args.documents}")
 
     as_of = _utc_iso(args.as_of)
-    documents = load_documents_jsonl(args.documents)
+
+    documents = load_documents_jsonl(args.documents) if args.documents is not None else []
     news_claims = extract_news_claims(documents)
     document_hash_by_id = {
         document.document_id: document.content_hash for document in documents
@@ -75,8 +104,7 @@ def main() -> None:
     document_platform_by_id = {
         document.document_id: str(document.platform) for document in documents
     }
-
-    structured_claims = [
+    structured_news_claims = [
         structured_claim_from_news(
             claim,
             publisher_type=document_platform_by_id.get(claim.document_id),
@@ -89,6 +117,10 @@ def main() -> None:
         )
         for claim in news_claims
     ]
+
+    official_evidence = _load_official_evidence(args.official_evidence)
+    official_claims = canonicalize_official_availability(official_evidence)
+    structured_claims = [*official_claims, *structured_news_claims]
 
     ledger = StructuredClaimLedger(args.output_root)
     created = 0
@@ -103,7 +135,8 @@ def main() -> None:
     snapshot = build_state_evidence_snapshots(eligible, as_of_utc=as_of)
     snapshot_dir = args.output_root / "snapshots"
     snapshot_dir.mkdir(parents=True, exist_ok=True)
-    snapshot_path = snapshot_dir / f"structured_news_{as_of.replace(':', '').replace('+', '_')}.parquet"
+    safe_cutoff = as_of.replace(":", "").replace("+", "_")
+    snapshot_path = snapshot_dir / f"structured_intelligence_{safe_cutoff}.parquet"
     write_table(snapshot, snapshot_path)
 
     registry = (
@@ -111,21 +144,35 @@ def main() -> None:
         if args.activation_registry is not None
         else IntelligenceActivationRegistry()
     )
-    manifest = {
-        "schema_version": 1,
-        "created_at_utc": datetime.now(UTC).isoformat(),
-        "as_of_utc": as_of,
-        "availability_basis": args.availability_basis,
-        "authority": "research_evidence_only",
-        "automatic_promotion": False,
-        "input": {
+    inputs: dict[str, object] = {}
+    if args.documents is not None:
+        inputs["public_documents"] = {
             "path": args.documents.as_posix(),
             "sha256": _sha256(args.documents),
             "document_count": len(documents),
-        },
+            "availability_basis": args.availability_basis,
+        }
+    if args.official_evidence is not None:
+        inputs["official_availability"] = {
+            "path": args.official_evidence.as_posix(),
+            "sha256": _sha256(args.official_evidence),
+            "evidence_count": len(official_evidence),
+            "availability_basis": "observed_at_utc",
+        }
+
+    manifest = {
+        "schema_version": 2,
+        "created_at_utc": datetime.now(UTC).isoformat(),
+        "as_of_utc": as_of,
+        "authority": "research_evidence_only",
+        "automatic_promotion": False,
+        "inputs": inputs,
         "claims": {
-            "extracted": len(news_claims),
-            "canonical": len(structured_claims),
+            "news_extracted": len(news_claims),
+            "news_canonical": len(structured_news_claims),
+            "official_evidence": len(official_evidence),
+            "official_canonical": len(official_claims),
+            "canonical_total": len(structured_claims),
             "created": created,
             "unchanged": unchanged,
             "eligible_at_cutoff": len(eligible),
