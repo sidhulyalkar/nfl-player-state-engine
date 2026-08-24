@@ -12,6 +12,7 @@ Its job is not to create a new forecasting model. Its job is to make every model
 - how did it compare with the production champion;
 - was any apparent improvement stable by season, position, and week;
 - did calibration and sharpness remain acceptable;
+- does the player-specific mapping beat an identity-destroyed negative control;
 - what evidence is still missing before promotion can even be considered.
 
 The direct quantile model remains production-authoritative. Evidence Factory output is `research_evidence_only`.
@@ -104,6 +105,31 @@ Every comparison reports:
 - evidence tier;
 - promotion blockers.
 
+## Identity-permutation negative control
+
+Every challenger is also tested against an identity-destroyed version of itself.
+
+Within each `season x position` slice, the challenger keeps the same q10/q50/q90 triplets and therefore the same coarse forecast marginals and interval geometry. The triplets are cyclically reassigned to different player-weeks using a deterministic seeded non-zero shift whenever the slice contains at least two rows.
+
+The test therefore asks whether the model's player-specific mapping contains real predictive information beyond its coarse positional and seasonal distribution.
+
+The negative-control effect is:
+
+```text
+identity-permuted control pinball - real challenger pinball
+```
+
+The control passes only when:
+
+```text
+effect > 0
+and paired 95% confidence interval lower bound > 0
+```
+
+Singleton groups cannot be permuted and are reported explicitly. A failed or uninformative identity control remains a promotion blocker.
+
+This is a signal/leakage sanity check, not proof that every possible leakage channel has been excluded.
+
 ## Promotion remains fail closed
 
 A good paired result is not model promotion.
@@ -185,6 +211,7 @@ artifacts/evidence_factory/
   slice_metrics.csv
   paired_comparisons.csv
   experiment_ledger.csv
+  negative_controls.csv
   run_manifest.json
   report.md
 ```
@@ -197,9 +224,10 @@ artifacts/evidence_factory/
 - targets;
 - bootstrap settings;
 - calibration tolerance;
+- negative-control definition and pass rule;
 - every input path, byte count, and SHA-256;
 - graph scoring-comparability status;
-- output paths;
+- every output path, byte count, and SHA-256 except the manifest itself;
 - explicit non-automatic-promotion authority.
 
 This is the reproducibility anchor. Do not publish benchmark claims without the manifest that produced them.
@@ -221,9 +249,25 @@ The response is read-only and includes:
 - slice metrics;
 - paired comparisons;
 - experiment ledger;
+- negative-control results;
 - explicit research-only authority.
 
 When the artifacts are missing, the endpoint returns `UNAVAILABLE` instead of fabricating placeholder model results.
+
+## Model Observatory
+
+The React Model Observatory reads the same read-only API. Its Evidence Factory panel shows:
+
+- method and challenger counts;
+- best paired effect;
+- identity-control pass count;
+- promotion-eligible count;
+- artifact health;
+- exact run Git SHA;
+- graph scoring guard status;
+- paired effect, confidence interval, calibration, sharpness and promotion blockers for each mounted challenger.
+
+The UI cannot promote a model or substitute browser-side calculations for the Python evidence ledger.
 
 ## Recommended first real run
 
@@ -236,7 +280,7 @@ The first meaningful Evidence Factory run should preserve the existing historica
 5. generate graph forecasts on the exact same eligible player-weeks;
 6. inspect overall, season, position, position-season, and week slices;
 7. inspect coverage and width before reading headline loss;
-8. run explicit negative controls;
+8. require the player-specific forecast to beat its identity-permuted control;
 9. only after isolated evidence is credible, move to draft/lineup/waiver/trade decision replay.
 
 The objective is not to make the newest model win. The objective is to make it difficult for a weak model to look strong by accident.
