@@ -117,7 +117,7 @@ export function EvidenceFactoryPanel() {
     </div>
 
     <div className="shadow-eval-bottom">
-      <div className="shadow-eval-compare"><FlaskConical size={18}/><div><strong>Frozen identity contract</strong><span>Target + method + player + season + week must be unique. Realized outcomes must agree before pairing.</span></div><div><strong>Identity negative control</strong><span>Forecast triplets are reassigned within season and position. The real player mapping must beat that control with its paired 95% interval above zero.</span></div></div>
+      <div className="shadow-eval-compare"><FlaskConical size={18}/><div><strong>Frozen identity contract</strong><span>Target + method + player + season + week must be unique. Realized outcomes must agree before pairing.</span></div><div><strong>Identity negative control</strong><span>Forecast triplets are reassigned among same-position players in the same season and week. The real player mapping must beat that control with its paired 95% interval above zero.</span></div></div>
       <div className="blocker-panel"><strong>Run provenance</strong><p>{payload.manifest?.git_sha ? `Git ${payload.manifest.git_sha.slice(0, 12)}` : 'Git SHA unavailable'} · artifacts {payload.health.available_count}/{payload.health.expected_count} · SHA-256 integrity verified · run-wide Benjamini-Hochberg FDR applied. Graph: {graphIncluded ? 'included under exact PPR scoring' : graphReason}.</p></div>
     </div>
 
