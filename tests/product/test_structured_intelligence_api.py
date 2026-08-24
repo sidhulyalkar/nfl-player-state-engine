@@ -70,15 +70,22 @@ def _seed(root) -> datetime:
     return cutoff
 
 
-def test_structured_intelligence_api_is_read_only_and_point_in_time(tmp_path) -> None:
-    cutoff = _seed(tmp_path)
-    activation = tmp_path / "activation.json"
-    client = TestClient(
+def _client(tmp_path) -> TestClient:
+    return TestClient(
         create_app(
             structured_intelligence_root=tmp_path,
-            intelligence_activation_registry=activation,
+            intelligence_activation_registry=tmp_path / "activation.json",
         )
     )
+
+
+def _parse_utc(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+
+
+def test_structured_intelligence_api_is_read_only_and_point_in_time(tmp_path) -> None:
+    cutoff = _seed(tmp_path)
+    client = _client(tmp_path)
 
     response = client.get(
         "/v1/model/structured-intelligence",
@@ -106,7 +113,10 @@ def test_structured_intelligence_api_is_read_only_and_point_in_time(tmp_path) ->
     assert claims["total_matches"] == 2
     assert claims["returned"] == 2
     assert all(row["effective_at_cutoff"] for row in claims["claims"])
-    assert all(row["provenance"]["available_at_utc"] <= cutoff.isoformat() for row in claims["claims"])
+    assert all(
+        _parse_utc(row["provenance"]["available_at_utc"]) <= cutoff
+        for row in claims["claims"]
+    )
 
     health = client.get("/v1/model/structured-intelligence/health")
     assert health.status_code == 200
@@ -118,7 +128,7 @@ def test_structured_intelligence_api_is_read_only_and_point_in_time(tmp_path) ->
 
 
 def test_structured_intelligence_api_validates_domain_and_cutoff(tmp_path) -> None:
-    client = TestClient(create_app(structured_intelligence_root=tmp_path))
+    client = _client(tmp_path)
 
     invalid_domain = client.get(
         "/v1/model/structured-intelligence",
@@ -134,7 +144,7 @@ def test_structured_intelligence_api_validates_domain_and_cutoff(tmp_path) -> No
 
 
 def test_structured_intelligence_api_does_not_fabricate_empty_evidence(tmp_path) -> None:
-    client = TestClient(create_app(structured_intelligence_root=tmp_path))
+    client = _client(tmp_path)
     response = client.get(
         "/v1/model/structured-intelligence",
         params={"as_of": "2026-09-09T18:00:00Z"},
