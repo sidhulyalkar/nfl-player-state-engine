@@ -99,6 +99,17 @@ def main() -> None:
             "trained_at": artifact.trained_at,
             "artifact_promoted": artifact.promoted,
             "artifact_promotion_reason": artifact.promotion_reason,
+            "operator_config": {
+                "min_rows": int(args.min_rows),
+                "min_drafts": int(args.min_drafts),
+                "test_fraction": float(args.test_fraction),
+                "min_holdout_drafts": int(args.min_holdout_drafts),
+                "min_brier_improvement": float(args.min_brier_improvement),
+                "max_ece_regression": float(args.max_ece_regression),
+                "min_format_rows": int(args.min_format_rows),
+                "max_format_brier_regression": float(args.max_format_brier_regression),
+                "require_verified_market": not bool(args.allow_unverified_market),
+            },
             "observations": {
                 "path": str(args.observations),
                 "bytes": args.observations.stat().st_size,
