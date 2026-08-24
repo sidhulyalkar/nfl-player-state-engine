@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -14,6 +15,10 @@ from fastapi.testclient import TestClient
 
 from player_state_engine.api.evidence_routes import install_evidence_routes
 from player_state_engine.product.evidence_artifacts import EvidenceArtifactStore
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _write_artifacts(root: Path) -> Path:
@@ -104,6 +109,18 @@ def _write_artifacts(root: Path) -> Path:
             }
         ]
     ).to_csv(root / "negative_controls.csv", index=False)
+
+    output_paths = {
+        "method_summary": root / "method_summary.csv",
+        "slice_metrics": root / "slice_metrics.csv",
+        "paired_comparisons": root / "paired_comparisons.csv",
+        "experiment_ledger": root / "experiment_ledger.csv",
+        "negative_controls": root / "negative_controls.csv",
+    }
+    outputs = {
+        name: {"path": str(path), "sha256": _sha256(path), "bytes": path.stat().st_size}
+        for name, path in output_paths.items()
+    }
     (root / "run_manifest.json").write_text(
         json.dumps(
             {
@@ -115,6 +132,7 @@ def _write_artifacts(root: Path) -> Path:
                     "carries": "position_specific_quantile",
                 },
                 "git_sha": "abc123",
+                "outputs": outputs,
             }
         ),
         encoding="utf-8",
@@ -130,6 +148,8 @@ def test_evidence_artifact_store_exposes_health_and_fail_closed_authority(tmp_pa
     assert payload["data_mode"] == "HISTORICAL_BACKTEST"
     assert payload["authority"] == "research_evidence_only"
     assert payload["health"]["available"] is True
+    assert payload["health"]["integrity_verified"] is True
+    assert payload["health"]["integrity_failures"] == []
     assert payload["health"]["available_count"] == 6
     assert payload["manifest"]["git_sha"] == "abc123"
     assert {row["method"] for row in payload["method_summary"]} == {
@@ -178,3 +198,28 @@ def test_evidence_factory_route_reports_unavailable_without_fabricating_results(
     assert payload["authority"] == "research_evidence_only"
     assert payload["reason"] == "evidence_factory_artifacts_unavailable"
     assert payload["health"]["available"] is False
+
+
+def test_evidence_factory_fails_closed_when_artifact_hash_changes(tmp_path: Path) -> None:
+    root = _write_artifacts(tmp_path / "evidence")
+    with (root / "paired_comparisons.csv").open("a", encoding="utf-8") as handle:
+        handle.write("\n")
+
+    payload = EvidenceArtifactStore(root).snapshot()
+
+    assert payload["data_mode"] == "UNAVAILABLE"
+    assert payload["reason"] == "evidence_factory_artifact_integrity_failed"
+    assert payload["health"]["integrity_verified"] is False
+    assert "paired_comparisons_hash_mismatch" in payload["health"]["integrity_failures"]
+
+
+def test_evidence_factory_fails_closed_when_manifest_is_invalid(tmp_path: Path) -> None:
+    root = _write_artifacts(tmp_path / "evidence")
+    (root / "run_manifest.json").write_text("{not-json", encoding="utf-8")
+
+    payload = EvidenceArtifactStore(root).snapshot()
+
+    assert payload["data_mode"] == "UNAVAILABLE"
+    assert payload["reason"] == "evidence_factory_manifest_invalid"
+    assert payload["health"]["integrity_verified"] is False
+    assert "manifest_invalid" in payload["health"]["integrity_failures"]
