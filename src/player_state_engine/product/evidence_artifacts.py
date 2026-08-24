@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from functools import lru_cache
 from pathlib import Path
@@ -23,8 +24,16 @@ def _read(path: Path) -> pd.DataFrame:
     return _read_cached(str(path.resolve()), path.stat().st_mtime_ns).copy()
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 class EvidenceArtifactStore:
-    """Read-only Product API adapter over Evidence Factory outputs."""
+    """Read-only Product API adapter over cryptographically verified Evidence Factory outputs."""
 
     def __init__(self, root: str | Path = "artifacts/evidence_factory") -> None:
         self.root = Path(root)
@@ -53,13 +62,53 @@ class EvidenceArtifactStore:
             "negative_controls": self.negative_controls_path,
             "manifest": self.manifest_path,
         }
-        metadata = {name: artifact_metadata(path) for name, path in paths.items()}
+        manifest = self._manifest()
+        outputs = manifest.get("outputs") if manifest is not None else None
+        output_manifest = outputs if isinstance(outputs, dict) else {}
+        metadata: dict[str, dict[str, object]] = {}
+        integrity_failures: list[str] = []
+
+        for name, path in paths.items():
+            item = artifact_metadata(path)
+            if name == "manifest":
+                item["parse_valid"] = manifest is not None
+                if path.is_file() and manifest is None:
+                    integrity_failures.append("manifest_invalid")
+            elif path.is_file():
+                output_record = output_manifest.get(name)
+                expected_sha = (
+                    output_record.get("sha256") if isinstance(output_record, dict) else None
+                )
+                actual_sha = _sha256_file(path)
+                hash_recorded = isinstance(expected_sha, str) and bool(expected_sha.strip())
+                integrity_match = hash_recorded and actual_sha == expected_sha
+                item.update(
+                    {
+                        "sha256": actual_sha,
+                        "expected_sha256": expected_sha if hash_recorded else None,
+                        "integrity_match": integrity_match,
+                    }
+                )
+                if not hash_recorded:
+                    integrity_failures.append(f"{name}_hash_missing")
+                elif not integrity_match:
+                    integrity_failures.append(f"{name}_hash_mismatch")
+            metadata[name] = item
+
         available_count = sum(bool(item.get("available")) for item in metadata.values())
+        missing = [name for name, item in metadata.items() if not item.get("available")]
+        available = (
+            available_count == len(paths)
+            and manifest is not None
+            and not integrity_failures
+        )
         return {
-            "available": available_count == len(paths),
+            "available": available,
             "available_count": available_count,
             "expected_count": len(paths),
-            "missing": [name for name, item in metadata.items() if not item.get("available")],
+            "missing": missing,
+            "integrity_verified": available,
+            "integrity_failures": integrity_failures,
             "artifacts": metadata,
         }
 
@@ -72,26 +121,27 @@ class EvidenceArtifactStore:
                 "reason": "evidence_factory_artifacts_unavailable",
                 "health": health,
             }
+        manifest = self._manifest()
+        if manifest is None:
+            return {
+                "data_mode": "UNAVAILABLE",
+                "authority": "research_evidence_only",
+                "reason": "evidence_factory_manifest_invalid",
+                "health": health,
+            }
+        if not bool(health["available"]):
+            return {
+                "data_mode": "UNAVAILABLE",
+                "authority": "research_evidence_only",
+                "reason": "evidence_factory_artifact_integrity_failed",
+                "health": health,
+            }
 
         method_summary = _read(self.method_summary_path)
-        slice_metrics = (
-            _read(self.slice_metrics_path) if self.slice_metrics_path.is_file() else pd.DataFrame()
-        )
-        paired = (
-            _read(self.paired_comparisons_path)
-            if self.paired_comparisons_path.is_file()
-            else pd.DataFrame()
-        )
-        ledger = (
-            _read(self.experiment_ledger_path)
-            if self.experiment_ledger_path.is_file()
-            else pd.DataFrame()
-        )
-        negative_controls = (
-            _read(self.negative_controls_path)
-            if self.negative_controls_path.is_file()
-            else pd.DataFrame()
-        )
+        slice_metrics = _read(self.slice_metrics_path)
+        paired = _read(self.paired_comparisons_path)
+        ledger = _read(self.experiment_ledger_path)
+        negative_controls = _read(self.negative_controls_path)
         if target:
             for frame in (method_summary, slice_metrics, paired, negative_controls):
                 if "target" in frame:
@@ -101,23 +151,21 @@ class EvidenceArtifactStore:
                     ledger["experiment_id"].astype(str).str.startswith(f"{target}:")
                 ]
 
-        manifest = self._manifest()
         champion_methods: dict[str, str] = {}
         default_champion_method = "quantile_engine"
-        if manifest is not None:
-            raw_champions = manifest.get("champion_methods")
-            if isinstance(raw_champions, dict):
-                champion_methods = {
-                    str(key): str(value)
-                    for key, value in raw_champions.items()
-                    if str(key).strip() and str(value).strip()
-                }
-            raw_default = manifest.get(
-                "default_champion_method",
-                manifest.get("champion_method", default_champion_method),
-            )
-            if raw_default is not None and str(raw_default).strip():
-                default_champion_method = str(raw_default)
+        raw_champions = manifest.get("champion_methods")
+        if isinstance(raw_champions, dict):
+            champion_methods = {
+                str(key): str(value)
+                for key, value in raw_champions.items()
+                if str(key).strip() and str(value).strip()
+            }
+        raw_default = manifest.get(
+            "default_champion_method",
+            manifest.get("champion_method", default_champion_method),
+        )
+        if raw_default is not None and str(raw_default).strip():
+            default_champion_method = str(raw_default)
 
         return {
             "data_mode": "HISTORICAL_BACKTEST",
@@ -138,7 +186,7 @@ class EvidenceArtifactStore:
                 "note": (
                     "Evidence Factory outputs summarize frozen comparisons. They do not change model "
                     "authority without the configured promotion evidence gates. Production authority "
-                    "is resolved per target from the run manifest."
+                    "is resolved per target from the cryptographically verified run manifest."
                 ),
             },
         }
