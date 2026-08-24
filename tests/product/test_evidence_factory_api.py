@@ -89,10 +89,25 @@ def _write_artifacts(root: Path) -> Path:
             }
         ]
     ).to_csv(root / "experiment_ledger.csv", index=False)
+    pd.DataFrame(
+        [
+            {
+                "target": "fantasy_points_ppr",
+                "method": "rolling_5",
+                "control_method": "rolling_5__identity_permutation_control",
+                "rows": 100,
+                "effect_control_minus_real": 0.3,
+                "ci_low": 0.1,
+                "ci_high": 0.5,
+                "probability_real_improves": 0.99,
+                "passed": True,
+            }
+        ]
+    ).to_csv(root / "negative_controls.csv", index=False)
     (root / "run_manifest.json").write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "authority": "research_evidence_only",
                 "champion_method": "quantile_engine",
                 "git_sha": "abc123",
@@ -111,6 +126,7 @@ def test_evidence_artifact_store_exposes_health_and_fail_closed_authority(tmp_pa
     assert payload["data_mode"] == "HISTORICAL_BACKTEST"
     assert payload["authority"] == "research_evidence_only"
     assert payload["health"]["available"] is True
+    assert payload["health"]["available_count"] == 6
     assert payload["manifest"]["git_sha"] == "abc123"
     assert {row["method"] for row in payload["method_summary"]} == {
         "quantile_engine",
@@ -118,6 +134,8 @@ def test_evidence_artifact_store_exposes_health_and_fail_closed_authority(tmp_pa
     }
     assert len(payload["paired_comparisons"]) == 1
     assert len(payload["experiment_ledger"]) == 1
+    assert len(payload["negative_controls"]) == 1
+    assert payload["negative_controls"][0]["passed"] is True
     assert payload["promotion"]["automatic"] is False
 
 
@@ -136,6 +154,7 @@ def test_evidence_factory_route_filters_targets(tmp_path: Path) -> None:
     assert payload["method_summary"][0]["target"] == "targets"
     assert payload["paired_comparisons"] == []
     assert payload["experiment_ledger"] == []
+    assert payload["negative_controls"] == []
 
 
 def test_evidence_factory_route_reports_unavailable_without_fabricating_results(tmp_path: Path) -> None:
