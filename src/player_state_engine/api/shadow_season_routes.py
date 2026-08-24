@@ -73,14 +73,11 @@ def install_shadow_season_routes(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-        settlement_path = store.settlement_path(snapshot_id)
+
         settlement = None
-        if settlement_path.is_file():
+        if store.settlement_path(snapshot_id).is_file():
             try:
-                settlement = store._load(  # noqa: SLF001 - same read-only store contract.
-                    settlement_path,
-                    label="shadow settlement",
-                )
+                settlement = store.load_settlement(snapshot_id)
             except (OSError, ValueError) as exc:
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
         return {
