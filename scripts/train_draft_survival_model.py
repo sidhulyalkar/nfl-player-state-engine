@@ -62,7 +62,7 @@ def main() -> None:
     parser.add_argument("--min-rows", type=int, default=250)
     parser.add_argument("--min-drafts", type=int, default=5)
     parser.add_argument("--test-fraction", type=float, default=0.20)
-    parser.add_argument("--min-holdout-drafts", type=int, default=2)
+    parser.add_argument("--min-holdout-drafts", type=int, default=5)
     parser.add_argument("--min-brier-improvement", type=float, default=0.001)
     parser.add_argument("--max-ece-regression", type=float, default=0.02)
     parser.add_argument("--min-format-rows", type=int, default=50)
