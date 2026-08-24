@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Database, FlaskConical, ShieldCheck } from 'lucide-react';
 import type { EvidenceFactoryResponse, EvidencePairComparisonRow } from '../lib/evidenceTypes';
 import { api } from '../lib/api';
+import './evidence-factory.css';
 
 function metric(value: number | null | undefined, digits = 3) {
   return value == null || !Number.isFinite(value) ? '—' : value.toFixed(digits);
@@ -43,7 +44,7 @@ export function EvidenceFactoryPanel() {
   const best = sorted[0];
   const eligible = comparisons.filter((row) => row.promotion_status === 'eligible').length;
   const graphStatus = payload?.manifest?.graph;
-  const graphIncluded = Boolean(graphStatus && graphStatus.included === true);
+  const graphIncluded = Boolean(graphStatus && graphStatus['included'] === true);
 
   if (error) {
     return <section className="panel observatory-error wide"><AlertTriangle size={18}/><div><strong>Evidence Factory unavailable.</strong><span>{error}</span></div></section>;
