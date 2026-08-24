@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 from datetime import UTC, datetime
+from math import isfinite
 from pathlib import Path
 
 import pandas as pd
@@ -21,6 +22,7 @@ from player_state_engine.evaluation.negative_controls import (
     identity_permutation_control,
 )
 from player_state_engine.fantasy.league import LeagueConfig
+from player_state_engine.state_graph.experiments import benjamini_hochberg
 
 DEFAULT_TARGETS = (
     "fantasy_points_ppr",
@@ -93,6 +95,90 @@ def parse_champion_overrides(values: list[str] | None) -> dict[str, str]:
             )
         overrides[target] = method
     return overrides
+
+
+def _blockers(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item)]
+    if isinstance(value, (tuple, set)):
+        return [str(item) for item in value if str(item)]
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return []
+    text = str(value)
+    if not text or text.lower() == "nan":
+        return []
+    return [item for item in text.split("|") if item]
+
+
+def apply_run_fdr(
+    bundle: EvidenceBundle,
+    *,
+    maximum_fdr_q: float = 0.10,
+) -> EvidenceBundle:
+    """Apply one Benjamini-Hochberg family across every comparison in a run.
+
+    Individual target bundles are useful standalone and already carry local q-values. A complete
+    Evidence Factory run spans multiple target-specific champions, so its publication artifact
+    re-applies FDR across the full challenger family and overwrites those local values.
+    """
+
+    paired = bundle.paired_comparisons.copy()
+    ledger = bundle.experiment_ledger.copy()
+    if paired.empty:
+        bundle.paired_comparisons = paired
+        bundle.experiment_ledger = ledger
+        return bundle
+
+    p_values: dict[str, float] = {}
+    for row in paired.itertuples(index=False):
+        experiment_id = str(row.experiment_id)
+        raw_p = getattr(row, "p_value", None)
+        try:
+            p_value = float(raw_p)
+        except (TypeError, ValueError):
+            continue
+        if isfinite(p_value) and 0.0 <= p_value <= 1.0:
+            p_values[experiment_id] = p_value
+    q_values = benjamini_hochberg(p_values)
+
+    for index, row in paired.iterrows():
+        experiment_id = str(row["experiment_id"])
+        blockers = [
+            blocker
+            for blocker in _blockers(row.get("blockers"))
+            if blocker not in {"fdr_q_above_threshold", "missing_fdr_evidence"}
+        ]
+        q_value = q_values.get(experiment_id)
+        paired.at[index, "fdr_q_value"] = q_value
+        if q_value is None or not isfinite(q_value):
+            blockers.append("missing_fdr_evidence")
+        elif q_value > maximum_fdr_q:
+            blockers.append("fdr_q_above_threshold")
+        blockers = list(dict.fromkeys(blockers))
+        paired.at[index, "blockers"] = "|".join(blockers)
+        paired.at[index, "promotion_status"] = "blocked" if blockers else "eligible"
+
+    if not ledger.empty and "experiment_id" in ledger:
+        for index, row in ledger.iterrows():
+            experiment_id = str(row["experiment_id"])
+            blockers = [
+                blocker
+                for blocker in _blockers(row.get("blockers"))
+                if blocker not in {"fdr_q_above_threshold", "missing_fdr_evidence"}
+            ]
+            q_value = q_values.get(experiment_id)
+            ledger.at[index, "fdr_q_value"] = q_value
+            if q_value is None or not isfinite(q_value):
+                blockers.append("missing_fdr_evidence")
+            elif q_value > maximum_fdr_q:
+                blockers.append("fdr_q_above_threshold")
+            blockers = list(dict.fromkeys(blockers))
+            ledger.at[index, "blockers"] = blockers
+            ledger.at[index, "promoted"] = not blockers
+
+    bundle.paired_comparisons = paired
+    bundle.experiment_ledger = ledger
+    return bundle
 
 
 def graph_scoring_status(manifest: dict[str, object]) -> dict[str, object]:
@@ -240,10 +326,7 @@ def build_run_bundle(
     bundles: list[EvidenceBundle] = []
     negative_control_frames: list[pd.DataFrame] = []
     overrides = champion_overrides or {}
-    champion_methods = {
-        target: overrides.get(target, champion_method)
-        for target in targets
-    }
+    champion_methods = {target: overrides.get(target, champion_method) for target in targets}
 
     for target_offset, target in enumerate(targets):
         target_champion = champion_methods[target]
@@ -284,6 +367,7 @@ def build_run_bundle(
             [bundle.experiment_ledger for bundle in bundles], ignore_index=True
         ),
     )
+    apply_run_fdr(combined_bundle)
     negative_controls = (
         pd.concat(negative_control_frames, ignore_index=True)
         if negative_control_frames
@@ -371,7 +455,7 @@ def write_report(
         "",
         "## Interpretation",
         "",
-        "A lower loss alone is insufficient. Read interval coverage, sharpness, season/position/week consistency, paired data availability, FDR, negative controls, downstream decision evidence, and evidence tier together.",
+        "A lower loss alone is insufficient. Read interval coverage, sharpness, season/position/week consistency, paired data availability, run-wide FDR, negative controls, downstream decision evidence, and evidence tier together.",
         "",
     ]
     path.write_text("\n".join(lines), encoding="utf-8")
@@ -418,7 +502,7 @@ def run(args: argparse.Namespace) -> None:
         "calibration_tolerance": float(args.calibration_tolerance),
         "multiple_testing": {
             "method": "benjamini_hochberg",
-            "family": "challenger_vs_target_champion_comparisons",
+            "family": "all_challenger_vs_target_champion_comparisons_in_run",
             "maximum_fdr_q": 0.10,
         },
         "negative_control": {
