@@ -49,9 +49,16 @@ starter_slots_per_team
 market_adp_sd
 ```
 
-`build_draft_survival_observations.py` canonicalizes common draft/market timestamp aliases.
+`build_draft_survival_observations.py` accepts common draft-start and market-snapshot timestamp aliases. Aliases are resolved **row by row**, rather than choosing one column for the whole export. The builder records the supplying alias in:
 
-When both timestamps are known:
+```text
+draft_timestamp_source
+market_timestamp_source
+```
+
+If two populated aliases on the same row disagree, observation construction fails closed instead of silently choosing one timestamp.
+
+When both canonical timestamps are known:
 
 ```text
 market_snapshot_at <= draft_started_at
@@ -59,7 +66,7 @@ market_snapshot_at <= draft_started_at
 
 must hold. A market snapshot captured after the draft started raises an error instead of entering training.
 
-The builder records:
+The builder also records:
 
 ```text
 point_in_time_market_verified
@@ -94,7 +101,7 @@ draft_market_depth
 recent_position_run
 ```
 
-The supply fields are computed from archived market ADP among players that were still available at that historical pick. They are timestamp-safe scaffolds for richer hazard models and room-pressure diagnostics.
+The supply fields are computed from archived market ADP among players that were still available at that historical pick. They are timestamp-safe scaffolds for richer hazard challengers and room-pressure diagnostics. They are not silently promoted into the live model merely because they exist.
 
 ## Target
 
@@ -112,7 +119,16 @@ Random draft-room splitting is not a valid promotion test.
 
 `train_chronological_survival_model()` orders entire draft rooms by `draft_started_at` when available and holds out the latest rooms. No draft room appears in both partitions and no future draft can enter training for an older test room.
 
-When only season metadata exists, the holdout consists of complete latest season blocks. Season-only data with one season cannot establish forward transfer and fails closed.
+When only season metadata exists, the holdout consists of complete latest-season blocks. Season-only data with one season cannot establish forward transfer and fails closed.
+
+The operator CLI defaults to:
+
+```text
+test_fraction = 0.20
+min_holdout_drafts = 5
+```
+
+The package function remains configurable for controlled research and synthetic tests, but the ordinary training path will not confer authority from only one or two late draft rooms.
 
 The frozen report records:
 
@@ -147,7 +163,7 @@ No holdout labels enter the bucket table.
 
 The promotion comparison uses the baseline with the lower holdout Brier score. A learned model therefore cannot claim victory merely by beating the weaker simple baseline.
 
-## Metrics
+## Metrics and slices
 
 Every chronological holdout reports:
 
@@ -155,7 +171,8 @@ Every chronological holdout reports:
 - log loss;
 - expected calibration error;
 - positive survival rate;
-- ROC AUC when both classes are present.
+- ROC AUC when both classes are present;
+- calibration slices by ADP distance from the user's next pick.
 
 The same holdout is sliced by a league-format key containing:
 
@@ -169,18 +186,56 @@ total starter slots
 
 This prevents a model that improves pooled results while materially regressing a supported 2QB or custom-roster format from receiving blanket authority.
 
+## Draft-room uncertainty
+
+Row-weighted improvement alone is not sufficient evidence because one or two large rooms can dominate the aggregate.
+
+The strict evaluator therefore computes paired per-draft-room Brier effects against the better simple baseline and resamples whole held-out draft rooms. The report includes:
+
+```text
+paired_draft_room_bootstrap.effect
+paired_draft_room_bootstrap.ci_low
+paired_draft_room_bootstrap.ci_high
+paired_draft_room_bootstrap.p_value
+paired_draft_room_bootstrap.room_consistency
+paired_draft_room_bootstrap.bootstrap_samples
+```
+
+The finite-sample p-value cannot be exactly zero merely because every bootstrap draw is favorable.
+
+`room_consistency` is the fraction of held-out rooms in which the challenger beats the selected simple baseline. The operator default requires at least 60% room consistency.
+
 ## Promotion gates
 
 The default strict artifact is blocked unless all applicable conditions clear:
 
 1. total rows and independent draft rooms meet minimum support;
 2. the chronological holdout contains both survival outcomes;
-3. Brier score improves over the best simple baseline by the configured minimum;
-4. calibration does not regress beyond `max_ece_regression`;
-5. no sufficiently supported league-format slice regresses beyond `max_format_brier_regression`;
-6. point-in-time market evidence is fully verified unless the operator explicitly chooses research-only unverified mode.
+3. Brier score improves over the better simple baseline by at least `min_brier_improvement`;
+4. the paired draft-room bootstrap lower confidence bound is above zero;
+5. held-out room consistency is at least `min_draft_consistency`;
+6. calibration does not regress beyond `max_ece_regression`;
+7. no sufficiently supported league-format slice regresses beyond `max_format_brier_regression`;
+8. point-in-time market evidence is fully verified unless the operator explicitly chooses research-only unverified mode.
 
-The gate thresholds are CLI parameters and are written into the training report. They should be chosen before reading the new holdout result, not tuned afterward to rescue a preferred model.
+The operator defaults are currently:
+
+```text
+min_rows = 250
+min_drafts = 5
+test_fraction = 0.20
+min_holdout_drafts = 5
+min_brier_improvement = 0.001
+max_ece_regression = 0.02
+min_format_rows = 50
+max_format_brier_regression = 0.005
+min_draft_consistency = 0.60
+bootstrap_samples = 2000
+random_state = 42
+require_verified_market = true
+```
+
+These thresholds are written into `operator_config` in the training report. They should be chosen before reading a new holdout result, not tuned afterward to rescue a preferred model.
 
 ## Training
 
@@ -204,12 +259,15 @@ python scripts/train_draft_survival_model.py \
 The report records:
 
 - Git SHA;
+- complete operator configuration;
 - observation path, bytes, and SHA-256;
 - model path, bytes, and SHA-256;
 - chronological split metadata;
 - model metrics;
 - both baseline metric sets;
+- ADP-distance calibration slices;
 - format slices;
+- paired draft-room uncertainty and room consistency;
 - market verification rate;
 - promotion gates, blockers, and result.
 
@@ -227,14 +285,15 @@ An unpromoted artifact does not rewrite `live_draft_score`.
 
 The learned market model is only one input to a draft decision. It does not overwrite player projections, league scoring, VORP, or roster value.
 
-## Next evidence stages
+## Evidence stages
 
-After chronological survival calibration is credible:
+The intended experimental order is:
 
-1. wire the timestamp-safe market-supply fields into a richer hazard challenger and compare it with the simple logistic head;
-2. add roster needs of managers selecting before the user's next pick when historical room state supports it;
-3. replay `WAIT` decisions and measure regret by format;
-4. compare ADP-only, VORP-only, current score, survival-aware, and survival-plus-roster-simulator policies on frozen historical drafts;
-5. only after multi-format replay succeeds, consider individual opponent tendencies with enough repeat-draft evidence.
+1. validate the existing feature family under the strict chronological, format, calibration, provenance, and draft-room uncertainty gates;
+2. run the timestamp-safe market-supply fields as an isolated challenger ablation on the same split;
+3. add roster needs of managers selecting before the user's next pick when historical room state supports it;
+4. replay `WAIT` decisions and measure regret by format using the existing frozen draft-policy replay infrastructure;
+5. compare ADP-only, VORP-only, current score, survival-aware, and survival-plus-roster-simulator policies on frozen historical drafts;
+6. only after multi-format replay succeeds, consider individual opponent tendencies with enough repeat-draft evidence.
 
 Do not jump directly to manager personality models. Sparse friend-league history is not enough evidence to learn a stable drafting persona.
