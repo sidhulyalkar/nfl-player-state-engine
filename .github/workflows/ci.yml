@@ -33,7 +33,8 @@ jobs:
             scripts/run_v014_transition_benchmark.py \
             scripts/run_v015_decision_benchmark.py \
             scripts/run_v016_terminal_benchmark.py \
-            scripts/run_player_state_graph_research.py
+            scripts/run_player_state_graph_research.py \
+            scripts/run_evidence_factory.py
       - name: Compile Python sources and all scripts
         run: python -m compileall -q src scripts tests
       - run: pytest
