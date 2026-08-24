@@ -6,6 +6,7 @@ from pathlib import Path
 
 from player_state_engine.data.io import write_table
 from player_state_engine.fantasy.draft_market_archive import normalize_archive
+from player_state_engine.fantasy.draft_market_processed import resolve_processed_player_identity
 
 
 def main() -> None:
@@ -30,13 +31,8 @@ def main() -> None:
     args = parser.parse_args()
 
     frame, report = normalize_archive(args.archive_root)
+    frame = resolve_processed_player_identity(frame)
     if not frame.empty:
-        canonical = frame["canonical_player_id"].where(frame["canonical_player_id"].notna(), None)
-        platform = frame["platform_player_id"].where(frame["platform_player_id"].notna(), None)
-        frame["player_id"] = canonical.combine_first(platform)
-        if frame["player_id"].isna().any():
-            raise ValueError("Normalized Sleeper draft archive contains picks without player identity")
-        frame["player_id"] = frame["player_id"].astype(str)
         report["player_identity"] = "canonical_player_id_then_sleeper_platform_player_id"
     output = write_table(frame, args.output)
     report["output"] = str(output)
