@@ -34,6 +34,7 @@ DEFAULT_TARGETS = (
     "passing_yards",
 )
 DEFAULT_CHAMPION_OVERRIDES = {"carries": "position_specific_quantile"}
+MINIMUM_BOOTSTRAP_SAMPLES = 200
 NEGATIVE_CONTROL_COLUMNS = (
     "target",
     "method",
@@ -95,6 +96,13 @@ def parse_champion_overrides(values: list[str] | None) -> dict[str, str]:
             )
         overrides[target] = method
     return overrides
+
+
+def effective_bootstrap_samples(requested: int) -> int:
+    requested = int(requested)
+    if requested <= 0:
+        raise ValueError("bootstrap_samples must be positive")
+    return max(MINIMUM_BOOTSTRAP_SAMPLES, requested)
 
 
 def _blockers(value: object) -> list[str]:
@@ -441,10 +449,12 @@ def write_report(
     champion_methods: dict[str, str],
 ) -> Path:
     path = output_dir / "report.md"
-    summary = bundle.method_summary.sort_values(["target", "mean_pinball"], kind="mergesort")
-    comparisons = bundle.paired_comparisons.sort_values(
-        ["target", "challenger"], kind="mergesort"
-    )
+    summary = bundle.method_summary.copy()
+    if not summary.empty and {"target", "mean_pinball"}.issubset(summary.columns):
+        summary = summary.sort_values(["target", "mean_pinball"], kind="mergesort")
+    comparisons = bundle.paired_comparisons.copy()
+    if not comparisons.empty and {"target", "challenger"}.issubset(comparisons.columns):
+        comparisons = comparisons.sort_values(["target", "challenger"], kind="mergesort")
     lines = [
         "# Evidence Factory frozen benchmark",
         "",
@@ -490,6 +500,8 @@ def write_report(
 def run(args: argparse.Namespace) -> None:
     targets = tuple(args.targets or DEFAULT_TARGETS)
     output_dir = Path(args.output_dir)
+    requested_bootstrap_samples = int(args.bootstrap_samples)
+    bootstrap_samples = effective_bootstrap_samples(requested_bootstrap_samples)
     champion_overrides = parse_champion_overrides(args.champion_override)
     bundle, negative_controls, input_records, graph_status, champion_methods = build_run_bundle(
         benchmark_root=Path(args.benchmark_root),
@@ -497,7 +509,7 @@ def run(args: argparse.Namespace) -> None:
         targets=targets,
         champion_method=args.champion_method,
         champion_overrides=champion_overrides,
-        bootstrap_samples=args.bootstrap_samples,
+        bootstrap_samples=bootstrap_samples,
         seed=args.seed,
         calibration_tolerance=args.calibration_tolerance,
     )
@@ -522,7 +534,9 @@ def run(args: argparse.Namespace) -> None:
         "default_champion_method": args.champion_method,
         "champion_methods": champion_methods,
         "targets": list(targets),
-        "bootstrap_samples": int(args.bootstrap_samples),
+        "requested_bootstrap_samples": requested_bootstrap_samples,
+        "bootstrap_samples": bootstrap_samples,
+        "minimum_bootstrap_samples": MINIMUM_BOOTSTRAP_SAMPLES,
         "seed": int(args.seed),
         "calibration_tolerance": float(args.calibration_tolerance),
         "multiple_testing": {
