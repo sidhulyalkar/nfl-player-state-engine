@@ -155,9 +155,9 @@ Paired data availability is deliberately stricter than overlap. If a challenger 
 
 Every challenger is also tested against an identity-destroyed version of itself.
 
-Within each `season x position` slice, the challenger keeps the same q10/q50/q90 triplets and therefore the same coarse forecast marginals and interval geometry. The triplets are cyclically reassigned to different player-weeks using a deterministic seeded non-zero shift whenever the slice contains at least two rows.
+Within each `season x week x position` slice, the challenger keeps the same q10/q50/q90 triplets and therefore the same contemporaneous positional forecast marginals and interval geometry. The triplets are cyclically reassigned among different players using a deterministic seeded non-zero shift whenever the slice contains at least two rows.
 
-The test therefore asks whether the model's player-specific mapping contains real predictive information beyond its coarse positional and seasonal distribution.
+Keeping week fixed is important. A control that permutes across an entire season can accidentally destroy week-level context as well as player identity, allowing a model to beat the control merely because it knows the week. The contemporaneous control asks the narrower question: among players at the same position in the same NFL week, does the player-specific mapping add predictive information?
 
 The negative-control effect is:
 
@@ -172,7 +172,7 @@ effect > 0
 and paired 95% confidence interval lower bound > 0
 ```
 
-Singleton groups cannot be permuted and are reported explicitly. A failed or uninformative identity control remains a promotion blocker.
+Singleton same-week position groups cannot be permuted and are reported explicitly. They remain unchanged in the control, which dilutes rather than inflates evidence for a pass. A failed or uninformative identity control remains a promotion blocker.
 
 This is a signal/leakage sanity check, not proof that every possible leakage channel has been excluded.
 
@@ -299,7 +299,7 @@ artifacts/evidence_factory/
 - bootstrap settings;
 - calibration tolerance;
 - multiple-testing family, finite-sample p-value rule and FDR rule;
-- negative-control definition and pass rule;
+- contemporaneous season/week/position identity-control definition and pass rule;
 - every input path, byte count, and SHA-256;
 - graph scoring-comparability status;
 - every output path, byte count, and SHA-256 except the manifest itself;
@@ -316,9 +316,11 @@ GET /v1/model/evidence-factory
 GET /v1/model/evidence-factory?target=fantasy_points_ppr
 ```
 
-The response is read-only and includes:
+The Product reader re-hashes every served Evidence Factory data artifact and compares it with the SHA-256 recorded in `run_manifest.json` before returning historical results. A missing artifact, malformed manifest, missing recorded hash, or hash mismatch fails closed as `UNAVAILABLE` rather than rendering unverified evidence.
 
-- artifact health;
+A verified response includes:
+
+- cryptographic artifact health;
 - run manifest;
 - method summary;
 - slice metrics;
@@ -328,8 +330,6 @@ The response is read-only and includes:
 - resolved target-aware production authority;
 - explicit research-only authority.
 
-When the artifacts are missing, the endpoint returns `UNAVAILABLE` instead of fabricating placeholder model results.
-
 ## Model Observatory
 
 The React Model Observatory reads the same read-only API. Its Evidence Factory panel shows:
@@ -338,7 +338,7 @@ The React Model Observatory reads the same read-only API. Its Evidence Factory p
 - number of target-local pairs with positive effect direction, without ranking raw effect magnitudes across target units;
 - identity-control pass count;
 - target champion count;
-- artifact health;
+- cryptographic artifact health;
 - exact run Git SHA;
 - graph scoring guard status;
 - challenger and actual target champion;
@@ -346,10 +346,10 @@ The React Model Observatory reads the same read-only API. Its Evidence Factory p
 - finite-sample p-value and Benjamini-Hochberg q-value;
 - paired data availability;
 - calibration and sharpness;
-- identity-control pass/fail;
+- same-week identity-control pass/fail;
 - promotion blockers.
 
-The UI orders comparisons deterministically by target and method. It cannot promote a model, rank incompatible target units, or substitute browser-side calculations for the Python evidence ledger.
+The UI orders comparisons deterministically by target and method. It cannot promote a model, rank incompatible target units, or substitute browser-side calculations for the Python evidence ledger. Missing, malformed, and hash-mismatched evidence bundles receive distinct unavailable states.
 
 ## CI artifact smoke
 
@@ -359,6 +359,7 @@ The ordinary repository CI runs the Evidence Factory against the checked-in froz
 - fantasy points resolves to `quantile_engine`;
 - carries resolves to `position_specific_quantile`;
 - all comparisons receive finite, non-zero p-values and FDR q-values;
+- the generated bundle round-trips through `EvidenceArtifactStore` with SHA-256 integrity verified;
 - the manifest remains research-only and non-automatic.
 
 This is a schema/reproducibility guard, not a new benchmark run and not evidence of model promotion.
