@@ -30,6 +30,14 @@ def main() -> None:
     args = parser.parse_args()
 
     frame, report = normalize_archive(args.archive_root)
+    if not frame.empty:
+        canonical = frame["canonical_player_id"].where(frame["canonical_player_id"].notna(), None)
+        platform = frame["platform_player_id"].where(frame["platform_player_id"].notna(), None)
+        frame["player_id"] = canonical.combine_first(platform)
+        if frame["player_id"].isna().any():
+            raise ValueError("Normalized Sleeper draft archive contains picks without player identity")
+        frame["player_id"] = frame["player_id"].astype(str)
+        report["player_identity"] = "canonical_player_id_then_sleeper_platform_player_id"
     output = write_table(frame, args.output)
     report["output"] = str(output)
     args.report.parent.mkdir(parents=True, exist_ok=True)
