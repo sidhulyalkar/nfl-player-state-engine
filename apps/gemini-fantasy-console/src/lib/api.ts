@@ -17,6 +17,7 @@ import type {
   TeamContextResponse,
   TradeSuggestion,
 } from '../../shared/types';
+import type { EvidenceFactoryResponse } from './evidenceTypes';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/pse${path}`, {
@@ -107,6 +108,8 @@ export const api = {
   modelObservatory: (target = 'fantasy_points_ppr', method = 'quantile_engine') =>
     request<ModelObservatoryResponse>(`/v1/model/observatory${query({ target, method })}`),
   shadowEvaluation: () => request<ShadowEvaluationResponse>('/v1/model/shadow-evaluation'),
+  evidenceFactory: (target = 'fantasy_points_ppr') =>
+    request<EvidenceFactoryResponse>(`/v1/model/evidence-factory${query({ target })}`),
   teamContext: (season?: number, week?: number) =>
     request<TeamContextResponse>(`/v1/nfl/team-context${query({ season, week })}`),
   copilot: async (message: string, leagueId?: string, rosterId?: string) => {
