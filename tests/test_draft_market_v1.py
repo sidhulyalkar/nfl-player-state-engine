@@ -77,6 +77,48 @@ def _format_regression_observations() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _room_fragility_observations() -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    start = datetime(2024, 4, 1, tzinfo=UTC)
+    for draft_index in range(20):
+        draft_time = start + timedelta(days=5 * draft_index)
+        if draft_index < 15:
+            room_rows = 40
+            reverse = False
+        elif draft_index in {15, 16}:
+            room_rows = 100
+            reverse = False
+        else:
+            room_rows = 10
+            reverse = True
+        for row_index in range(room_rows):
+            run = row_index % 4
+            survives = int(run >= 2)
+            if reverse:
+                survives = 1 - survives
+            rows.append(
+                {
+                    "draft_id": f"fragile-{draft_index:02d}",
+                    "draft_started_at": draft_time.isoformat(),
+                    "point_in_time_market_verified": True,
+                    "current_pick": 20 + row_index % 3,
+                    "next_pick": 31 + row_index % 3,
+                    "market_adp": 30.0,
+                    "market_adp_sd": 8.0,
+                    "teams": 10,
+                    "position": "WR",
+                    "platform": "sleeper",
+                    "scoring": "ppr",
+                    "qb_slots_per_team": 2,
+                    "superflex_slots_per_team": 0,
+                    "starter_slots_per_team": 10,
+                    "recent_position_run": run,
+                    "survived_to_next_pick": survives,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 def test_chronological_holdout_is_strict_and_order_invariant() -> None:
     observations = _market_observations()
     first = chronological_room_holdout(observations, test_fraction=0.25, min_holdout_drafts=2)
@@ -109,6 +151,7 @@ def test_verified_chronological_model_can_clear_both_adp_baselines() -> None:
         max_ece_regression=0.20,
         min_format_rows=20,
         max_format_brier_regression=0.02,
+        bootstrap_samples=400,
     )
 
     assert result.artifact.version == "draft-survival-logit-v2-chronological"
@@ -120,6 +163,11 @@ def test_verified_chronological_model_can_clear_both_adp_baselines() -> None:
         result.report["model_metrics"]["brier"]
         < result.report["baselines"]["empirical_adp_bucket"]["brier"]
     )
+    bootstrap = result.report["paired_draft_room_bootstrap"]
+    assert bootstrap["ci_low"] > 0.0
+    assert bootstrap["p_value"] > 0.0
+    assert bootstrap["room_consistency"] == 1.0
+    assert result.report["adp_calibration_slices"]
     assert result.report["promotion"]["blockers"] == []
 
 
@@ -134,6 +182,7 @@ def test_overall_market_lift_cannot_hide_supported_format_regression() -> None:
         max_ece_regression=0.50,
         min_format_rows=20,
         max_format_brier_regression=0.05,
+        bootstrap_samples=400,
     )
 
     assert float(result.artifact.metrics["brier_improvement"]) > 0.0
@@ -148,6 +197,27 @@ def test_overall_market_lift_cannot_hide_supported_format_regression() -> None:
     assert any("half_ppr" in row["format_key"] for row in regressions)
 
 
+def test_row_weighted_lift_cannot_hide_draft_room_fragility() -> None:
+    result = train_chronological_survival_model(
+        _room_fragility_observations(),
+        min_rows=400,
+        min_drafts=15,
+        test_fraction=0.25,
+        min_holdout_drafts=5,
+        min_brier_improvement=0.001,
+        max_ece_regression=0.50,
+        min_format_rows=20,
+        max_format_brier_regression=0.50,
+        min_draft_consistency=0.60,
+        bootstrap_samples=500,
+    )
+
+    assert float(result.artifact.metrics["brier_improvement"]) > 0.0
+    assert result.report["paired_draft_room_bootstrap"]["room_consistency"] < 0.60
+    assert result.artifact.promoted is False
+    assert "draft_room_consistency_below_gate" in result.report["promotion"]["blockers"]
+
+
 def test_unverified_market_blocks_promotion_even_when_model_has_signal() -> None:
     result = train_chronological_survival_model(
         _market_observations(verified=False),
@@ -159,6 +229,7 @@ def test_unverified_market_blocks_promotion_even_when_model_has_signal() -> None
         max_ece_regression=0.20,
         min_format_rows=20,
         max_format_brier_regression=0.05,
+        bootstrap_samples=400,
     )
 
     assert result.artifact.promoted is False
