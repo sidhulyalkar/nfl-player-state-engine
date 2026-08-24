@@ -49,6 +49,8 @@ jobs:
 
           import pandas as pd
 
+          from player_state_engine.product.evidence_artifacts import EvidenceArtifactStore
+
           root = Path('/tmp/evidence_factory_smoke')
           manifest = json.loads((root / 'run_manifest.json').read_text(encoding='utf-8'))
           comparisons = pd.read_csv(root / 'paired_comparisons.csv')
@@ -63,6 +65,12 @@ jobs:
           assert comparisons['p_value'].notna().all()
           assert (comparisons['p_value'] > 0.0).all()
           assert comparisons['fdr_q_value'].notna().all()
+
+          snapshot = EvidenceArtifactStore(root).snapshot()
+          assert snapshot['data_mode'] == 'HISTORICAL_BACKTEST'
+          assert snapshot['authority'] == 'research_evidence_only'
+          assert snapshot['health']['integrity_verified'] is True
+          assert snapshot['health']['integrity_failures'] == []
           PY
       - run: pytest
 
