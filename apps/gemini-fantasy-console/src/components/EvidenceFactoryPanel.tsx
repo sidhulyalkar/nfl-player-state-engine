@@ -21,6 +21,28 @@ function label(value: string) {
   return value.replaceAll('_', ' ');
 }
 
+function unavailableCopy(payload: EvidenceFactoryResponse) {
+  if (payload.reason === 'evidence_factory_artifact_integrity_failed') {
+    const failures = payload.health.integrity_failures ?? [];
+    return {
+      title: 'Evidence bundle failed integrity verification',
+      body: failures.length > 0
+        ? `Refusing unverified research evidence: ${failures.map(label).join(', ')}.`
+        : 'One or more Evidence Factory artifacts do not match the SHA-256 hashes recorded by the run manifest.',
+    };
+  }
+  if (payload.reason === 'evidence_factory_manifest_invalid') {
+    return {
+      title: 'Evidence manifest is invalid',
+      body: 'The frozen evidence files are not trusted without a valid run_manifest.json provenance contract.',
+    };
+  }
+  return {
+    title: 'No frozen evidence bundle mounted',
+    body: 'Run scripts/run_evidence_factory.py and mount its artifact directory. The product will not invent comparison results.',
+  };
+}
+
 export function EvidenceFactoryPanel() {
   const [payload, setPayload] = useState<EvidenceFactoryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +97,8 @@ export function EvidenceFactoryPanel() {
   }
 
   if (payload.data_mode === 'UNAVAILABLE') {
-    return <section className="panel shadow-evaluation-panel wide unavailable"><AlertTriangle size={19}/><div><span className="eyebrow">Evidence Factory</span><h2>No frozen evidence bundle mounted</h2><p>Run <code>scripts/run_evidence_factory.py</code> and mount its artifact directory. The product will not invent comparison results.</p></div></section>;
+    const copy = unavailableCopy(payload);
+    return <section className="panel shadow-evaluation-panel wide unavailable"><AlertTriangle size={19}/><div><span className="eyebrow">Evidence Factory</span><h2>{copy.title}</h2><p>{copy.body}</p></div></section>;
   }
 
   return <section className="panel shadow-evaluation-panel wide evidence-factory-panel">
@@ -95,7 +118,7 @@ export function EvidenceFactoryPanel() {
 
     <div className="shadow-eval-bottom">
       <div className="shadow-eval-compare"><FlaskConical size={18}/><div><strong>Frozen identity contract</strong><span>Target + method + player + season + week must be unique. Realized outcomes must agree before pairing.</span></div><div><strong>Identity negative control</strong><span>Forecast triplets are reassigned within season and position. The real player mapping must beat that control with its paired 95% interval above zero.</span></div></div>
-      <div className="blocker-panel"><strong>Run provenance</strong><p>{payload.manifest?.git_sha ? `Git ${payload.manifest.git_sha.slice(0, 12)}` : 'Git SHA unavailable'} · artifacts {payload.health.available_count}/{payload.health.expected_count} · SHA-256 inputs and outputs recorded · run-wide Benjamini-Hochberg FDR applied. Graph: {graphIncluded ? 'included under exact PPR scoring' : graphReason}.</p></div>
+      <div className="blocker-panel"><strong>Run provenance</strong><p>{payload.manifest?.git_sha ? `Git ${payload.manifest.git_sha.slice(0, 12)}` : 'Git SHA unavailable'} · artifacts {payload.health.available_count}/{payload.health.expected_count} · SHA-256 integrity verified · run-wide Benjamini-Hochberg FDR applied. Graph: {graphIncluded ? 'included under exact PPR scoring' : graphReason}.</p></div>
     </div>
 
     {ordered.length > 0 && <div className="evidence-comparison-list">
