@@ -8,9 +8,11 @@ import pytest
 from player_state_engine.evaluation.evidence_factory import EvidenceBundle
 from player_state_engine.evaluation.evidence_run import (
     DEFAULT_CHAMPION_OVERRIDES,
+    MINIMUM_BOOTSTRAP_SAMPLES,
     _finite_bootstrap_p_value,
     apply_run_fdr,
     build_run_bundle,
+    effective_bootstrap_samples,
     parse_champion_overrides,
 )
 
@@ -71,6 +73,15 @@ def test_explicit_champion_override_extends_defaults() -> None:
 def test_invalid_champion_override_fails_closed() -> None:
     with pytest.raises(ValueError, match="expected TARGET=METHOD"):
         parse_champion_overrides(["carries"])
+
+
+def test_effective_bootstrap_count_matches_shared_engine_minimum() -> None:
+    assert MINIMUM_BOOTSTRAP_SAMPLES == 200
+    assert effective_bootstrap_samples(50) == 200
+    assert effective_bootstrap_samples(200) == 200
+    assert effective_bootstrap_samples(800) == 800
+    with pytest.raises(ValueError, match="must be positive"):
+        effective_bootstrap_samples(0)
 
 
 def test_finite_bootstrap_p_value_never_publishes_zero() -> None:
