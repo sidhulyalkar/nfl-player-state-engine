@@ -5,8 +5,10 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from player_state_engine.evaluation.evidence_factory import EvidenceBundle
 from player_state_engine.evaluation.evidence_run import (
     DEFAULT_CHAMPION_OVERRIDES,
+    apply_run_fdr,
     build_run_bundle,
     parse_champion_overrides,
 )
@@ -70,6 +72,64 @@ def test_invalid_champion_override_fails_closed() -> None:
         parse_champion_overrides(["carries"])
 
 
+def test_run_wide_fdr_overrides_target_local_q_values() -> None:
+    paired = pd.DataFrame(
+        [
+            {
+                "experiment_id": "fantasy_points_ppr:a:vs:quantile_engine",
+                "p_value": 0.04,
+                "fdr_q_value": 0.04,
+                "blockers": "",
+                "promotion_status": "eligible",
+            },
+            {
+                "experiment_id": "carries:b:vs:position_specific_quantile",
+                "p_value": 0.06,
+                "fdr_q_value": 0.06,
+                "blockers": "",
+                "promotion_status": "eligible",
+            },
+        ]
+    )
+    ledger = pd.DataFrame(
+        [
+            {
+                "experiment_id": "fantasy_points_ppr:a:vs:quantile_engine",
+                "p_value": 0.04,
+                "fdr_q_value": 0.04,
+                "blockers": [],
+                "promoted": True,
+            },
+            {
+                "experiment_id": "carries:b:vs:position_specific_quantile",
+                "p_value": 0.06,
+                "fdr_q_value": 0.06,
+                "blockers": [],
+                "promoted": True,
+            },
+        ]
+    )
+    bundle = EvidenceBundle(
+        predictions=pd.DataFrame(),
+        method_summary=pd.DataFrame(),
+        slice_metrics=pd.DataFrame(),
+        paired_comparisons=paired,
+        experiment_ledger=ledger,
+    )
+
+    apply_run_fdr(bundle, maximum_fdr_q=0.05)
+
+    assert bundle.paired_comparisons["fdr_q_value"].tolist() == pytest.approx([0.06, 0.06])
+    assert set(bundle.paired_comparisons["promotion_status"]) == {"blocked"}
+    assert bundle.paired_comparisons["blockers"].str.contains("fdr_q_above_threshold").all()
+    assert bundle.experiment_ledger["fdr_q_value"].tolist() == pytest.approx([0.06, 0.06])
+    assert bundle.experiment_ledger["promoted"].eq(False).all()
+    assert all(
+        "fdr_q_above_threshold" in blockers
+        for blockers in bundle.experiment_ledger["blockers"]
+    )
+
+
 def test_run_bundle_uses_position_specific_carries_as_champion(tmp_path: Path) -> None:
     benchmark_root = tmp_path / "benchmark"
     _write_carries_benchmark(benchmark_root)
@@ -94,4 +154,5 @@ def test_run_bundle_uses_position_specific_carries_as_champion(tmp_path: Path) -
     }
     assert set(bundle.experiment_ledger["champion"]) == {"position_specific_quantile"}
     assert set(controls["method"]) == {"position_prior", "quantile_engine", "rolling_5"}
+    assert bundle.paired_comparisons["fdr_q_value"].notna().all()
     assert graph_status["included"] is False
