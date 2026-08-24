@@ -180,6 +180,69 @@ jobs:
           assert activation['enabled'] == []
           assert 'structured_news' in activation['disabled']
           PY
+      - name: Smoke combined structured intelligence operator
+        run: |
+          python - <<'PY'
+          from datetime import UTC, datetime
+          from pathlib import Path
+
+          import pandas as pd
+
+          from player_state_engine.intelligence.schemas import PublicDocument
+
+          root = Path('/tmp/structured_operator_inputs')
+          root.mkdir(parents=True, exist_ok=True)
+          document = PublicDocument(
+              document_id='doc-news-1',
+              player_id='p1',
+              player_name='Player One',
+              platform='team_official',
+              source_url='https://example.com/news',
+              text='The team named the player the starter for Week 1.',
+              authored_at_utc=datetime(2026, 9, 9, 16, 0, tzinfo=UTC),
+              collected_at_utc=datetime(2026, 9, 9, 17, 0, tzinfo=UTC),
+              metadata={'source_reliability': 0.95},
+          )
+          (root / 'documents.jsonl').write_text(document.model_dump_json() + '\n', encoding='utf-8')
+          pd.DataFrame([{
+              'evidence_id': 'official-out-1',
+              'player_id': 'p2',
+              'observed_at_utc': '2026-09-09T17:30:00Z',
+              'source_url': 'https://example.com/injury-report',
+              'event_type': 'game_designation',
+              'practice_status': 'unknown',
+              'game_status': 'out',
+              'source_reliability': 0.99,
+          }]).to_csv(root / 'official.csv', index=False)
+          PY
+          python scripts/build_structured_intelligence_ledger.py \
+            --documents /tmp/structured_operator_inputs/documents.jsonl \
+            --official-evidence /tmp/structured_operator_inputs/official.csv \
+            --as-of 2026-09-09T18:00:00Z \
+            --availability-basis collected \
+            --output-root /tmp/structured_operator_output
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          import pandas as pd
+
+          root = Path('/tmp/structured_operator_output')
+          manifest = json.loads((root / 'run_manifest.json').read_text(encoding='utf-8'))
+          snapshot = pd.read_parquet(manifest['snapshot']['path'])
+          assert manifest['schema_version'] == 2
+          assert manifest['authority'] == 'research_evidence_only'
+          assert manifest['automatic_promotion'] is False
+          assert manifest['claims']['news_canonical'] >= 1
+          assert manifest['claims']['official_canonical'] == 1
+          assert manifest['claims']['canonical_total'] >= 2
+          assert manifest['ledger_health']['integrity_verified'] is True
+          assert set(manifest['inputs']) == {'public_documents', 'official_availability'}
+          assert manifest['activation']['enabled'] == []
+          assert len(snapshot) >= 2
+          assert snapshot['production_feature_enabled'].eq(False).all()
+          assert set(snapshot['authority']) == {'research_evidence_only'}
+          PY
       - run: pytest
 
   frontend:
