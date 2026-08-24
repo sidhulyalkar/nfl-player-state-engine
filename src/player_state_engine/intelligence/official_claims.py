@@ -6,7 +6,11 @@ from collections.abc import Iterable
 from typing import Final
 
 from player_state_engine.intelligence.availability import OfficialAvailabilityEvidence
-from player_state_engine.intelligence.structured import ClaimProvenance, StructuredClaim
+from player_state_engine.intelligence.structured import (
+    ClaimDomain,
+    ClaimProvenance,
+    StructuredClaim,
+)
 
 _PRACTICE_DIRECTION: Final[dict[str, float]] = {
     "full": 0.65,
@@ -45,8 +49,11 @@ _DEPTH_DIRECTION: Final[dict[str, float]] = {
 
 
 def _claim_id(evidence_id: str, claim_type: str) -> str:
+    normalized_id = str(evidence_id).strip()
+    if not normalized_id:
+        raise ValueError("official evidence_id cannot be blank")
     payload = json.dumps(
-        {"evidence_id": evidence_id, "claim_type": claim_type},
+        {"evidence_id": normalized_id, "claim_type": claim_type},
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -82,7 +89,7 @@ def _claim(
     evidence: OfficialAvailabilityEvidence,
     *,
     claim_type: str,
-    domain: str,
+    domain: ClaimDomain,
     latent_state: str,
     direction: float,
     magnitude: float | None = None,
@@ -100,7 +107,7 @@ def _claim(
         claim_id=_claim_id(evidence.evidence_id, claim_type),
         player_id=evidence.player_id,
         claim_type=claim_type,
-        domain=domain,  # type: ignore[arg-type]
+        domain=domain,
         latent_state=latent_state,
         direction=bounded_direction,
         magnitude=bounded_magnitude,
@@ -171,7 +178,11 @@ def structured_claims_from_official_availability(
         )
     elif event_type == "injured_reserve":
         status = evidence.transaction_status
-        direction = -1.0 if status in {"ir", "pup"} or evidence.game_status in {"ir", "pup"} else 0.0
+        direction = (
+            -1.0
+            if status in {"ir", "pup"} or evidence.game_status in {"ir", "pup"}
+            else 0.0
+        )
         claims.append(
             _claim(
                 evidence,
