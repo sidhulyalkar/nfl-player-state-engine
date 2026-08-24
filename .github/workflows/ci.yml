@@ -56,9 +56,12 @@ jobs:
           assert manifest['promotion']['automatic'] is False
           assert manifest['champion_methods']['fantasy_points_ppr'] == 'quantile_engine'
           assert manifest['champion_methods']['carries'] == 'position_specific_quantile'
+          assert manifest['multiple_testing']['p_value'] == 'finite_sample_plus_one_bootstrap_tail'
           assert set(comparisons.loc[comparisons['target'].eq('carries'), 'champion']) == {
               'position_specific_quantile'
           }
+          assert comparisons['p_value'].notna().all()
+          assert (comparisons['p_value'] > 0.0).all()
           assert comparisons['fdr_q_value'].notna().all()
           PY
       - run: pytest
