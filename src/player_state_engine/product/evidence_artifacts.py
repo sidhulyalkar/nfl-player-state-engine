@@ -13,7 +13,10 @@ from player_state_engine.product.provenance import artifact_metadata, frame_reco
 @lru_cache(maxsize=32)
 def _read_cached(path: str, modified_ns: int) -> pd.DataFrame:
     del modified_ns
-    return read_table(path)
+    try:
+        return read_table(path)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
 
 
 def _read(path: Path) -> pd.DataFrame:
