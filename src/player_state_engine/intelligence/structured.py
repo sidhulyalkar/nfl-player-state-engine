@@ -162,10 +162,20 @@ class StructuredClaim(BaseModel):
             raise ValueError("claim identifiers cannot be empty")
         return cleaned
 
+    @field_validator("supersedes_claim_id", mode="before")
+    @classmethod
+    def normalize_supersedes_claim_id(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        cleaned = str(value).strip()
+        return cleaned or None
+
     @model_validator(mode="after")
     def validate_status_linkage(self) -> StructuredClaim:
         if self.status in {"retracted", "superseded"} and not self.supersedes_claim_id:
             raise ValueError(f"{self.status} claims must reference supersedes_claim_id")
+        if self.supersedes_claim_id == self.claim_id:
+            raise ValueError("structured claim cannot supersede itself")
         payload = self.model_dump(mode="json", exclude={"content_sha256"})
         digest = _sha256(_canonical_json(payload))
         if self.content_sha256 is None:
@@ -233,6 +243,25 @@ def structured_claim_from_news(
         provenance=provenance,
         metadata={"source_claim_id": claim.claim_id},
     )
+
+
+def _correction_relationship_failures(claims: Iterable[StructuredClaim]) -> list[str]:
+    rows = list(claims)
+    by_id = {claim.claim_id: claim for claim in rows}
+    failures: list[str] = []
+    for claim in rows:
+        target_id = claim.supersedes_claim_id
+        if not target_id:
+            continue
+        target = by_id.get(target_id)
+        if target is None:
+            failures.append(f"orphan_correction:{claim.claim_id}->{target_id}")
+            continue
+        if target.player_id != claim.player_id:
+            failures.append(f"cross_player_correction:{claim.claim_id}->{target_id}")
+        if claim.available_at_utc < target.available_at_utc:
+            failures.append(f"correction_predates_target:{claim.claim_id}->{target_id}")
+    return failures
 
 
 class StructuredClaimLedger:
@@ -316,17 +345,17 @@ class StructuredClaimLedger:
 
     def health(self) -> dict[str, object]:
         failures: list[str] = []
-        count = 0
+        claims: list[StructuredClaim] = []
         if self.claim_root.exists():
             for path in sorted(self.claim_root.rglob("*.json")):
                 try:
-                    self._load(path)
-                    count += 1
+                    claims.append(self._load(path))
                 except (OSError, ValueError, json.JSONDecodeError) as exc:
                     failures.append(f"{path.as_posix()}:{exc}")
+        failures.extend(_correction_relationship_failures(claims))
         return {
             "root": self.root.as_posix(),
-            "claim_count": count,
+            "claim_count": len(claims),
             "integrity_verified": not failures,
             "integrity_failures": failures,
             "authority": "research_evidence_only",
@@ -341,8 +370,26 @@ def effective_claims_as_of(
     """Apply corrections only after they become available, preserving historical truth."""
 
     cutoff = _utc(as_of_utc)
+    all_claims = list(claims)
+    by_id = {claim.claim_id: claim for claim in all_claims}
+    for claim in all_claims:
+        target_id = claim.supersedes_claim_id
+        if not target_id:
+            continue
+        target = by_id.get(target_id)
+        if target is None:
+            continue
+        if target.player_id != claim.player_id:
+            raise ValueError(
+                f"correction {claim.claim_id} references a different player claim {target_id}"
+            )
+        if claim.available_at_utc < target.available_at_utc:
+            raise ValueError(
+                f"correction {claim.claim_id} predates superseded claim {target_id}"
+            )
+
     eligible = sorted(
-        (claim for claim in claims if claim.available_at_utc <= cutoff),
+        (claim for claim in all_claims if claim.available_at_utc <= cutoff),
         key=lambda claim: (claim.available_at_utc, claim.claim_id),
     )
     suppressed: set[str] = set()
