@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Annotated
 
 from player_state_engine.intelligence.structured import ClaimDomain
 from player_state_engine.product.structured_intelligence import StructuredIntelligenceArtifactStore
@@ -36,7 +37,7 @@ def install_structured_intelligence_routes(
     def structured_intelligence(
         as_of: str | None = Query(None),
         player_id: str | None = Query(None, min_length=1, max_length=128),
-        domain: ClaimDomain | None = Query(None),
+        domain: Annotated[ClaimDomain | None, Query()] = None,
     ) -> dict[str, object]:
         try:
             return store.snapshot(
@@ -57,7 +58,7 @@ def install_structured_intelligence_routes(
     def structured_intelligence_claims(
         as_of: str | None = Query(None),
         player_id: str | None = Query(None, min_length=1, max_length=128),
-        domain: ClaimDomain | None = Query(None),
+        domain: Annotated[ClaimDomain | None, Query()] = None,
         limit: int = Query(200, ge=1, le=2000),
     ) -> dict[str, object]:
         try:
