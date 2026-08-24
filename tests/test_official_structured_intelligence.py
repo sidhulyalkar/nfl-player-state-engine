@@ -83,6 +83,13 @@ def test_unknown_coach_workload_does_not_invent_claim() -> None:
     assert structured_claims_from_official_availability(_evidence("coach_workload")) == []
 
 
+def test_blank_official_evidence_id_fails_closed() -> None:
+    with pytest.raises(ValueError, match="official evidence_id cannot be blank"):
+        structured_claims_from_official_availability(
+            _evidence("game_designation", evidence_id="   ", game_status="out")
+        )
+
+
 def test_official_claims_resolve_in_same_state_snapshot_as_news_contract() -> None:
     claims = canonicalize_official_availability(
         [
