@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from player_state_engine.intelligence.structured import ClaimDomain
 from player_state_engine.product.structured_intelligence import StructuredIntelligenceArtifactStore
 
 try:
@@ -35,12 +36,12 @@ def install_structured_intelligence_routes(
     def structured_intelligence(
         as_of: str | None = Query(None),
         player_id: str | None = Query(None, min_length=1, max_length=128),
-        domain: str | None = Query(None, pattern="^(availability|opportunity|role|environment|public_context)$"),
+        domain: ClaimDomain | None = Query(None),
     ) -> dict[str, object]:
         return store.snapshot(
             as_of_utc=as_of,
             player_id=player_id,
-            domain=domain,  # type: ignore[arg-type]
+            domain=domain,
         )
 
     @app.get("/v1/model/structured-intelligence/health")
@@ -51,12 +52,12 @@ def install_structured_intelligence_routes(
     def structured_intelligence_claims(
         as_of: str | None = Query(None),
         player_id: str | None = Query(None, min_length=1, max_length=128),
-        domain: str | None = Query(None, pattern="^(availability|opportunity|role|environment|public_context)$"),
+        domain: ClaimDomain | None = Query(None),
         limit: int = Query(200, ge=1, le=2000),
     ) -> dict[str, object]:
         return store.claims_snapshot(
             as_of_utc=as_of,
             player_id=player_id,
-            domain=domain,  # type: ignore[arg-type]
+            domain=domain,
             limit=limit,
         )
