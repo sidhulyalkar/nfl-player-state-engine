@@ -7,7 +7,7 @@ from player_state_engine.intelligence.structured import ClaimDomain
 from player_state_engine.product.structured_intelligence import StructuredIntelligenceArtifactStore
 
 try:
-    from fastapi import FastAPI, Query
+    from fastapi import FastAPI, HTTPException, Query
 except ImportError as exc:  # pragma: no cover
     raise RuntimeError("Install the API extras: python -m pip install -e '.[api]'") from exc
 
@@ -38,11 +38,16 @@ def install_structured_intelligence_routes(
         player_id: str | None = Query(None, min_length=1, max_length=128),
         domain: ClaimDomain | None = Query(None),
     ) -> dict[str, object]:
-        return store.snapshot(
-            as_of_utc=as_of,
-            player_id=player_id,
-            domain=domain,
-        )
+        try:
+            return store.snapshot(
+                as_of_utc=as_of,
+                player_id=player_id,
+                domain=domain,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.get("/v1/model/structured-intelligence/health")
     def structured_intelligence_health() -> dict[str, object]:
@@ -55,9 +60,14 @@ def install_structured_intelligence_routes(
         domain: ClaimDomain | None = Query(None),
         limit: int = Query(200, ge=1, le=2000),
     ) -> dict[str, object]:
-        return store.claims_snapshot(
-            as_of_utc=as_of,
-            player_id=player_id,
-            domain=domain,
-            limit=limit,
-        )
+        try:
+            return store.claims_snapshot(
+                as_of_utc=as_of,
+                player_id=player_id,
+                domain=domain,
+                limit=limit,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
