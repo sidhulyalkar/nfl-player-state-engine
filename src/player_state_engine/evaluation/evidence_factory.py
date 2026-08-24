@@ -107,10 +107,11 @@ def canonicalize_predictions(
     output["q50"] = pd.to_numeric(frame[q50_column], errors="coerce")
     output["q90"] = pd.to_numeric(frame[q90_column], errors="coerce")
 
-    finite = np.ones(len(output), dtype=bool)
-    for column in ("actual", "q10", "q50", "q90"):
-        finite &= np.isfinite(pd.to_numeric(output[column], errors="coerce").to_numpy(dtype=float))
-    output["valid_prediction"] = finite
+    actual_numeric = output["actual"].to_numpy(dtype=float)
+    quantile_numeric = output[["q10", "q50", "q90"]].to_numpy(dtype=float)
+    output["valid_outcome"] = np.isfinite(actual_numeric)
+    output["valid_quantiles"] = np.isfinite(quantile_numeric).all(axis=1)
+    output["valid_prediction"] = output["valid_outcome"] & output["valid_quantiles"]
     output["crossed_quantiles"] = (output["q10"] > output["q50"]) | (
         output["q50"] > output["q90"]
     )
@@ -144,7 +145,16 @@ def _pinball(actual: pd.Series, prediction: pd.Series, quantile: float) -> pd.Se
 def add_row_metrics(predictions: pd.DataFrame) -> pd.DataFrame:
     """Attach per-player-week loss, coverage, sharpness, and validity diagnostics."""
 
-    required = {*CANONICAL_KEYS, "actual", "q10", "q50", "q90", "valid_prediction"}
+    required = {
+        *CANONICAL_KEYS,
+        "actual",
+        "q10",
+        "q50",
+        "q90",
+        "valid_outcome",
+        "valid_quantiles",
+        "valid_prediction",
+    }
     missing = required - set(predictions)
     if missing:
         raise ValueError(f"Canonical predictions missing columns: {sorted(missing)}")
@@ -180,18 +190,24 @@ def add_row_metrics(predictions: pd.DataFrame) -> pd.DataFrame:
 
 def _metric_row(frame: pd.DataFrame, **labels: object) -> dict[str, object]:
     valid = frame.loc[frame["valid_prediction"].astype(bool)].copy()
+    outcome_rows = int(frame["valid_outcome"].astype(bool).sum())
+    cutoff_rate = float(frame["prediction_cutoff"].notna().mean()) if len(frame) else 0.0
     if valid.empty:
         return {
             **labels,
             "rows": 0,
             "available_rows": int(len(frame)),
+            "evaluable_outcome_rows": outcome_rows,
             "valid_rate": 0.0,
+            "prediction_cutoff_rate": cutoff_rate,
         }
     return {
         **labels,
         "rows": int(len(valid)),
         "available_rows": int(len(frame)),
-        "valid_rate": float(len(valid) / max(len(frame), 1)),
+        "evaluable_outcome_rows": outcome_rows,
+        "valid_rate": float(len(valid) / max(outcome_rows, 1)),
+        "prediction_cutoff_rate": cutoff_rate,
         "mean_pinball": float(valid["mean_pinball"].mean()),
         "pinball_q10": float(valid["pinball_q10"].mean()),
         "pinball_q50": float(valid["pinball_q50"].mean()),
@@ -270,23 +286,30 @@ def _paired_rows(
     target: str,
     champion_method: str,
     challenger_method: str,
-) -> tuple[pd.DataFrame, float]:
+) -> tuple[pd.DataFrame, float, float]:
     measured = add_row_metrics(predictions)
-    champion = measured.loc[
+    champion_all = measured.loc[
         measured["target"].eq(target) & measured["method"].eq(champion_method)
     ].copy()
-    challenger = measured.loc[
+    challenger_all = measured.loc[
         measured["target"].eq(target) & measured["method"].eq(challenger_method)
     ].copy()
-    if champion.empty:
+    if champion_all.empty:
         raise ValueError(f"Champion method {champion_method!r} is unavailable for target {target!r}")
-    if challenger.empty:
+    if challenger_all.empty:
         raise ValueError(
             f"Challenger method {challenger_method!r} is unavailable for target {target!r}"
         )
 
-    champion = champion.loc[champion["valid_prediction"].astype(bool)].copy()
-    challenger = challenger.loc[challenger["valid_prediction"].astype(bool)].copy()
+    outcome_universe = pd.concat(
+        [
+            champion_all.loc[champion_all["valid_outcome"].astype(bool), list(PAIR_KEYS)],
+            challenger_all.loc[challenger_all["valid_outcome"].astype(bool), list(PAIR_KEYS)],
+        ],
+        ignore_index=True,
+    ).drop_duplicates()
+    champion = champion_all.loc[champion_all["valid_prediction"].astype(bool)].copy()
+    challenger = challenger_all.loc[challenger_all["valid_prediction"].astype(bool)].copy()
     paired = champion.merge(
         challenger,
         on=list(PAIR_KEYS),
@@ -313,9 +336,10 @@ def _paired_rows(
     paired["position"] = champion_position.where(~champion_position.eq("UNKNOWN"), challenger_position)
     paired["actual"] = pd.to_numeric(paired["actual_champion"], errors="coerce")
     paired["effect"] = paired["mean_pinball_champion"] - paired["mean_pinball_challenger"]
-    denominator = max(1, min(len(champion), len(challenger)))
-    overlap = min(1.0, len(paired) / denominator)
-    return paired, float(overlap)
+    overlap_denominator = max(1, min(len(champion), len(challenger)))
+    overlap = min(1.0, len(paired) / overlap_denominator)
+    availability = min(1.0, len(paired) / max(len(outcome_universe), 1))
+    return paired, float(overlap), float(availability)
 
 
 def compare_methods(
@@ -334,7 +358,7 @@ def compare_methods(
 ) -> tuple[dict[str, object], ExperimentRecord]:
     """Create one paired champion/challenger evidence record on identical player-weeks."""
 
-    paired, overlap = _paired_rows(
+    paired, overlap, data_availability = _paired_rows(
         predictions,
         target=target,
         champion_method=champion_method,
@@ -355,6 +379,7 @@ def compare_methods(
     effect = float(paired["effect"].mean()) if bootstrap is None else bootstrap.effect
     ci_low = float("nan") if bootstrap is None else bootstrap.ci_low
     ci_high = float("nan") if bootstrap is None else bootstrap.ci_high
+    p_value = None if bootstrap is None else float(1.0 - bootstrap.probability_improves)
     seasons = int(pd.to_numeric(paired["season"], errors="coerce").nunique())
     tier = (
         EvidenceTier.MULTI_SEASON_ISOLATED
@@ -380,11 +405,13 @@ def compare_methods(
             paired, effect_column="effect", group_columns=("season", "week")
         ),
         coverage=overlap,
-        data_availability=overlap,
+        data_availability=data_availability,
         negative_control_passed=negative_control_passed,
         downstream_decision_effect=downstream_decision_effect,
+        p_value=p_value,
     )
-    (promotion_policy or PromotionPolicy()).evaluate(record)
+    policy = promotion_policy or PromotionPolicy()
+    policy.evaluate(record)
 
     champion_coverage = float(paired["covered_80_champion"].mean())
     challenger_coverage = float(paired["covered_80_challenger"].mean())
@@ -404,6 +431,7 @@ def compare_methods(
         "paired_rows": int(len(paired)),
         "paired_seasons": seasons,
         "overlap_rate": overlap,
+        "data_availability": data_availability,
         "champion_mean_pinball": float(paired["mean_pinball_champion"].mean()),
         "challenger_mean_pinball": float(paired["mean_pinball_challenger"].mean()),
         "pinball_effect_champion_minus_challenger": effect,
@@ -412,6 +440,8 @@ def compare_methods(
         "probability_improves": (
             float(bootstrap.probability_improves) if bootstrap is not None else float("nan")
         ),
+        "p_value": p_value,
+        "fdr_q_value": None,
         "champion_q50_mae": float(paired["absolute_q50_error_champion"].mean()),
         "challenger_q50_mae": float(paired["absolute_q50_error_challenger"].mean()),
         "champion_80_coverage": champion_coverage,
@@ -438,6 +468,7 @@ def build_evidence_bundle(
     seed: int = 42,
     negative_control_methods: Iterable[str] = (),
     calibration_tolerance: float = 0.05,
+    promotion_policy: PromotionPolicy | None = None,
 ) -> EvidenceBundle:
     """Build one canonical evidence ledger across targets and model families."""
 
@@ -456,6 +487,7 @@ def build_evidence_bundle(
     negative_controls = set(negative_control_methods)
     comparison_rows: list[dict[str, object]] = []
     ledger = ExperimentLedger()
+    policy = promotion_policy or PromotionPolicy()
     for target, target_rows in predictions.groupby("target", sort=True):
         available_methods = sorted(set(target_rows["method"].astype(str)))
         challengers = (
@@ -475,9 +507,26 @@ def build_evidence_bundle(
                 seed=seed + offset * 1009,
                 negative_control_passed=challenger in negative_controls,
                 calibration_tolerance=calibration_tolerance,
+                promotion_policy=policy,
             )
             comparison_rows.append(row)
             ledger.add(record)
+
+    ledger.apply_fdr()
+    rows_by_id = {row["experiment_id"]: row for row in comparison_rows}
+    for record in ledger.records:
+        if record.fdr_q_value is not None and (
+            not np.isfinite(record.fdr_q_value) or record.fdr_q_value > policy.maximum_fdr_q
+        ):
+            record.blockers.append("fdr_q_above_threshold")
+        record.blockers = list(dict.fromkeys(record.blockers))
+        record.promoted = not record.blockers
+        row = rows_by_id.get(record.experiment_id)
+        if row is not None:
+            row["p_value"] = record.p_value
+            row["fdr_q_value"] = record.fdr_q_value
+            row["promotion_status"] = "eligible" if record.promoted else "blocked"
+            row["blockers"] = "|".join(record.blockers)
 
     return EvidenceBundle(
         predictions=predictions.sort_values(list(CANONICAL_KEYS), kind="mergesort").reset_index(
