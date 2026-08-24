@@ -137,7 +137,7 @@ Every comparison reports:
 - champion and challenger mean pinball;
 - paired effect and confidence interval;
 - bootstrap probability of improvement;
-- one-sided bootstrap p-value;
+- finite-sample one-sided bootstrap p-value;
 - Benjamini-Hochberg FDR q-value;
 - q50 MAE;
 - 80% interval coverage;
@@ -180,20 +180,24 @@ This is a signal/leakage sanity check, not proof that every possible leakage cha
 
 Evidence Factory treats all challenger-vs-target-champion comparisons in a run as one multiple-testing family.
 
-For each paired bootstrap comparison it records a one-sided p-value:
+The paired bootstrap first measures the fraction of resampled effects that do not favor the challenger. When `B` bootstrap draws are available, the publication p-value uses a finite-sample plus-one tail estimate:
 
 ```text
-p = 1 - P(challenger improves)
+p = (unfavorable bootstrap draws + 1) / (B + 1)
 ```
 
-The experiment ledger then applies Benjamini-Hochberg correction across the family and writes an FDR q-value back into both:
+This prevents a finite bootstrap run from publishing an exact `p=0` simply because every sampled effect happened to land on the favorable side.
+
+The complete run then applies Benjamini-Hochberg correction across all target/challenger comparisons and writes the run-wide FDR q-value back into both:
 
 ```text
 paired_comparisons.csv
 experiment_ledger.csv
 ```
 
-The current promotion policy uses `maximum_fdr_q=0.10`. Invalid/non-finite q-values or values above the threshold fail closed when FDR evidence is present.
+Target-local q-values are overwritten in the final publication bundle. A regression test explicitly covers the case where locally acceptable comparisons become blocked once the complete run-wide family is corrected.
+
+The current promotion policy uses `maximum_fdr_q=0.10`. Missing, invalid, non-finite or above-threshold run-wide FDR evidence fails closed.
 
 FDR correction does not turn a historical comparison into production authority. It only closes one statistical loophole in a larger evidence policy.
 
@@ -215,7 +219,7 @@ The current production gate still requires, where applicable:
 - sufficient evaluable data availability;
 - negative controls;
 - downstream fantasy decision evidence;
-- acceptable FDR evidence.
+- acceptable run-wide FDR evidence.
 
 Evidence Factory additionally blocks challengers whose 80% interval coverage is outside the configured tolerance or whose quantiles cross.
 
@@ -294,7 +298,7 @@ artifacts/evidence_factory/
 - targets;
 - bootstrap settings;
 - calibration tolerance;
-- multiple-testing family and FDR rule;
+- multiple-testing family, finite-sample p-value rule and FDR rule;
 - negative-control definition and pass rule;
 - every input path, byte count, and SHA-256;
 - graph scoring-comparability status;
@@ -354,7 +358,7 @@ The ordinary repository CI runs the Evidence Factory against the checked-in froz
 - the artifact pipeline completes on real stored benchmark schemas;
 - fantasy points resolves to `quantile_engine`;
 - carries resolves to `position_specific_quantile`;
-- all comparisons receive FDR q-values;
+- all comparisons receive finite, non-zero p-values and FDR q-values;
 - the manifest remains research-only and non-automatic.
 
 This is a schema/reproducibility guard, not a new benchmark run and not evidence of model promotion.
