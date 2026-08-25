@@ -18,10 +18,13 @@ v2 creates a new research identity instead:
 - schedules come from one pinned `nfldata` commit;
 - every historical injury source has an exact byte count and SHA-256;
 - the aggregate numerical and injury identities are registered in Git;
+- the exact model configuration bytes are SHA-pinned;
+- the statistical/evaluation contract is stored in the same registry;
 - the raw input bundle is retained as a GitHub Actions artifact while artifact retention permits;
+- after artifact expiry, source URLs may be used only as transport for hash-verified rehydration;
 - the experiment never claims byte-for-byte historical production feature parity.
 
-The canonical registry is `experiments/historical_official_availability_v2/registered_inputs.json`.
+The canonical registry is `experiments/historical_official_availability_v2/registered_inputs.json`. The registered runner treats that file as the experiment contract, not merely documentation.
 
 ## Primary scope: regular season
 
@@ -48,6 +51,8 @@ The canonical historical adapter maps them to `full`, `limited`, and `did_not_pa
 
 Official evidence is selected only when its archived `date_modified` is at or before the player-game prediction cutoff. The registered cutoff is 1.5 hours before kickoff. Later injury-report revisions are not permitted to rewrite an earlier prediction state.
 
+The structured-evidence adapter uses this explicit `prediction_cutoff` when it exists. Its configured one-hour safety lag is only a fallback for rows without an explicit cutoff, so it does **not** subtract another hour from this experiment's registered boundary.
+
 Source coverage and evidence prevalence are deliberately distinct:
 
 - **source coverage** asks whether the team's official injury-report source was demonstrably observable before the cutoff;
@@ -65,9 +70,29 @@ Its schedule source is pinned to `nfldata` commit:
 
 `67fa4d790ba09e5f0e2868b49ef9dbbd8946bb22`
 
+The registered model configuration is `configs/base.yaml`, SHA-256:
+
+`fcec5d12b061c7cdf413d159f9486af2b19823b973f6fac4db5f56d2d3435b85`
+
 The target is `fantasy_points_ppr` for QB, RB, WR, and TE rows.
 
-Weekly statistical features remain leakage-safe: lagged and rolling statistics are built from chronologically prior observations, and the benchmark trains each fold only on earlier season-week blocks.
+Weekly statistical features remain leakage-safe: player lagged/rolling/EWM features use prior observations, position priors and team/opponent histories are shifted before use, raw same-week outcome columns are excluded by an explicit allowlist, and the benchmark trains each fold only on earlier season-week blocks.
+
+## Pregame-context provenance sensitivity
+
+The final nflverse games table also contains `spread_line`, `total_line`, `roof`, `temp`, and `wind`. The upstream dataset describes these as game-level line/condition values, but the final historical table does not carry an as-of timestamp proving that each stored value was exactly the value available at the registered 1.5-hour cutoff.
+
+Those fields therefore remain **unverified for the strict point-in-time claim**, even though they are plausible pregame variables in ordinary modelling.
+
+The primary registered run is not rewritten after discovering this provenance limitation. Instead, a separately identified sensitivity analysis repeats the same REG experiment after removing exactly these five fields from every model variant:
+
+- `spread_line`
+- `total_line`
+- `roof`
+- `temp`
+- `wind`
+
+All frozen source bytes, injury evidence, outcomes, walk-forward folds, 2,000-bootstrap procedure, negative controls, FDR handling, and activation gates remain unchanged. Agreement between the primary and sensitivity runs strengthens robustness. Material disagreement blocks activation and indicates that a genuinely timestamped pregame context source is required before the official-availability result can be trusted operationally.
 
 ## Walk-forward evaluation
 
@@ -128,6 +153,29 @@ The experiment evaluates more than pinball loss. It records q50 MAE and q10-q90 
 
 An accuracy gain that materially damages uncertainty calibration is not eligible for activation review.
 
+## Fail-closed registered execution
+
+The registered runner verifies the complete experiment identity **before fitting**:
+
+1. numerical baseline ID, aggregate identity, and pinned schedule commit;
+2. exact numerical source set, byte counts, and SHA-256 values in both the registry and restored manifest;
+3. the raw numerical file bytes themselves;
+4. exact injury source set, byte counts, and SHA-256 values in both the registry and restored manifest;
+5. the raw injury file bytes themselves;
+6. `configs/base.yaml` against its registered SHA-256;
+7. REG scope, 1.5-hour prediction boundary, target, seasons, bootstrap count, FDR threshold, consistency requirements, sample-size requirements, and calibration limits from the registry;
+8. `automatic_promotion == false`.
+
+The command line cannot override target, seasons, model config, bootstrap count, or statistical thresholds. Adversarial tests intentionally mutate raw files, manifests, the model config, scope, and promotion authority to ensure the runner fails closed.
+
+## Source recovery after artifact expiry
+
+The manual workflow first attempts to restore the retained Actions source artifact. If it is unavailable or has expired, `scripts/rehydrate_registered_historical_sources_v2.py` downloads each source from its registered upstream URL.
+
+The URL is **not** trusted as identity. Each recovered file must match the Git-registered byte count and SHA-256 before it is accepted. A changed mutable release therefore fails the experiment rather than silently creating a new baseline. The registered runner then independently verifies the rehydrated source set a second time before fitting.
+
+The evidence bundle records whether sources came from the retained artifact or hash-verified rehydration.
+
 ## Authority boundary
 
 Every artifact produced by this experiment is `research_evidence_only`.
@@ -141,36 +189,25 @@ A successful result means only that the official-availability family is eligible
 - authorize broader news/persona evidence;
 - automatically justify using the feature in every fantasy league or target.
 
-If the combined official-availability family passes all gates, the next scientific step should decompose practice participation and game designation under a registered follow-up rather than guessing which sub-signal generated the lift.
+If the combined official-availability family passes all gates **and** remains directionally/statistically credible in the pregame-context sensitivity analysis, the next scientific step should decompose practice participation and game designation under a registered follow-up rather than guessing which sub-signal generated the lift.
 
 ## Reproduction
 
-The manual GitHub Actions workflow `Historical official availability v2 REG experiment` restores the registered source-byte artifact, captures the exact Python/package environment, revalidates the core corpus contracts, and runs the registered experiment.
+The manual GitHub Actions workflow `Historical official availability v2 REG experiment` has no user-editable modelling inputs. It restores or hash-rehydrates the registered source bytes, captures the exact Python/package environment, revalidates the core corpus and tamper-resistance contracts, and runs the registry-defined experiment.
 
-The local operator is:
+The local operator is intentionally compact:
 
 ```bash
 python scripts/run_reg_historical_intelligence_experiment_v2.py \
   --numerical-root data/raw/historical_numerical_baseline_v2 \
   --injury-root data/raw/historical_injury_archive_v2 \
-  --seasons 2020 2021 2022 2023 2024 \
-  --target fantasy_points_ppr \
-  --config configs/base.yaml \
-  --bootstrap-samples 2000 \
-  --minimum-source-coverage 0.80 \
-  --maximum-fdr-q 0.10 \
-  --minimum-consistency 0.55 \
-  --minimum-paired-rows 250 \
-  --minimum-seasons 2 \
-  --minimum-blocks 8 \
-  --minimum-position-rows 50 \
-  --maximum-overall-coverage-gap-regression 0.02 \
-  --maximum-position-coverage-gap-regression 0.05 \
   --output-dir artifacts/intelligence_ablations/historical_official_v2_reg
 ```
 
-The runner refuses to execute this registered analysis if the numerical baseline identity differs from the registered SHA.
+All scientific parameters come from `registered_inputs.json`. The runner refuses to execute if the numerical bytes, injury bytes, model config, or registered experiment contract drift.
 
 ## Result
 
-The result is intentionally not pre-populated in this protocol document. It should be written only from the completed immutable Actions evidence bundle, including the primary effect, confidence interval, FDR q-value, consistency metrics, negative controls, calibration diagnostics, source coverage, blockers, and artifact identity.
+The result is intentionally not pre-populated in this protocol document. It should be written only from the completed immutable Actions evidence bundle, including the primary effect, confidence interval, FDR q-value, consistency metrics, negative controls, calibration diagnostics, source coverage, blockers, exact execution environment, and artifact identity.
+
+The pregame-context sensitivity result should be recorded separately rather than merged into the primary estimate.
