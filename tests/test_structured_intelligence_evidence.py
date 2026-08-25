@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from player_state_engine.evaluation.ablations import AblationRun
 from player_state_engine.evaluation.benchmark import BenchmarkResult
@@ -10,6 +11,7 @@ from player_state_engine.evaluation.intelligence_evidence import (
     build_incremental_feature_sets,
     evaluate_incremental_intelligence_evidence,
 )
+from player_state_engine.state_graph.experiments import EvidenceTier
 
 TARGET = "fantasy_points_ppr"
 
@@ -94,6 +96,24 @@ def _runs(frame: pd.DataFrame) -> dict[str, AblationRun]:
     return {name: _fake_run(name, error, frame) for name, error in errors.items()}
 
 
+def _evaluate(
+    frame: pd.DataFrame,
+    *,
+    evidence_tier: EvidenceTier = EvidenceTier.SYNTHETIC_ONLY,
+) -> pd.DataFrame:
+    return evaluate_incremental_intelligence_evidence(
+        frame,
+        _runs(frame),
+        TARGET,
+        evidence_tier=evidence_tier,
+        bootstrap_samples=400,
+        minimum_position_rows=50,
+        minimum_paired_rows=250,
+        minimum_seasons=2,
+        minimum_blocks=8,
+    )
+
+
 def test_incremental_feature_hierarchy_excludes_audit_coverage_and_raw_outcomes() -> None:
     frame = _evaluation_frame()
     frame["opportunity_target_share"] = 0.99
@@ -121,18 +141,8 @@ def test_incremental_feature_hierarchy_excludes_audit_coverage_and_raw_outcomes(
     assert "news_structured_as_of_utc" not in variants["structured_news"]
 
 
-def test_strong_synthetic_incremental_evidence_can_clear_research_review_gate() -> None:
-    frame = _evaluation_frame(include_coverage=True)
-    evidence = evaluate_incremental_intelligence_evidence(
-        frame,
-        _runs(frame),
-        TARGET,
-        bootstrap_samples=400,
-        minimum_position_rows=50,
-        minimum_paired_rows=250,
-        minimum_seasons=2,
-        minimum_blocks=8,
-    )
+def test_strong_synthetic_evidence_can_clear_model_gate_but_not_activation_review() -> None:
+    evidence = _evaluate(_evaluation_frame(include_coverage=True))
 
     assert set(evidence["family"]) == {
         "official_availability",
@@ -146,28 +156,68 @@ def test_strong_synthetic_incremental_evidence_can_clear_research_review_gate() 
     assert (evidence["fdr_q_value"] <= 0.10).all()
     assert evidence["identity_control_passed"].all()
     assert (evidence["source_coverage"] == 1.0).all()
-    assert evidence["eligible_for_activation_review"].all()
+    assert (evidence["source_coverage_measurement_rate"] == 1.0).all()
+    assert evidence["model_gate_passed"].all()
+    assert (~evidence["eligible_for_activation_review"]).all()
+    assert (evidence["evidence_tier"] == int(EvidenceTier.SYNTHETIC_ONLY)).all()
+    assert all(
+        "evidence_tier_below_activation_review" in blockers
+        for blockers in evidence["activation_review_blockers"]
+    )
     assert (evidence["authority"] == "research_evidence_only").all()
     assert (~evidence["automatic_promotion"]).all()
     assert (~evidence["production_projection_changed"]).all()
 
 
-def test_missing_source_coverage_blocks_activation_review_even_with_model_lift() -> None:
-    frame = _evaluation_frame(include_coverage=False)
-    evidence = evaluate_incremental_intelligence_evidence(
-        frame,
-        _runs(frame),
-        TARGET,
-        bootstrap_samples=400,
-        minimum_position_rows=50,
-        minimum_paired_rows=250,
-        minimum_seasons=2,
-        minimum_blocks=8,
+def test_explicit_tier_two_evidence_can_clear_activation_review_mechanics() -> None:
+    evidence = _evaluate(
+        _evaluation_frame(include_coverage=True),
+        evidence_tier=EvidenceTier.MULTI_SEASON_ISOLATED,
     )
 
+    assert evidence["model_gate_passed"].all()
+    assert evidence["eligible_for_activation_review"].all()
+    assert (evidence["evidence_tier"] == int(EvidenceTier.MULTI_SEASON_ISOLATED)).all()
+    assert evidence["activation_review_blockers"].map(len).eq(0).all()
+
+
+def test_missing_source_coverage_blocks_tier_two_review_even_with_model_lift() -> None:
+    evidence = _evaluate(
+        _evaluation_frame(include_coverage=False),
+        evidence_tier=EvidenceTier.MULTI_SEASON_ISOLATED,
+    )
+
+    assert evidence["model_gate_passed"].all()
     assert (~evidence["eligible_for_activation_review"]).all()
     assert evidence["source_coverage"].isna().all()
     assert all(
         "source_coverage_not_measured" in blockers
         for blockers in evidence["activation_review_blockers"]
     )
+
+
+def test_partial_source_coverage_measurement_fails_closed() -> None:
+    frame = _evaluation_frame(include_coverage=True)
+    frame.loc[frame.index[0], "official_availability_source_covered"] = np.nan
+    evidence = _evaluate(frame, evidence_tier=EvidenceTier.MULTI_SEASON_ISOLATED)
+    official = evidence.loc[evidence["family"].eq("official_availability")].iloc[0]
+
+    assert float(official["source_coverage_measurement_rate"]) < 1.0
+    assert "source_coverage_incomplete" in official["activation_review_blockers"]
+    assert not bool(official["eligible_for_activation_review"])
+
+
+def test_conflicting_source_coverage_aliases_are_rejected() -> None:
+    frame = _evaluation_frame(include_coverage=True)
+    frame["official_structured_source_covered"] = 0
+
+    with pytest.raises(ValueError, match="Conflicting official_availability source coverage aliases"):
+        _evaluate(frame, evidence_tier=EvidenceTier.MULTI_SEASON_ISOLATED)
+
+
+def test_invalid_source_coverage_value_is_rejected() -> None:
+    frame = _evaluation_frame(include_coverage=True)
+    frame.loc[frame.index[0], "structured_news_source_covered"] = "probably"
+
+    with pytest.raises(ValueError, match="unrecognized binary values"):
+        _evaluate(frame, evidence_tier=EvidenceTier.MULTI_SEASON_ISOLATED)
