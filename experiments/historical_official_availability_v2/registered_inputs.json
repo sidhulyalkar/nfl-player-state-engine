@@ -4,6 +4,10 @@
   "authority": "research_evidence_only",
   "registered_at_utc": "2026-08-25T07:23:25Z",
   "historical_production_parity_verified": false,
+  "model_config": {
+    "path": "configs/base.yaml",
+    "sha256": "fcec5d12b061c7cdf413d159f9486af2b19823b973f6fac4db5f56d2d3435b85"
+  },
   "numerical_baseline": {
     "baseline_id": "historical-numerical-v2-a036c410e0bb1ec670e3",
     "identity_sha256": "a036c410e0bb1ec670e3fa0f7d6e14e1433322b6eeabdaa81c25c8daee43a29c",
