@@ -37,10 +37,11 @@ That distinction matters when mutable feeds are corrected, republished, delayed,
 Each successful capture stores:
 
 - the exact mutable injury source bytes as `injuries_source.csv`;
+- the exact commit-pinned schedule bytes as `schedule_source.csv`;
 - a normalized `availability_snapshot.csv` containing only current-week availability fields and game cutoffs;
-- `manifest.json` with the collection time, source URL, byte count, SHA-256, commit-pinned schedule identity, row counts, and authority metadata.
+- `manifest.json` with collection time, source URLs, byte counts, SHA-256 identities, schedule commit, team-observation diagnostics, row counts, and authority metadata.
 
-The normalized snapshot intentionally excludes player game outcomes. Its manifest asserts `contains_player_outcomes = false`.
+The bundle is therefore self-contained even if an upstream source later changes or disappears. The normalized snapshot intentionally excludes player game outcomes, and the manifest asserts `contains_player_outcomes = false`.
 
 Snapshot directories are content/time addressed:
 
@@ -61,6 +62,24 @@ If the configured injury URL returns HTTP 404, the collector writes a `source_un
 
 This is important because nflverse injury releases have had availability gaps in prior seasons.
 
+## Conservative team-source audit
+
+A globally downloadable file does **not** prove every scheduled team's report is complete.
+
+For every scheduled team, `manifest.json` records a `team_observation` entry containing:
+
+- game and team identity;
+- the game's 1.5-hour cutoff;
+- actual collection time;
+- whether collection occurred before that cutoff;
+- `team_row_observed`, meaning at least one current-week source row for that team existed in the downloaded bytes.
+
+The manifest also records `scheduled_teams`, `teams_with_source_rows`, and `conservative_team_row_observation_rate`.
+
+A scheduled team with zero source rows is deliberately **not** interpreted as a clean injury report. It may mean no listed injuries, a delayed team report, or incomplete upstream coverage. Later confirmation must keep that state unresolved unless report completeness is established independently.
+
+This mirrors the fail-closed philosophy of the historical corpus: absence of evidence is never promoted into evidence of health merely because a file downloaded successfully.
+
 ## Schedule authority
 
 Each capture resolves the latest Git commit touching `nfldata/data/games.csv` at capture time and then downloads `games.csv` from that exact commit SHA. The snapshot manifest records:
@@ -70,7 +89,7 @@ Each capture resolves the latest Git commit touching `nfldata/data/games.csv` at
 - schedule byte count;
 - schedule SHA-256.
 
-The schedule source is therefore reproducible even though the injury feed itself is mutable.
+The exact schedule bytes are also retained in the snapshot directory.
 
 ## Current-week semantics
 
@@ -96,6 +115,15 @@ The initial workflow is deliberately **manual-only**. Before the regular season 
 During the season, the safest collection policy is multiple immutable captures during each reporting week, including one sufficiently close to the 1.5-hour cutoff. Later confirmation should select the latest capture that was actually collected before each game's cutoff.
 
 A scheduled capture workflow can be added only after the manual path is qualified and the 2026 source URL is observed to be stable enough for unattended collection.
+
+## Workflow concurrency
+
+PR qualification and scientific capture use different concurrency semantics:
+
+- obsolete PR-head qualification runs are canceled when a newer commit arrives;
+- each manual capture uses its unique workflow run ID and can never be canceled by a later manual capture.
+
+This keeps CI economical without discarding a real point-in-time scientific observation.
 
 ## Artifact-retention limitation
 
