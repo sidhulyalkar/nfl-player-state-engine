@@ -32,6 +32,7 @@ jobs:
             scripts/record_shadow_checkpoint.py \
             scripts/settle_shadow_checkpoint.py \
             scripts/build_structured_intelligence_ledger.py \
+            scripts/run_structured_intelligence_ablation.py \
             scripts/run_play_call_benchmark.py \
             scripts/run_game_simulation_replay.py \
             scripts/weekly_game_intelligence_refresh.py \
@@ -243,6 +244,13 @@ jobs:
           assert snapshot['production_feature_enabled'].eq(False).all()
           assert set(snapshot['authority']) == {'research_evidence_only'}
           PY
+      - name: Qualify structured intelligence ablation contracts
+        run: |
+          python scripts/run_structured_intelligence_ablation.py --help >/dev/null
+          pytest -q \
+            tests/test_intelligence_evidence_provenance.py \
+            tests/test_structured_intelligence_evidence.py \
+            tests/test_structured_intelligence_research_features.py
       - run: pytest
 
   frontend:
