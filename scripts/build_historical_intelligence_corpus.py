@@ -91,7 +91,7 @@ def _combined_archive_identity(
 
 
 def _persist_ledger(evidence: pd.DataFrame, root: Path) -> dict[str, object]:
-    records = evidence.where(pd.notna(evidence), None).to_dict(orient="records")
+    records = evidence.astype(object).where(pd.notna(evidence), None).to_dict(orient="records")
     typed = [OfficialAvailabilityEvidence.model_validate(record) for record in records]
     claims = canonicalize_official_availability(typed)
     ledger = StructuredClaimLedger(root)
@@ -268,10 +268,14 @@ def main() -> None:
         encoding="utf-8",
     )
     ledger = _persist_ledger(corpus.official_evidence, args.output_dir / "ledger")
-    if not ledger["health"]["integrity_verified"]:
+    health = ledger.get("health")
+    if not isinstance(health, dict):
+        raise ValueError("Historical structured-claim ledger returned invalid health metadata")
+    if not health.get("integrity_verified"):
+        failures = health.get("integrity_failures", [])
         raise ValueError(
             "Historical structured-claim ledger failed integrity verification: "
-            + "; ".join(str(item) for item in ledger["health"]["integrity_failures"])
+            + "; ".join(str(item) for item in failures)
         )
 
     run_manifest = {
