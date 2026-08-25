@@ -9,6 +9,20 @@ from player_state_engine.intelligence.news import claims_to_feature_snapshots, e
 from player_state_engine.intelligence.schemas import PublicDocument
 
 
+def _official_document(*, document_id: str, text: str, player_name: str | None = None) -> PublicDocument:
+    return PublicDocument(
+        document_id=document_id,
+        player_id="p1",
+        player_name=player_name,
+        platform="team_official",
+        source_url=f"https://example.com/{document_id}",
+        text=text,
+        authored_at_utc=datetime(2026, 9, 9, 16, 0, tzinfo=UTC),
+        collected_at_utc=datetime(2026, 9, 9, 17, 0, tzinfo=UTC),
+        metadata={"source_reliability": 0.95},
+    )
+
+
 def test_official_availability_preserves_evidence_families() -> None:
     evidence = pd.DataFrame(
         [
@@ -56,3 +70,38 @@ def test_news_claims_retain_provenance_and_build_features() -> None:
     features = claims_to_feature_snapshots(claims)
     assert features.iloc[-1]["news_starter_role"] > 0
     assert features.iloc[-1]["news_workload_limit"] < 0
+
+
+def test_starter_role_accepts_explicit_player_reference() -> None:
+    document = _official_document(
+        document_id="starter-player",
+        text="The team named the player the starter for Week 1.",
+        player_name="Player One",
+    )
+    claims = extract_news_claims([document])
+    starters = [claim for claim in claims if claim.claim_type == "starter_role"]
+    assert len(starters) == 1
+    assert starters[0].evidence_class == "OFFICIAL"
+    assert starters[0].direction == 1.0
+
+
+def test_starter_role_accepts_exact_known_player_name() -> None:
+    document = _official_document(
+        document_id="starter-name",
+        text="The team named Player One the starter for Week 1.",
+        player_name="Player One",
+    )
+    claims = extract_news_claims([document])
+    starters = [claim for claim in claims if claim.claim_type == "starter_role"]
+    assert len(starters) == 1
+    assert starters[0].evidence_class == "OFFICIAL"
+
+
+def test_starter_role_does_not_accept_arbitrary_named_phrase() -> None:
+    document = _official_document(
+        document_id="starter-false-positive",
+        text="The club named the stadium starter package after a sponsor.",
+        player_name="Player One",
+    )
+    claims = extract_news_claims([document])
+    assert all(claim.claim_type != "starter_role" for claim in claims)

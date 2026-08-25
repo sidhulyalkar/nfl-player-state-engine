@@ -19,6 +19,7 @@ import type {
 } from '../../shared/types';
 import type { EvidenceFactoryResponse } from './evidenceTypes';
 import type { ShadowSeasonResponse } from './shadowSeasonTypes';
+import type { StructuredIntelligenceResponse } from './structuredIntelligenceTypes';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/pse${path}`, {
@@ -111,6 +112,10 @@ export const api = {
   shadowEvaluation: () => request<ShadowEvaluationResponse>('/v1/model/shadow-evaluation'),
   shadowSeason: (season = 2026) =>
     request<ShadowSeasonResponse>(`/v1/model/shadow-season${query({ season })}`),
+  structuredIntelligence: (asOf?: string) =>
+    request<StructuredIntelligenceResponse>(
+      `/v1/model/structured-intelligence${query({ as_of: asOf })}`,
+    ),
   evidenceFactory: (target = 'fantasy_points_ppr') =>
     request<EvidenceFactoryResponse>(`/v1/model/evidence-factory${query({ target })}`),
   teamContext: (season?: number, week?: number) =>

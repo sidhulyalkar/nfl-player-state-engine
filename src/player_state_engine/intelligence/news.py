@@ -136,7 +136,10 @@ _PATTERNS: dict[ClaimType, tuple[tuple[str, float], ...]] = {
         (r"\b(?:returned to practice|back at practice|full participant|cleared to practice)\b", 0.75),
     ),
     "starter_role": (
-        (r"\b(?:will start|named (?:the )?starter|starting role|remain(?:s)? the starter)\b", 1.0),
+        (
+            r"\b(?:will start|named (?:the )?starter|named (?:(?:the )?player|him|her|them) (?:the )?starter|starting role|remain(?:s)? the starter)\b",
+            1.0,
+        ),
     ),
     "backup_role": ((r"\b(?:backup role|second[- ]string|will back up|reserve role)\b", -0.65),),
     "committee_role": (
@@ -209,6 +212,29 @@ def _evidence_class(document: PublicDocument, excerpt: str) -> EvidenceClass:
     return "ANALYSIS"
 
 
+def _match_claim_pattern(
+    document: PublicDocument,
+    claim_type: ClaimType,
+    patterns: tuple[tuple[str, float], ...],
+) -> tuple[re.Match[str], float] | None:
+    for pattern, direction in patterns:
+        match = re.search(pattern, document.text, flags=re.IGNORECASE)
+        if match:
+            return match, direction
+
+    if claim_type != "starter_role":
+        return None
+    player_name = " ".join((document.player_name or "").split())
+    if not player_name:
+        return None
+    match = re.search(
+        rf"\bnamed\s+(?:the\s+)?{re.escape(player_name)}\s+(?:the\s+)?starter\b",
+        document.text,
+        flags=re.IGNORECASE,
+    )
+    return (match, 1.0) if match else None
+
+
 def extract_news_claims(
     documents: Iterable[PublicDocument],
     *,
@@ -232,39 +258,38 @@ def extract_news_claims(
             )
         )
         for claim_type, patterns in _PATTERNS.items():
-            for pattern, direction in patterns:
-                match = re.search(pattern, document.text, flags=re.IGNORECASE)
-                if not match:
-                    continue
-                excerpt = _excerpt(document.text, match)
-                evidence_class = _evidence_class(document, excerpt)
-                author_signal = 0.08 if document.author_handle is not None else 0.0
-                confidence = min(
-                    0.50 + 0.35 * _EVIDENCE_WEIGHT[evidence_class] + author_signal,
-                    0.98,
+            matched = _match_claim_pattern(document, claim_type, patterns)
+            if matched is None:
+                continue
+            match, direction = matched
+            excerpt = _excerpt(document.text, match)
+            evidence_class = _evidence_class(document, excerpt)
+            author_signal = 0.08 if document.author_handle is not None else 0.0
+            confidence = min(
+                0.50 + 0.35 * _EVIDENCE_WEIGHT[evidence_class] + author_signal,
+                0.98,
+            )
+            magnitude = min(abs(direction), 1.0)
+            claim_id = f"{document.document_id}:{claim_type}:{match.start()}"
+            claims.append(
+                NewsClaim(
+                    claim_id=claim_id,
+                    player_id=document.player_id,
+                    claim_type=claim_type,
+                    direction=direction,
+                    magnitude=magnitude,
+                    source_url=document.source_url,
+                    published_at_utc=published,
+                    collected_at_utc=document.collected_at_utc,
+                    evidence_text=excerpt,
+                    extractor_confidence=confidence,
+                    source_reliability=max(0.0, min(reliability, 1.0)),
+                    document_id=document.document_id,
+                    evidence_class=evidence_class,
+                    latent_state=_CLAIM_STATE[claim_type],
+                    decay_half_life_days=_CLAIM_HALF_LIFE.get(claim_type, 7.0),
                 )
-                magnitude = min(abs(direction), 1.0)
-                claim_id = f"{document.document_id}:{claim_type}:{match.start()}"
-                claims.append(
-                    NewsClaim(
-                        claim_id=claim_id,
-                        player_id=document.player_id,
-                        claim_type=claim_type,
-                        direction=direction,
-                        magnitude=magnitude,
-                        source_url=document.source_url,
-                        published_at_utc=published,
-                        collected_at_utc=document.collected_at_utc,
-                        evidence_text=excerpt,
-                        extractor_confidence=confidence,
-                        source_reliability=max(0.0, min(reliability, 1.0)),
-                        document_id=document.document_id,
-                        evidence_class=evidence_class,
-                        latent_state=_CLAIM_STATE[claim_type],
-                        decay_half_life_days=_CLAIM_HALF_LIFE.get(claim_type, 7.0),
-                    )
-                )
-                break
+            )
     return claims
 
 
