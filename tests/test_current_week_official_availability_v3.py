@@ -128,7 +128,7 @@ def test_registered_v3_contract_matches_executable_and_refuses_parameter_drift()
 
     drifted = copy.deepcopy(registry)
     drifted["evaluation_contract"]["bootstrap_samples"] = 1000
-    with pytest.raises(ValueError, match="bootstrap count"):
+    with pytest.raises(ValueError, match="bootstrap_samples"):
         registered._assert_static_contract(drifted)
 
     drifted = copy.deepcopy(registry)
@@ -142,24 +142,18 @@ def test_registered_v3_contract_matches_executable_and_refuses_parameter_drift()
         registered._assert_static_contract(drifted)
 
 
-def test_v3_authority_cannot_self_promote() -> None:
+def test_v3_authority_cannot_self_promote(tmp_path: Path) -> None:
     registry = registered._load_registry(registered.REGISTRY_PATH)
 
     promoted = copy.deepcopy(registry)
     promoted["automatic_promotion"] = True
-    path = Path("/tmp/v3-promoted-registry.json")
+    path = tmp_path / "v3-promoted-registry.json"
     path.write_text(__import__("json").dumps(promoted), encoding="utf-8")
-    try:
-        with pytest.raises(ValueError, match="automatic promotion"):
-            registered._load_registry(path)
-    finally:
-        path.unlink(missing_ok=True)
+    with pytest.raises(ValueError, match="automatic promotion"):
+        registered._load_registry(path)
 
     activation = copy.deepcopy(registry)
     activation["eligible_for_activation_review"] = True
     path.write_text(__import__("json").dumps(activation), encoding="utf-8")
-    try:
-        with pytest.raises(ValueError, match="self-authorize activation review"):
-            registered._load_registry(path)
-    finally:
-        path.unlink(missing_ok=True)
+    with pytest.raises(ValueError, match="self-authorize activation review"):
+        registered._load_registry(path)
