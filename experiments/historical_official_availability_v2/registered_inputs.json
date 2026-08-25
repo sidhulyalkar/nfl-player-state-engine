@@ -53,7 +53,8 @@
     ]
   },
   "injury_archive": {
-    "identity_sha256": "a1b497a0b91fbf62c56aa548345c9bf8ff8dd8897f5aa3e782bf8fedcd8a2178",
+    "identity_sha256": "c150ff3f78eb48e90e9c907640af855dd15b8f98564dc214ca0e9b61a541cff1",
+    "identity_definition": "SHA-256 over each registered injury source sorted by actual filename including .csv, concatenating filename then file SHA-256, matching verify_source_archive_manifest.",
     "certified_through_season": 2024,
     "files": [
       {
