@@ -1,0 +1,236 @@
+name: historical-official-availability-v1
+
+on:
+  push:
+    branches:
+      - experiment/historical-official-availability-v1
+    paths:
+      - ".github/workflows/historical-official-availability-v1.yml"
+      - "scripts/acquire_historical_injury_archive.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: historical-official-availability-v1
+  cancel-in-progress: false
+
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install experiment environment
+        run: python -m pip install -e '.[dev,intelligence,api]'
+
+      - name: Qualify focused acquisition operator
+        run: |
+          ruff check scripts/acquire_historical_injury_archive.py
+          python -m compileall -q scripts/acquire_historical_injury_archive.py
+          python scripts/acquire_historical_injury_archive.py --help >/dev/null
+
+      - name: Acquire exact frozen numerical benchmark sources
+        run: |
+          python scripts/acquire_frozen_benchmark_sources.py \
+            --benchmark-manifest artifacts/reports/benchmark_real/DATA_MANIFEST.json \
+            --output-dir data/raw/frozen_benchmark_sources \
+            --seasons 2021 2022 2023 2024
+
+      - name: Verify numerical source identity before evidence acquisition
+        run: |
+          python scripts/run_historical_intelligence_experiment.py \
+            --benchmark-root artifacts/reports/benchmark_real \
+            --benchmark-source-dir data/raw/frozen_benchmark_sources \
+            --seasons 2021 2022 2023 2024 \
+            --verify-only
+
+      - name: Acquire and freeze historical injury evidence
+        run: |
+          python scripts/acquire_historical_injury_archive.py \
+            --output-dir data/raw/historical_injury_archive \
+            --seasons 2021 2022 2023 2024
+
+      - name: Build point-in-time official availability corpus
+        run: |
+          python scripts/build_historical_intelligence_corpus.py \
+            --data-dir data/raw/historical_injury_archive \
+            --source-manifest data/raw/historical_injury_archive/SOURCE_MANIFEST.csv \
+            --benchmark-root artifacts/reports/benchmark_real \
+            --schedules data/raw/frozen_benchmark_sources/games.csv \
+            --seasons 2021 2022 2023 2024 \
+            --output-dir artifacts/intelligence_corpus/historical_official_v1
+
+      - name: Materialize source coverage preflight before model fitting
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          import pandas as pd
+
+          from player_state_engine.evaluation.frozen_opportunity import load_frozen_prediction_panel
+
+          out = Path('artifacts/experiment_preflight')
+          out.mkdir(parents=True, exist_ok=True)
+          coverage = pd.read_parquet(
+              'artifacts/intelligence_corpus/historical_official_v1/source_coverage.parquet'
+          )
+          panel = load_frozen_prediction_panel('artifacts/reports/benchmark_real')
+          panel = panel.loc[pd.to_numeric(panel['season'], errors='coerce').isin([2021, 2022, 2023, 2024])]
+          keys = ['season', 'week', 'player_id']
+          context = panel[keys + ['position']].drop_duplicates(keys)
+          audited = coverage.merge(context, on=keys, how='left', validate='one_to_one')
+
+          summary = (
+              audited.groupby(['season', 'position'], dropna=False)
+              .agg(
+                  rows=('player_id', 'size'),
+                  injury_source_coverage=('official_injury_report_source_covered', 'mean'),
+                  official_source_coverage=('official_availability_source_covered', 'mean'),
+                  evidence_prevalence=('official_availability_evidence_found', 'mean'),
+              )
+              .reset_index()
+              .sort_values(['season', 'position'])
+          )
+          summary.to_csv(out / 'source_coverage_by_season_position.csv', index=False)
+          overall = {
+              'rows': int(len(audited)),
+              'seasons': sorted(int(value) for value in audited['season'].dropna().unique()),
+              'injury_source_coverage': float(audited['official_injury_report_source_covered'].mean()),
+              'official_source_coverage': float(audited['official_availability_source_covered'].mean()),
+              'evidence_prevalence': float(audited['official_availability_evidence_found'].mean()),
+              'missing_position_rows': int(audited['position'].isna().sum()),
+          }
+          (out / 'source_coverage_overall.json').write_text(
+              json.dumps(overall, indent=2, sort_keys=True) + '\n',
+              encoding='utf-8',
+          )
+          print(json.dumps(overall, indent=2, sort_keys=True))
+          print(summary.to_string(index=False))
+          PY
+
+      - name: Run confirmatory official availability ablation
+        run: |
+          python scripts/run_historical_intelligence_experiment.py \
+            --benchmark-root artifacts/reports/benchmark_real \
+            --benchmark-source-dir data/raw/frozen_benchmark_sources \
+            --corpus-root artifacts/intelligence_corpus/historical_official_v1 \
+            --seasons 2021 2022 2023 2024 \
+            --target fantasy_points_ppr \
+            --config configs/base.yaml \
+            --bootstrap-samples 2000 \
+            --minimum-source-coverage 0.80 \
+            --maximum-fdr-q 0.10 \
+            --minimum-consistency 0.55 \
+            --minimum-paired-rows 250 \
+            --minimum-seasons 2 \
+            --minimum-blocks 8 \
+            --minimum-position-rows 50 \
+            --maximum-overall-coverage-gap-regression 0.02 \
+            --maximum-position-coverage-gap-regression 0.05 \
+            --output-dir artifacts/intelligence_ablations/historical_official_v1
+
+      - name: Summarize experiment gates
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          import pandas as pd
+
+          root = Path('artifacts/intelligence_ablations/historical_official_v1')
+          manifest = json.loads((root / 'run_manifest.json').read_text(encoding='utf-8'))
+          preflight = json.loads(
+              Path('artifacts/experiment_preflight/source_coverage_overall.json').read_text(
+                  encoding='utf-8'
+              )
+          )
+          evidence = pd.read_csv(root / 'incremental_evidence.csv')
+          official = evidence.loc[evidence['family'].eq('official_availability')]
+          if len(official) != 1:
+              raise ValueError(f'Expected one official_availability evidence row, found {len(official)}')
+          row = official.iloc[0].to_dict()
+
+          summary = {
+              'authority': manifest['authority'],
+              'baseline_authority': manifest['baseline_authority'],
+              'historical_production_parity_verified': manifest['historical_production_parity_verified'],
+              'frozen_numerical_baseline_sources_verified': manifest[
+                  'frozen_numerical_baseline_sources_verified'
+              ],
+              'source_coverage_preflight': preflight,
+              'official_availability': row,
+          }
+          (root / 'experiment_summary.json').write_text(
+              json.dumps(summary, indent=2, sort_keys=True, default=str) + '\n',
+              encoding='utf-8',
+          )
+
+          def value(name):
+              result = row.get(name)
+              return 'n/a' if pd.isna(result) else str(result)
+
+          lines = [
+              '# Historical Official Availability Experiment v1',
+              '',
+              f"- Frozen numerical sources verified: **{manifest['frozen_numerical_baseline_sources_verified']}**",
+              f"- Baseline authority: `{manifest['baseline_authority']}`",
+              f"- Historical production parity claimed: **{manifest['historical_production_parity_verified']}**",
+              f"- Preflight source coverage: **{preflight['official_source_coverage']:.3f}**",
+              f"- Evidence prevalence: **{preflight['evidence_prevalence']:.3f}**",
+              f"- Paired rows: **{value('paired_rows')}**",
+              f"- Reference mean pinball: **{value('reference_mean_pinball')}**",
+              f"- Candidate mean pinball: **{value('candidate_mean_pinball')}**",
+              f"- Effect, reference minus candidate: **{value('effect')}**",
+              f"- 95% CI: **[{value('ci_low')}, {value('ci_high')}]**",
+              f"- P-value: **{value('p_value')}**",
+              f"- FDR q-value: **{value('fdr_q_value')}**",
+              f"- Season consistency: **{value('season_consistency')}**",
+              f"- Position consistency: **{value('position_consistency')}**",
+              f"- Week consistency: **{value('week_consistency')}**",
+              f"- Reference 80% coverage: **{value('reference_80_coverage')}**",
+              f"- Candidate 80% coverage: **{value('candidate_80_coverage')}**",
+              f"- Identity negative control passed: **{value('identity_control_passed')}**",
+              f"- Model gate passed: **{value('model_gate_passed')}**",
+              f"- Model blockers: `{value('model_gate_blockers')}`",
+              f"- Eligible for activation review: **{value('eligible_for_activation_review')}**",
+              f"- Activation-review blockers: `{value('activation_review_blockers')}`",
+              '',
+              '> Research evidence only. No production activation or automatic promotion occurs in this workflow.',
+          ]
+          report = '\n'.join(lines) + '\n'
+          (root / 'experiment_summary.md').write_text(report, encoding='utf-8')
+          print(report)
+          with open(Path(__import__('os').environ['GITHUB_STEP_SUMMARY']), 'a', encoding='utf-8') as handle:
+              handle.write(report)
+          PY
+
+      - name: Upload experiment evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-official-availability-v1-results
+          if-no-files-found: warn
+          retention-days: 90
+          path: |
+            artifacts/intelligence_corpus/historical_official_v1
+            artifacts/intelligence_ablations/historical_official_v1
+            artifacts/experiment_preflight
+
+      - name: Upload accepted raw source archive
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-official-availability-v1-raw-sources
+          if-no-files-found: warn
+          retention-days: 90
+          path: |
+            data/raw/frozen_benchmark_sources
+            data/raw/historical_injury_archive
