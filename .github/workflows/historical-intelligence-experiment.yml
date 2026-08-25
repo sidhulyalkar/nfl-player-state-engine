@@ -1,0 +1,45 @@
+name: historical-intelligence-experiment
+
+on:
+  pull_request:
+    paths:
+      - "src/player_state_engine/evaluation/historical_intelligence_experiment.py"
+      - "scripts/acquire_frozen_benchmark_sources.py"
+      - "scripts/run_historical_intelligence_experiment.py"
+      - "tests/test_historical_intelligence_experiment.py"
+      - "docs/modeling/historical_intelligence_experiment.md"
+      - ".github/workflows/historical-intelligence-experiment.yml"
+
+concurrency:
+  group: historical-intelligence-experiment-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e '.[dev,intelligence,api]'
+      - name: Lint experiment implementation
+        run: |
+          ruff check \
+            src/player_state_engine/evaluation/historical_intelligence_experiment.py \
+            scripts/acquire_frozen_benchmark_sources.py \
+            scripts/run_historical_intelligence_experiment.py \
+            tests/test_historical_intelligence_experiment.py
+      - name: Compile experiment implementation
+        run: |
+          python -m compileall -q \
+            src/player_state_engine/evaluation/historical_intelligence_experiment.py \
+            scripts/acquire_frozen_benchmark_sources.py \
+            scripts/run_historical_intelligence_experiment.py \
+            tests/test_historical_intelligence_experiment.py
+      - name: Validate operator CLIs
+        run: |
+          python scripts/acquire_frozen_benchmark_sources.py --help >/dev/null
+          python scripts/run_historical_intelligence_experiment.py --help >/dev/null
+      - name: Run frozen replay contracts
+        run: pytest -q tests/test_historical_intelligence_experiment.py
