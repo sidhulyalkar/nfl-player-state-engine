@@ -11,7 +11,6 @@ from pathlib import Path
 import pandas as pd
 
 from player_state_engine.config import load_config
-from player_state_engine.data.historical import read_historical_table
 from player_state_engine.data.io import read_table, write_table
 from player_state_engine.evaluation.historical_intelligence_experiment import (
     build_historical_feature_replay,
@@ -190,11 +189,11 @@ def main() -> None:
     if not player_paths:
         raise ValueError("Frozen source verification resolved no player-stat files")
     player_stats = pd.concat(
-        [read_historical_table(path) for path in player_paths],
+        [read_table(path) for path in player_paths],
         ignore_index=True,
         sort=False,
     )
-    schedules = read_historical_table(verification.path_for("schedules"))
+    schedules = read_table(verification.path_for("schedules"))
     source_coverage = read_table(coverage_path)
     config = load_config(args.config)
 
@@ -240,13 +239,11 @@ def main() -> None:
         maximum_position_coverage_gap_regression=args.maximum_position_coverage_gap_regression,
     )
 
-    replay_path = Path(write_table(replay.frame, args.output_dir / "replay_features.parquet"))
-    point_in_time_path = Path(
-        write_table(experiment.frame, args.output_dir / "point_in_time_features.parquet")
+    replay_path = write_table(replay.frame, args.output_dir / "replay_features.parquet")
+    point_in_time_path = write_table(
+        experiment.frame, args.output_dir / "point_in_time_features.parquet"
     )
-    evidence_path = Path(
-        write_table(experiment.evidence, args.output_dir / "incremental_evidence.csv")
-    )
+    evidence_path = write_table(experiment.evidence, args.output_dir / "incremental_evidence.csv")
     replay_audit_path = args.output_dir / "replay_audit.json"
     experiment_audit_path = args.output_dir / "experiment_audit.json"
     source_verification_path = args.output_dir / "benchmark_source_verification.json"
