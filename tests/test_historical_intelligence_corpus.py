@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pandas as pd
@@ -201,7 +202,6 @@ def test_timestamped_depth_coverage_requires_recent_pre_cutoff_snapshot() -> Non
 def test_source_archive_manifest_verifies_hashes_and_fails_on_tamper(tmp_path: Path) -> None:
     source = tmp_path / "injuries_2024.csv"
     source.write_text("season,week\n2024,1\n", encoding="utf-8")
-    import hashlib
 
     expected = hashlib.sha256(source.read_bytes()).hexdigest()
     manifest = pd.DataFrame(
