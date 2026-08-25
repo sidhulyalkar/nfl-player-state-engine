@@ -18,8 +18,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: prospective-availability-shadow-${{ github.event.pull_request.number || format('2026-w{0}', inputs.week) }}
-  cancel-in-progress: false
+  # PR heads share a group so stale qualification runs are canceled. Manual scientific
+  # captures use the unique run ID and therefore never cancel one another.
+  group: prospective-availability-shadow-${{ github.event.pull_request.number || format('manual-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   qualify:
