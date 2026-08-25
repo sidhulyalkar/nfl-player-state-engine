@@ -44,6 +44,32 @@ def _utc(value: datetime | str | pd.Timestamp) -> pd.Timestamp:
     return timestamp
 
 
+def _validate_injury_source_schema(frame: pd.DataFrame) -> None:
+    columns = set(frame.columns)
+    required_exact = {"season", "week"}
+    missing_exact = required_exact - columns
+    if missing_exact:
+        raise ValueError(
+            f"Prospective injury source is missing required columns: {sorted(missing_exact)}"
+        )
+    alias_groups = {
+        "player identifier": {"gsis_id", "player_id"},
+        "team": {"team", "recent_team"},
+        "availability status": {
+            "practice_status",
+            "practice_participation",
+            "report_status",
+            "game_status",
+        },
+    }
+    for label, aliases in alias_groups.items():
+        if columns.isdisjoint(aliases):
+            raise ValueError(
+                f"Prospective injury source has no supported {label} column; "
+                f"expected one of {sorted(aliases)}"
+            )
+
+
 def _team_games(schedules: pd.DataFrame, *, season: int, week: int) -> pd.DataFrame:
     required = {"season", "week", "game_id", "home_team", "away_team"}
     missing = required - set(schedules.columns)
@@ -155,6 +181,7 @@ def build_snapshot(
 
     collected = _utc(collected_at_utc)
     injuries_raw = pd.read_csv(io.BytesIO(injury_bytes))
+    _validate_injury_source_schema(injuries_raw)
     schedules = pd.read_csv(io.BytesIO(schedule_bytes), low_memory=False)
     team_games = _team_games(schedules, season=season, week=week)
     latest = _latest_current_week_rows(
