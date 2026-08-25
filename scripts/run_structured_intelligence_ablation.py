@@ -23,6 +23,7 @@ from player_state_engine.intelligence.research_features import (
     attach_canonical_structured_evidence,
 )
 from player_state_engine.intelligence.structured import StructuredClaimLedger
+from player_state_engine.state_graph.experiments import EvidenceTier
 
 
 def _sha256(path: Path) -> str:
@@ -59,8 +60,15 @@ def _git_sha() -> str | None:
 
 
 def _merge_source_coverage(frame: pd.DataFrame, path: Path | None) -> pd.DataFrame:
+    embedded = sorted(column for column in frame if column.endswith("_source_covered"))
+    if embedded:
+        raise ValueError(
+            "Source coverage must be supplied as a separate hashed --source-coverage artifact; "
+            "refusing embedded coverage authority: " + ", ".join(embedded)
+        )
     if path is None:
         return frame
+
     coverage = read_table(path)
     keys = ["season", "week", "player_id"]
     missing = set(keys) - set(coverage.columns)
@@ -73,12 +81,6 @@ def _merge_source_coverage(frame: pd.DataFrame, path: Path | None) -> pd.DataFra
         raise ValueError("Source coverage table contains duplicate season/week/player_id rows")
 
     working = frame.copy()
-    overlap = sorted(set(coverage_columns) & set(working.columns))
-    if overlap:
-        raise ValueError(
-            "Source coverage columns already exist in the feature table; refusing ambiguous "
-            "coverage authority: " + ", ".join(overlap)
-        )
     working["player_id"] = working["player_id"].astype(str)
     coverage = coverage[[*keys, *coverage_columns]].copy()
     coverage["player_id"] = coverage["player_id"].astype(str)
@@ -112,7 +114,15 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=Path("configs/base.yaml"))
     parser.add_argument("--prediction-cutoff-column", default="prediction_cutoff")
     parser.add_argument("--kickoff-column", default="gameday")
-    parser.add_argument("--source-coverage", type=Path, default=None)
+    parser.add_argument(
+        "--source-coverage",
+        type=Path,
+        default=None,
+        help=(
+            "Separate per-player-week source-coverage artifact. Coverage columns embedded in the "
+            "feature table are rejected so coverage authority has its own hash/provenance."
+        ),
+    )
     parser.add_argument(
         "--evidence-provenance-manifest",
         type=Path,
@@ -152,6 +162,10 @@ def main() -> None:
         if args.evidence_provenance_manifest is not None
         else IntelligenceEvidenceProvenance.synthetic_default()
     )
+    if provenance.tier >= EvidenceTier.MULTI_SEASON_ISOLATED and args.source_coverage is None:
+        raise ValueError(
+            "Tier-2+ intelligence evidence requires a separately hashed --source-coverage artifact"
+        )
 
     config = load_config(args.config)
     frame = read_table(args.features)
@@ -283,10 +297,11 @@ def main() -> None:
             "correction": "Benjamini-Hochberg across the four incremental family tests",
         },
         "source_coverage_contract": (
-            "Claim prevalence is not source coverage. Activation-review eligibility requires "
-            "explicit, fully measured *_source_covered values on evaluated player-weeks. Tier-2+ "
-            "runs additionally require the provenance manifest to certify that coverage itself "
-            "was recorded point-in-time rather than reconstructed from hindsight."
+            "Claim prevalence is not source coverage. Coverage is accepted only from a separate "
+            "hashed --source-coverage artifact and must be fully measured on evaluated "
+            "player-weeks. Tier-2+ runs additionally require the provenance manifest to certify "
+            "that coverage itself was recorded point-in-time rather than reconstructed from "
+            "hindsight."
         ),
         "experiments": experiment.evidence.to_dict(orient="records"),
         "outputs": {
