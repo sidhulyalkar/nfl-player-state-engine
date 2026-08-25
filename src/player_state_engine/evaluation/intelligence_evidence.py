@@ -532,7 +532,7 @@ def evaluate_incremental_intelligence_evidence(
         max_position_regression, supported_positions = _max_position_coverage_regression(
             paired,
             target,
-            min_position_rows=min_position_rows,
+            min_position_rows=minimum_position_rows,
         )
         seasons = int(paired["season"].nunique())
         blocks = int(paired[["season", "week"]].drop_duplicates().shape[0])
