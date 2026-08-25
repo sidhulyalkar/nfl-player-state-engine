@@ -12,6 +12,7 @@ on:
       - "src/player_state_engine/evaluation/historical_intelligence_corpus.py"
       - "src/player_state_engine/evaluation/historical_intelligence_experiment.py"
       - "src/player_state_engine/evaluation/intelligence_evidence.py"
+      - "tests/test_historical_intelligence_corpus.py"
   workflow_dispatch:
 
 permissions:
@@ -36,14 +37,18 @@ jobs:
       - name: Install experiment environment
         run: python -m pip install -e '.[dev,intelligence,api]'
 
-      - name: Qualify REG-only operator
+      - name: Qualify REG-only operator and corpus regressions
         run: |
           ruff check \
             scripts/run_reg_only_historical_intelligence_experiment_v2.py \
-            scripts/resume_rebaselined_historical_intelligence_experiment_v2.py
+            scripts/resume_rebaselined_historical_intelligence_experiment_v2.py \
+            src/player_state_engine/evaluation/historical_intelligence_corpus.py \
+            tests/test_historical_intelligence_corpus.py
           python -m compileall -q \
             scripts/run_reg_only_historical_intelligence_experiment_v2.py \
-            scripts/resume_rebaselined_historical_intelligence_experiment_v2.py
+            scripts/resume_rebaselined_historical_intelligence_experiment_v2.py \
+            src/player_state_engine/evaluation/historical_intelligence_corpus.py
+          pytest -q tests/test_historical_intelligence_corpus.py
 
       - name: Download exact first-run frozen input bundle
         uses: actions/download-artifact@v4
