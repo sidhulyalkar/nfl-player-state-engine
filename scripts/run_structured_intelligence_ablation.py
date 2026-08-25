@@ -15,6 +15,9 @@ from player_state_engine.data.io import read_table, write_table
 from player_state_engine.evaluation.intelligence_evidence import (
     run_structured_intelligence_evidence_experiment,
 )
+from player_state_engine.evaluation.intelligence_provenance import (
+    IntelligenceEvidenceProvenance,
+)
 from player_state_engine.features.weekly import feature_columns_for_target
 from player_state_engine.intelligence.research_features import (
     attach_canonical_structured_evidence,
@@ -68,7 +71,14 @@ def _merge_source_coverage(frame: pd.DataFrame, path: Path | None) -> pd.DataFra
         raise ValueError("Source coverage table contains no '*_source_covered' columns")
     if coverage.duplicated(keys).any():
         raise ValueError("Source coverage table contains duplicate season/week/player_id rows")
+
     working = frame.copy()
+    overlap = sorted(set(coverage_columns) & set(working.columns))
+    if overlap:
+        raise ValueError(
+            "Source coverage columns already exist in the feature table; refusing ambiguous "
+            "coverage authority: " + ", ".join(overlap)
+        )
     working["player_id"] = working["player_id"].astype(str)
     coverage = coverage[[*keys, *coverage_columns]].copy()
     coverage["player_id"] = coverage["player_id"].astype(str)
@@ -103,6 +113,15 @@ def main() -> None:
     parser.add_argument("--prediction-cutoff-column", default="prediction_cutoff")
     parser.add_argument("--kickoff-column", default="gameday")
     parser.add_argument("--source-coverage", type=Path, default=None)
+    parser.add_argument(
+        "--evidence-provenance-manifest",
+        type=Path,
+        default=None,
+        help=(
+            "Typed provenance JSON for the frozen evaluation sample. Without this manifest the "
+            "run is Tier 0 synthetic/unverified and cannot become activation-review eligible."
+        ),
+    )
     parser.add_argument("--bootstrap-samples", type=int, default=2000)
     parser.add_argument("--minimum-source-coverage", type=float, default=0.80)
     parser.add_argument("--maximum-fdr-q", type=float, default=0.10)
@@ -127,6 +146,12 @@ def main() -> None:
         raise ValueError("--bootstrap-samples must be positive")
     if not 0.0 <= args.minimum_source_coverage <= 1.0:
         raise ValueError("--minimum-source-coverage must be between 0 and 1")
+
+    provenance = (
+        IntelligenceEvidenceProvenance.load(args.evidence_provenance_manifest)
+        if args.evidence_provenance_manifest is not None
+        else IntelligenceEvidenceProvenance.synthetic_default()
+    )
 
     config = load_config(args.config)
     frame = read_table(args.features)
@@ -165,6 +190,7 @@ def main() -> None:
         base_features,
         args.target,
         replace(config.model, targets=(args.target,)),
+        evidence_tier=provenance.tier,
         output_dir=args.output_dir / "variants",
         min_train_weeks=config.benchmark.min_train_weeks,
         retrain_every_weeks=config.benchmark.retrain_every_weeks,
@@ -205,15 +231,22 @@ def main() -> None:
             "bytes": args.source_coverage.stat().st_size,
             "sha256": _sha256(args.source_coverage),
         }
+    if args.evidence_provenance_manifest is not None:
+        input_manifest["evidence_provenance"] = {
+            "path": args.evidence_provenance_manifest.as_posix(),
+            "bytes": args.evidence_provenance_manifest.stat().st_size,
+            "sha256": _sha256(args.evidence_provenance_manifest),
+        }
 
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "git_sha": _git_sha(),
         "target": args.target,
         "authority": "research_evidence_only",
         "automatic_promotion": False,
         "production_projection_changed": False,
         "activation_registry_changed": False,
+        "evidence_provenance": provenance.model_dump(mode="json"),
         "inputs": input_manifest,
         "operator_config": {
             "prediction_cutoff_column": args.prediction_cutoff_column,
@@ -250,8 +283,10 @@ def main() -> None:
             "correction": "Benjamini-Hochberg across the four incremental family tests",
         },
         "source_coverage_contract": (
-            "Claim prevalence is not source coverage. Activation-review eligibility requires an "
-            "explicit *_source_covered field on the evaluated player-weeks."
+            "Claim prevalence is not source coverage. Activation-review eligibility requires "
+            "explicit, fully measured *_source_covered values on evaluated player-weeks. Tier-2+ "
+            "runs additionally require the provenance manifest to certify that coverage itself "
+            "was recorded point-in-time rather than reconstructed from hindsight."
         ),
         "experiments": experiment.evidence.to_dict(orient="records"),
         "outputs": {
@@ -265,9 +300,11 @@ def main() -> None:
             },
         },
         "interpretation": (
-            "eligible_for_activation_review is a research gate only. It cannot enable a feature "
-            "family, cannot rewrite production projections, and cannot substitute for downstream "
-            "decision evidence or the live 2026 shadow season."
+            "model_gate_passed means only that the isolated statistical/control gates passed. "
+            "eligible_for_activation_review additionally requires Tier-2+ frozen point-in-time "
+            "provenance and complete source-coverage measurement. Neither field can enable a "
+            "feature family, rewrite production projections, or substitute for downstream "
+            "decision evidence and the live 2026 shadow season."
         ),
     }
     manifest_path = args.output_dir / "run_manifest.json"
