@@ -94,8 +94,9 @@ def _runs(frame: pd.DataFrame) -> dict[str, AblationRun]:
     return {name: _fake_run(name, error, frame) for name, error in errors.items()}
 
 
-def test_incremental_feature_hierarchy_excludes_audit_and_coverage_columns() -> None:
+def test_incremental_feature_hierarchy_excludes_audit_coverage_and_raw_outcomes() -> None:
     frame = _evaluation_frame()
+    frame["opportunity_target_share"] = 0.99
     supplied = [
         "base_numeric",
         "official_availability_source_covered",
@@ -112,6 +113,7 @@ def test_incremental_feature_hierarchy_excludes_audit_and_coverage_columns() -> 
     assert base == ["base_numeric"]
     assert "availability_expected_active" in variants["official_availability"]
     assert "opportunity_target_share_roll3_mean" in variants["objective_reference"]
+    assert "opportunity_target_share" not in variants["objective_reference"]
     assert "news_structured_starter_security_signal" in variants["structured_news"]
     assert "persona_training_focus" in variants["public_player_context"]
     assert not any(column.endswith("_source_covered") for column in variants["public_player_context"])
