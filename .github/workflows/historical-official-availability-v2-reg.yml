@@ -30,6 +30,7 @@ jobs:
           ruff check \
             scripts/acquire_historical_injury_archive.py \
             scripts/freeze_historical_numerical_baseline_v2.py \
+            scripts/rehydrate_registered_historical_sources_v2.py \
             scripts/run_rebaselined_historical_intelligence_experiment_v2.py \
             scripts/run_reg_historical_intelligence_experiment_v2.py \
             src/player_state_engine/evaluation/historical_intelligence_corpus.py \
@@ -38,10 +39,12 @@ jobs:
           python -m compileall -q \
             scripts/acquire_historical_injury_archive.py \
             scripts/freeze_historical_numerical_baseline_v2.py \
+            scripts/rehydrate_registered_historical_sources_v2.py \
             scripts/run_rebaselined_historical_intelligence_experiment_v2.py \
             scripts/run_reg_historical_intelligence_experiment_v2.py \
             src/player_state_engine/evaluation/historical_intelligence_corpus.py \
             tests/test_registered_historical_official_availability.py
+          python scripts/rehydrate_registered_historical_sources_v2.py --help >/dev/null
           python scripts/run_reg_historical_intelligence_experiment_v2.py --help >/dev/null
           pytest -q \
             tests/test_historical_intelligence_corpus.py \
@@ -65,7 +68,9 @@ jobs:
               handle.write(f"artifact_name={artifact['artifact_name']}\n")
           PY
 
-      - name: Download registered frozen input bundle
+      - name: Download retained registered source bundle
+        id: retained_artifact
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: ${{ steps.registry.outputs.artifact_name }}
@@ -73,17 +78,27 @@ jobs:
           github-token: ${{ github.token }}
           path: recovered/v2-registered
 
-      - name: Restore exact registered source paths
+      - name: Restore or rehydrate exact registered sources
         run: |
-          mkdir -p data/raw
-          cp -a recovered/v2-registered/data/raw/historical_numerical_baseline_v2 data/raw/
-          cp -a recovered/v2-registered/data/raw/historical_injury_archive_v2 data/raw/
+          mkdir -p data/raw artifacts/intelligence_ablations/historical_official_v2_reg
+          if [[ -d recovered/v2-registered/data/raw/historical_numerical_baseline_v2 \
+                && -d recovered/v2-registered/data/raw/historical_injury_archive_v2 ]]; then
+            cp -a recovered/v2-registered/data/raw/historical_numerical_baseline_v2 data/raw/
+            cp -a recovered/v2-registered/data/raw/historical_injury_archive_v2 data/raw/
+            echo "retained_actions_artifact" \
+              > artifacts/intelligence_ablations/historical_official_v2_reg/source_recovery_mode.txt
+          else
+            python scripts/rehydrate_registered_historical_sources_v2.py \
+              --numerical-root data/raw/historical_numerical_baseline_v2 \
+              --injury-root data/raw/historical_injury_archive_v2
+            echo "registry_hash_verified_rehydration" \
+              > artifacts/intelligence_ablations/historical_official_v2_reg/source_recovery_mode.txt
+          fi
           test -f data/raw/historical_numerical_baseline_v2/NUMERICAL_BASELINE_MANIFEST.json
           test -f data/raw/historical_injury_archive_v2/SOURCE_MANIFEST.csv
 
       - name: Capture execution environment
         run: |
-          mkdir -p artifacts/intelligence_ablations/historical_official_v2_reg
           python --version > artifacts/intelligence_ablations/historical_official_v2_reg/python_version.txt
           python -m pip freeze > artifacts/intelligence_ablations/historical_official_v2_reg/pip_freeze.txt
           git rev-parse HEAD > artifacts/intelligence_ablations/historical_official_v2_reg/git_head.txt
