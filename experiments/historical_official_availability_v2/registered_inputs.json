@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "experiment_family": "historical_official_availability_v2",
+  "authority": "research_evidence_only",
+  "registered_at_utc": "2026-08-25T07:23:25Z",
+  "historical_production_parity_verified": false,
+  "numerical_baseline": {
+    "baseline_id": "historical-numerical-v2-a036c410e0bb1ec670e3",
+    "identity_sha256": "a036c410e0bb1ec670e3fa0f7d6e14e1433322b6eeabdaa81c25c8daee43a29c",
+    "schedule_commit": "67fa4d790ba09e5f0e2868b49ef9dbbd8946bb22",
+    "files": [
+      {
+        "name": "player_stats_2020",
+        "bytes": 7883276,
+        "sha256": "c02dbb80fe2ccafe684e9c50457ce705d9bd600c4e77ba479dc9a867af0a8baa",
+        "source_url": "https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2020.csv"
+      },
+      {
+        "name": "player_stats_2021",
+        "bytes": 8477784,
+        "sha256": "41915fb49238902ad1f129ebf0405b11a1e710454ae0fe8f7b3e4f9145875f48",
+        "source_url": "https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2021.csv"
+      },
+      {
+        "name": "player_stats_2022",
+        "bytes": 8408729,
+        "sha256": "ad426c3fe5bf1cc30c3f137fdfe96d054e19d400879ee4413129da49fa7b54be",
+        "source_url": "https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2022.csv"
+      },
+      {
+        "name": "player_stats_2023",
+        "bytes": 8332874,
+        "sha256": "f19cb71a5de0dce7fd09376026237c9ee9d5a93fe13815a2ea3ec2d37204cb17",
+        "source_url": "https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2023.csv"
+      },
+      {
+        "name": "player_stats_2024",
+        "bytes": 8470040,
+        "sha256": "3ddc45a84f759aa348ce465ae001752c530575455717657cdfe1f8abfcdb4759",
+        "source_url": "https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2024.csv"
+      },
+      {
+        "name": "schedules",
+        "bytes": 2177174,
+        "sha256": "896b1b795253d151174a526acbe2d65dde146b8912f20c6471695aae901f671f",
+        "source_commit": "67fa4d790ba09e5f0e2868b49ef9dbbd8946bb22",
+        "source_url": "https://raw.githubusercontent.com/nflverse/nfldata/67fa4d790ba09e5f0e2868b49ef9dbbd8946bb22/data/games.csv"
+      }
+    ]
+  },
+  "injury_archive": {
+    "identity_sha256": "a1b497a0b91fbf62c56aa548345c9bf8ff8dd8897f5aa3e782bf8fedcd8a2178",
+    "certified_through_season": 2024,
+    "files": [
+      {
+        "name": "injuries_2020",
+        "bytes": 737474,
+        "sha256": "706cca82824214f6b73ba0c6e537d3ee39766a50c644b8974b9fc28d7518de90",
+        "source_url": "https://github.com/nflverse/nflverse-data/releases/download/injuries/injuries_2020.csv"
+      },
+      {
+        "name": "injuries_2021",
+        "bytes": 737083,
+        "sha256": "1049fb9ff0fe7cfcf3ba8bfe1f5a35d3aba985c461c8fb7bf5201735b6d34254",
+        "source_url": "https://github.com/nflverse/nflverse-data/releases/download/injuries/injuries_2021.csv"
+      },
+      {
+        "name": "injuries_2022",
+        "bytes": 752433,
+        "sha256": "5f0d60324e597edd1a2ced8540b04e40b51dd440591dd1df11b8d96343387c9e",
+        "source_url": "https://github.com/nflverse/nflverse-data/releases/download/injuries/injuries_2022.csv"
+      },
+      {
+        "name": "injuries_2023",
+        "bytes": 738501,
+        "sha256": "16b04e21da5aa3944cfa9c22cafcc84ed7e6d9866eaddf0344e9b8cbf2f63afe",
+        "source_url": "https://github.com/nflverse/nflverse-data/releases/download/injuries/injuries_2023.csv"
+      },
+      {
+        "name": "injuries_2024",
+        "bytes": 816989,
+        "sha256": "498bce8e13cb64b2ab9bb0ad6cb81d0a63c2ddb24016c9fc90c2de2126fae449",
+        "source_url": "https://github.com/nflverse/nflverse-data/releases/download/injuries/injuries_2024.csv"
+      }
+    ]
+  },
+  "retained_source_artifact": {
+    "workflow_run_id": 32821290568,
+    "artifact_id": 9553221955,
+    "artifact_name": "historical-official-availability-v2-results",
+    "artifact_zip_sha256": "b126a3e8419abdb31730ba3480df33f9fefa21327ae22b05df2897075b9eb32b",
+    "retention_expires_at_utc": "2026-11-23T07:22:43Z",
+    "purpose": "Exact source-byte recovery for the registered v2 experiment while the retained Actions artifact exists. The Git registry remains authoritative for expected hashes after artifact expiry."
+  },
+  "evaluation_contract": {
+    "primary_season_type": "REG",
+    "target": "fantasy_points_ppr",
+    "seasons": [2020, 2021, 2022, 2023, 2024],
+    "prediction_cutoff_hours_before_kickoff": 1.5,
+    "bootstrap_samples": 2000,
+    "minimum_source_coverage": 0.8,
+    "maximum_fdr_q": 0.1,
+    "minimum_consistency": 0.55,
+    "minimum_paired_rows": 250,
+    "minimum_seasons": 2,
+    "minimum_blocks": 8,
+    "minimum_position_rows": 50,
+    "maximum_overall_coverage_gap_regression": 0.02,
+    "maximum_position_coverage_gap_regression": 0.05,
+    "automatic_promotion": false
+  },
+  "archival_note": "The earlier July benchmark experiment remains archivally blocked because its exact frozen schedule bytes could not be recovered from bounded nfldata Git history. This v2 identity is a new, fully content-addressed research baseline and must never be represented as July historical-production parity."
+}
