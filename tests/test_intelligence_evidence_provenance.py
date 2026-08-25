@@ -22,7 +22,7 @@ def test_missing_provenance_fails_closed_to_synthetic_only() -> None:
 
 
 def test_tier_two_requires_frozen_point_in_time_provenance() -> None:
-    with pytest.raises(ValidationError, match="Tier-2\+ intelligence evidence"):
+    with pytest.raises(ValidationError, match=r"Tier-2\+ intelligence evidence"):
         IntelligenceEvidenceProvenance(
             evidence_tier=int(EvidenceTier.MULTI_SEASON_ISOLATED),
             frozen_sample_id="",
