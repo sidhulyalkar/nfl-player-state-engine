@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Mapping
 
 import numpy as np
 import pandas as pd
@@ -268,9 +268,9 @@ def _latest_injury_rows(
     )
 
     keys = ["season", "week", "recent_team", "player_id"]
-    candidates = panel_cutoffs[
-        [*keys, "game_id", "prediction_cutoff"]
-    ].merge(injury, on=keys, how="left")
+    candidates = panel_cutoffs[[*keys, "game_id", "prediction_cutoff"]].merge(
+        injury, on=keys, how="left"
+    )
     known = (
         candidates["date_modified"].notna()
         & candidates["prediction_cutoff"].notna()
@@ -322,7 +322,9 @@ def _latest_depth_rows(
         times = grouped_times.get((int(season), str(team)))
         if times is None or len(times) == 0:
             continue
-        valid_indexes = [index for index in indexes if pd.notna(coverage.at[index, "prediction_cutoff"])]
+        valid_indexes = [
+            index for index in indexes if pd.notna(coverage.at[index, "prediction_cutoff"])
+        ]
         if not valid_indexes:
             continue
         cutoffs = pd.DatetimeIndex(coverage.loc[valid_indexes, "prediction_cutoff"])
@@ -360,6 +362,23 @@ def _latest_depth_rows(
     return point_in_time, coverage
 
 
+def _assert_evidence_precedes_cutoff(
+    frame: pd.DataFrame,
+    *,
+    observed_column: str,
+    label: str,
+) -> None:
+    if frame.empty:
+        return
+    observed = pd.to_datetime(frame[observed_column], utc=True, errors="coerce")
+    cutoff = pd.to_datetime(frame["prediction_cutoff"], utc=True, errors="coerce")
+    invalid = observed.isna() | cutoff.isna() | observed.gt(cutoff)
+    if invalid.any():
+        raise ValueError(
+            f"{label} contains {int(invalid.sum())} rows not proven available before cutoff"
+        )
+
+
 def _official_evidence_frame(
     injury_rows: pd.DataFrame,
     depth_rows: pd.DataFrame,
@@ -376,6 +395,7 @@ def _official_evidence_frame(
         practice = _practice_status(row.get("practice_status"))
         game = _game_status(row.get("report_status"))
         injury_name = row.get("primary_injury")
+        injury_text = None if pd.isna(injury_name) else str(injury_name)
         if practice != "unknown":
             payload = {
                 "family": "injuries",
@@ -394,10 +414,9 @@ def _official_evidence_frame(
                     source_url=source_url,
                     event_type="practice_participation",
                     practice_status=practice,
-                    body_area=None if pd.isna(injury_name) else str(injury_name),
                     evidence_text=(
                         f"Archived official injury-report practice status: {practice}; "
-                        f"injury={injury_name}."
+                        f"injury={injury_text}."
                     ),
                     source_reliability=0.98,
                 )
@@ -420,17 +439,18 @@ def _official_evidence_frame(
                     source_url=source_url,
                     event_type="game_designation",
                     game_status=game,
-                    body_area=None if pd.isna(injury_name) else str(injury_name),
                     evidence_text=(
                         f"Archived official injury-report game designation: {game}; "
-                        f"injury={injury_name}."
+                        f"injury={injury_text}."
                     ),
                     source_reliability=0.98,
                 )
             )
 
     for row in depth_rows.to_dict(orient="records"):
-        rank = pd.to_numeric(pd.Series([row.get("source_depth_rank_pit")]), errors="coerce").iloc[0]
+        rank = pd.to_numeric(
+            pd.Series([row.get("source_depth_rank_pit")]), errors="coerce"
+        ).iloc[0]
         if pd.isna(rank):
             continue
         season = int(row["season"])
@@ -455,7 +475,7 @@ def _official_evidence_frame(
                 depth_role=role,
                 depth_rank=int(rank),
                 evidence_text=(
-                    f"Latest timestamped depth-chart snapshot before the frozen cutoff: "
+                    "Latest timestamped depth-chart snapshot before the frozen cutoff: "
                     f"role={role}; rank={int(rank)}."
                 ),
                 source_reliability=0.95,
@@ -516,6 +536,16 @@ def build_historical_intelligence_corpus(
         depth_charts if include_depth_charts else None,
         cutoff_hours_before=cutoff_hours_before,
         maximum_age_days=depth_maximum_age_days,
+    )
+    _assert_evidence_precedes_cutoff(
+        injury_rows,
+        observed_column="date_modified",
+        label="historical injury evidence",
+    )
+    _assert_evidence_precedes_cutoff(
+        depth_rows,
+        observed_column="source_depth_observed_at",
+        label="historical depth evidence",
     )
 
     coverage = panel_cutoffs.copy()
