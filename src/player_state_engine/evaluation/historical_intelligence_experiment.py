@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
-import numpy as np
 import pandas as pd
 
 from player_state_engine.config import EngineConfig
