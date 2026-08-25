@@ -6,6 +6,7 @@ import {
 } from 'recharts';
 import type { ModelObservatoryResponse } from '../../shared/types';
 import { api } from '../lib/api';
+import { EvidenceFactoryPanel } from './EvidenceFactoryPanel';
 import { ModeBadge } from './ModeBadge';
 import { ShadowEvaluationPanel } from './ShadowEvaluationPanel';
 
@@ -72,6 +73,7 @@ export function ModelDiagnosticsPanel() {
       <section className="metric-card"><div className="metric-icon"><CheckCircle2 size={20}/></div><span>Research artifacts</span><strong>{health ? `${health.available}/${health.total}` : '—'}</strong><small>{graphHealth?.available ? 'state graph mounted' : health?.missing?.length ? `${health.missing.length} missing` : 'core research mounted'}</small></section>
     </div>
 
+    <EvidenceFactoryPanel/>
     <ShadowEvaluationPanel evaluation={payload?.player_state_graph?.shadow_evaluation}/>
 
     <div className="observatory-chart-grid wide">

@@ -8,15 +8,15 @@ Its governing rule is simple: **a new model does not gain authority because it i
 
 ## Fantasy modelling workspace
 
-The repository now includes a decision-first fantasy product under `apps/gemini-fantasy-console` with five persistent surfaces:
+The repository includes a decision-first fantasy product under `apps/gemini-fantasy-console` with five persistent surfaces:
 
 1. **Draft Room** for live pick decisions, VORP, wait cost, room survival, roster construction, and candidate comparison.
 2. **Player Intelligence** for full league-aware player dossiers, six decision contexts, frozen player replay, and the research-only Player State Graph Shadow Lab.
 3. **Portfolio** for cross-league player, starter, NFL-team, and positional exposure with canonical identity diagnostics.
 4. **League OS** for trades, waivers, lineup optimization, league state, NFL state, and the broader season-management console.
-5. **Model Observatory** for calibration, sharpness, drift, graph replay, artifact health, and fail-closed promotion evidence.
+5. **Model Observatory** for calibration, sharpness, drift, graph replay, the frozen Evidence Factory, artifact health, and fail-closed promotion evidence.
 
-The application is deliberately server-owned for numerical truth. React renders Product API calculations and provenance; Python owns projections, exact supported league scoring, replacement economics, rankings, uncertainty, simulation, and promotion gates.
+The application is deliberately server-owned for numerical truth. React renders Product API calculations and provenance; Python owns projections, exact supported league scoring, replacement economics, rankings, uncertainty, simulation, evidence statistics, and promotion gates.
 
 Workspace and player state can be deep-linked:
 
@@ -28,13 +28,45 @@ Workspace and player state can be deep-linked:
 ?workspace=model
 ```
 
-The Player State Graph remains a research challenger. Shadow Lab distributions and bounded scenario sensitivity never silently replace the direct production player quantile model.
+The Player State Graph remains a research challenger. Shadow Lab distributions and bounded scenario sensitivity never silently replace the target-aware direct production quantile stack.
 
-Start here for the product:
+Start here for the product and evidence system:
 
 - `apps/gemini-fantasy-console/README.md`
 - `docs/product/modelling_workspace.md`
 - `docs/product/gemini_ai_studio.md`
+- `docs/modeling/evidence_factory.md`
+
+## Frozen Evidence Factory
+
+The Evidence Factory is the canonical model-comparison layer for frozen player-week research artifacts. It forces champion and challenger distributions through one identity, metric, calibration, negative-control, multiple-testing, and promotion contract.
+
+Production authority is target-aware rather than globally assigned to a single method name. The direct `quantile_engine` remains the default champion for ordinary supported targets. Carries resolves to `position_specific_quantile` because the production `HybridQuantileModelBundle` uses position-specific heads for that structurally zero-inflated target. Historical pooled carry predictions remain visible as research evidence instead of being mislabeled as current authority.
+
+A frozen comparison records:
+
+- canonical target / method / player / season / week identity;
+- q10 / q50 / q90 and realized outcome;
+- mean pinball, q50 MAE, calibration and interval width;
+- season, position, position-season, and week slices;
+- paired coverage and evaluable data availability;
+- paired season/week bootstrap effect and confidence interval;
+- identity-permutation negative controls;
+- one-sided bootstrap p-values and run-wide Benjamini-Hochberg FDR q-values;
+- exact promotion blockers.
+
+The artifact bundle also records Git SHA, input/output SHA-256 hashes, target champion mapping, graph scoring comparability, and explicit `research_evidence_only` authority. Missing evidence remains unavailable rather than being synthesized by the UI.
+
+Run against the checked-in historical benchmark with:
+
+```bash
+python scripts/run_evidence_factory.py \
+  --benchmark-root artifacts/reports/benchmark_real \
+  --graph-root artifacts/player_state_graph \
+  --output-dir artifacts/evidence_factory
+```
+
+The ordinary CI suite also performs a small smoke run against the real checked-in `fantasy_points_ppr` and `carries` prediction artifacts. That smoke validates artifact/schema compatibility and authority resolution; it is not a new benchmark result or a promotion event.
 
 ## Architecture
 
@@ -280,12 +312,19 @@ GET /v1/research/game-intelligence/status
 GET /v1/research/game-intelligence/benchmark
 GET /v1/research/game-intelligence/sources
 POST /v1/research/game-intelligence/simulate
+GET /v1/model/evidence-factory
 ```
 
-The benchmark root defaults to:
+The game-intelligence benchmark root defaults to:
 
 ```text
 artifacts/game_intelligence/v016
+```
+
+The Evidence Factory root defaults to:
+
+```text
+artifacts/evidence_factory
 ```
 
 The live `/simulate` endpoint deliberately remains on the established non-terminal-authority path. A version bump is not a model promotion.
@@ -307,6 +346,10 @@ The live `/simulate` endpoint deliberately remains on the established non-termin
 ```text
 src/player_state_engine/
 ├── api/
+├── evaluation/
+│   ├── evidence_factory.py
+│   ├── evidence_run.py
+│   └── negative_controls.py
 ├── fantasy/
 ├── game_intelligence/
 │   ├── benchmark.py
@@ -342,16 +385,18 @@ A deep sequence model remains downstream of these transparent tests. The objecti
 
 ## Validation boundary
 
-Current implementation validation includes:
+Release validation is fail closed and includes:
 
-- Ruff passing;
-- full Python compilation passing;
-- **185 Python tests passing**;
-- frontend production build passing;
+- Ruff over package, tests, and operational research runners;
+- full Python compilation;
+- the complete Python test suite;
+- frontend production build;
+- Evidence Factory smoke execution against checked-in frozen fantasy-point and carry artifacts;
 - league-specific intelligence and live-store discovery tests;
 - Player State Graph opportunity-conservation and authority tests;
 - Shadow Lab scenario and scoring-contract tests, including TE-premium mismatch;
 - Portfolio canonical-identity and unresolved-roster tests;
+- Evidence Factory identity, availability, negative-control, target-authority, and run-wide FDR tests;
 - fail-closed challenger promotion tests;
 - v0.15 parity tests;
 - sparse structural-support tests;
@@ -364,6 +409,7 @@ These checks establish software and experimental-contract integrity. They do **n
 See:
 
 - `docs/product/modelling_workspace.md`
+- `docs/modeling/evidence_factory.md`
 - `docs/modeling/terminal_family_v016.md`
 - `docs/modeling/v016_experiment_queue.md`
 - `docs/releases/v0.16.md`

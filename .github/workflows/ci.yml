@@ -33,9 +33,45 @@ jobs:
             scripts/run_v014_transition_benchmark.py \
             scripts/run_v015_decision_benchmark.py \
             scripts/run_v016_terminal_benchmark.py \
-            scripts/run_player_state_graph_research.py
+            scripts/run_player_state_graph_research.py \
+            scripts/run_evidence_factory.py
       - name: Compile Python sources and all scripts
         run: python -m compileall -q src scripts tests
+      - name: Smoke Evidence Factory against frozen benchmark artifacts
+        run: |
+          python scripts/run_evidence_factory.py \
+            --targets fantasy_points_ppr carries \
+            --bootstrap-samples 200 \
+            --output-dir /tmp/evidence_factory_smoke
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          import pandas as pd
+
+          from player_state_engine.product.evidence_artifacts import EvidenceArtifactStore
+
+          root = Path('/tmp/evidence_factory_smoke')
+          manifest = json.loads((root / 'run_manifest.json').read_text(encoding='utf-8'))
+          comparisons = pd.read_csv(root / 'paired_comparisons.csv')
+          assert manifest['authority'] == 'research_evidence_only'
+          assert manifest['promotion']['automatic'] is False
+          assert manifest['champion_methods']['fantasy_points_ppr'] == 'quantile_engine'
+          assert manifest['champion_methods']['carries'] == 'position_specific_quantile'
+          assert manifest['multiple_testing']['p_value'] == 'finite_sample_plus_one_bootstrap_tail'
+          assert set(comparisons.loc[comparisons['target'].eq('carries'), 'champion']) == {
+              'position_specific_quantile'
+          }
+          assert comparisons['p_value'].notna().all()
+          assert (comparisons['p_value'] > 0.0).all()
+          assert comparisons['fdr_q_value'].notna().all()
+
+          snapshot = EvidenceArtifactStore(root).snapshot()
+          assert snapshot['data_mode'] == 'HISTORICAL_BACKTEST'
+          assert snapshot['authority'] == 'research_evidence_only'
+          assert snapshot['health']['integrity_verified'] is True
+          assert snapshot['health']['integrity_failures'] == []
+          PY
       - run: pytest
 
   frontend:

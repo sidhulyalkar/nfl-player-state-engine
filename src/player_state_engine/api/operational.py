@@ -8,6 +8,7 @@ from player_state_engine.api.app import create_app as create_base_app
 from player_state_engine.api.draft_planner_routes import install_draft_planner_routes
 from player_state_engine.api.draft_reliability_routes import install_draft_reliability_routes
 from player_state_engine.api.draft_routes import install_draft_routes
+from player_state_engine.api.evidence_routes import install_evidence_routes
 from player_state_engine.api.game_intelligence_routes import install_game_intelligence_routes
 from player_state_engine.api.intelligence_routes import install_intelligence_routes
 from player_state_engine.api.ranking_routes import install_ranking_routes
@@ -22,6 +23,7 @@ def create_app(**kwargs: Any) -> FastAPI:
         "game_intelligence_benchmark_root",
         "player_state_graph_root",
         "live_store_root",
+        "evidence_factory_root",
     }
     base_kwargs = {key: value for key, value in kwargs.items() if key not in operational_only}
     app = create_base_app(**base_kwargs)
@@ -43,6 +45,10 @@ def create_app(**kwargs: Any) -> FastAPI:
         historical_source_root=kwargs.get("historical_source_root"),
         player_state_graph_root=kwargs.get("player_state_graph_root"),
     )
+    install_evidence_routes(
+        app,
+        evidence_factory_root=kwargs.get("evidence_factory_root"),
+    )
     install_ranking_routes(
         app,
         store_root=kwargs.get("store_root"),
@@ -58,11 +64,11 @@ def create_app(**kwargs: Any) -> FastAPI:
     app.version = "0.16.0"
     app.description = (
         f"{app.description} Live Draft War Room, player intelligence, cross-league portfolio "
-        "exposure, Player State Graph shadow comparison and sensitivity, model observatory, "
-        "ranking calibration, guarded draft reliability, guarded game-intelligence simulation, "
-        "expanding frozen replay, factorial attribution, simulated-state opportunity, "
-        "drive-volume, possession-transition, fourth-down decision, and terminal-family "
-        "research surfaces."
+        "exposure, Player State Graph shadow comparison and sensitivity, frozen Evidence Factory, "
+        "model observatory, ranking calibration, guarded draft reliability, guarded "
+        "game-intelligence simulation, expanding frozen replay, factorial attribution, "
+        "simulated-state opportunity, drive-volume, possession-transition, fourth-down decision, "
+        "and terminal-family research surfaces."
     )
     return app
 
