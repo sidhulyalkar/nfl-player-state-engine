@@ -34,11 +34,15 @@ export interface ReliableDraftBoardResponse extends Omit<DraftBoardResponse, 'bo
     score: number;
     ready: boolean;
     flags: string[];
+    blocking_flags?: string[];
     required_positions: string[];
+    present_positions?: string[];
     missing_positions: string[];
     projection_rows: number;
     unique_player_coverage: number;
     market_adp_coverage: number;
+    market_coverage?: number;
+    market_source?: string | null;
     exact_scoring_coverage: number;
     valuation_coverage: number;
   };
