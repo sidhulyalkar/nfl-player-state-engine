@@ -6,7 +6,7 @@ import json
 import shutil
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -77,24 +77,42 @@ def _github_json(url: str) -> object:
         return json.load(response)
 
 
-def _candidate_commits(until: str, limit: int = 40) -> list[str]:
-    parsed = datetime.fromisoformat(until.replace("Z", "+00:00"))
-    stamp = parsed.isoformat().replace("+00:00", "Z")
-    query = urllib.parse.urlencode(
-        {
-            "path": "data/games.csv",
-            "until": stamp,
-            "per_page": min(max(limit, 1), 100),
-        }
-    )
-    payload = _github_json(f"https://api.github.com/repos/nflverse/nfldata/commits?{query}")
-    if not isinstance(payload, list):
-        raise ValueError("Unexpected nfldata commit response")
-    return [str(row["sha"]) for row in payload if isinstance(row, dict) and row.get("sha")]
+def _candidate_commits(
+    anchor: str,
+    *,
+    days_before: int = 10,
+    days_after: int = 10,
+    max_pages: int = 8,
+) -> list[str]:
+    parsed = datetime.fromisoformat(anchor.replace("Z", "+00:00"))
+    since = (parsed - timedelta(days=days_before)).isoformat().replace("+00:00", "Z")
+    until = (parsed + timedelta(days=days_after)).isoformat().replace("+00:00", "Z")
+    commits: list[str] = []
+    for page in range(1, max_pages + 1):
+        query = urllib.parse.urlencode(
+            {
+                "path": "data/games.csv",
+                "since": since,
+                "until": until,
+                "per_page": 100,
+                "page": page,
+            }
+        )
+        payload = _github_json(f"https://api.github.com/repos/nflverse/nfldata/commits?{query}")
+        if not isinstance(payload, list):
+            raise ValueError("Unexpected nfldata commit response")
+        if not payload:
+            break
+        for row in payload:
+            if isinstance(row, dict) and row.get("sha"):
+                commits.append(str(row["sha"]))
+        if len(payload) < 100:
+            break
+    return list(dict.fromkeys(commits))
 
 
 def _recover_schedule(
-    record: dict[str, object], *, until: str, output: Path, label: str
+    record: dict[str, object], *, anchor: str, output: Path, label: str
 ) -> dict[str, object]:
     output.parent.mkdir(parents=True, exist_ok=True)
     if _matches(output, record):
@@ -107,7 +125,8 @@ def _recover_schedule(
         }
 
     attempts: list[dict[str, object]] = []
-    for commit in _candidate_commits(until):
+    candidates = _candidate_commits(anchor)
+    for commit in candidates:
         url = f"https://raw.githubusercontent.com/nflverse/nfldata/{commit}/data/games.csv"
         temporary = output.with_suffix(f".{commit[:8]}.partial")
         request = urllib.request.Request(
@@ -118,10 +137,12 @@ def _recover_schedule(
             with urllib.request.urlopen(request, timeout=120) as response, temporary.open("wb") as target:
                 while chunk := response.read(1024 * 1024):
                     target.write(chunk)
+            actual_bytes = temporary.stat().st_size
+            actual_sha = _sha256(temporary)
             attempt = {
                 "commit": commit,
-                "bytes": temporary.stat().st_size,
-                "sha256": _sha256(temporary),
+                "bytes": actual_bytes,
+                "sha256": actual_sha,
             }
             attempts.append(attempt)
             if _matches(temporary, record):
@@ -133,15 +154,21 @@ def _recover_schedule(
                     "path": output.as_posix(),
                     "sha256": _sha256(output),
                     "bytes": output.stat().st_size,
-                    "attempts_before_match": len(attempts) - 1,
+                    "candidate_commits_scanned": len(attempts),
+                    "search_anchor": anchor,
                 }
         finally:
             if temporary.exists():
                 temporary.unlink()
+    near_size = [
+        attempt
+        for attempt in attempts
+        if abs(int(attempt["bytes"]) - int(record["bytes"])) <= 64
+    ]
     raise ValueError(
-        f"Could not recover {label} schedule bytes from nfldata Git history. "
+        f"Could not recover {label} schedule bytes from bounded nfldata Git history. "
         f"Expected sha256={record.get('sha256')} bytes={record.get('bytes')}; "
-        f"attempts={attempts}"
+        f"commits_scanned={len(attempts)}; near_size_attempts={near_size[:30]}"
     )
 
 
@@ -157,7 +184,9 @@ def _schedule_context(frame: pd.DataFrame, seasons: set[int]) -> pd.DataFrame:
     for column in subset.columns:
         if column in {"season", "week"}:
             subset[column] = pd.to_numeric(subset[column], errors="coerce")
-    sort_keys = [key for key in ("season", "week", "game_id", "away_team", "home_team") if key in subset]
+    sort_keys = [
+        key for key in ("season", "week", "game_id", "away_team", "home_team") if key in subset
+    ]
     return subset.sort_values(sort_keys).reset_index(drop=True)
 
 
@@ -223,13 +252,13 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     frozen_schedule = _recover_schedule(
         benchmark_records["schedules"],
-        until=str(benchmark["created_at_utc"]),
+        anchor=str(benchmark["created_at_utc"]),
         output=args.output_dir / "frozen_games.csv",
         label="frozen_benchmark",
     )
     archived_schedule = _recover_schedule(
         archived_records["schedules"],
-        until=str(archived["created_at_utc"]),
+        anchor=str(archived["created_at_utc"]),
         output=args.output_dir / "archived_feature_games.csv",
         label="archived_feature_panel",
     )
