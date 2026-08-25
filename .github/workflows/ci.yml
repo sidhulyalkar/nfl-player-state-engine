@@ -44,7 +44,12 @@ jobs:
             scripts/run_v015_decision_benchmark.py \
             scripts/run_v016_terminal_benchmark.py \
             scripts/run_player_state_graph_research.py \
-            scripts/run_evidence_factory.py
+            scripts/run_evidence_factory.py \
+            scripts/acquire_historical_injury_archive.py \
+            scripts/freeze_historical_numerical_baseline_v2.py \
+            scripts/rehydrate_registered_historical_sources_v2.py \
+            scripts/run_rebaselined_historical_intelligence_experiment_v2.py \
+            scripts/run_reg_historical_intelligence_experiment_v2.py
       - name: Compile Python sources and all scripts
         run: python -m compileall -q src scripts tests
       - name: Smoke Evidence Factory against frozen benchmark artifacts
