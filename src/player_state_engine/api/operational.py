@@ -12,6 +12,7 @@ from player_state_engine.api.evidence_routes import install_evidence_routes
 from player_state_engine.api.game_intelligence_routes import install_game_intelligence_routes
 from player_state_engine.api.intelligence_routes import install_intelligence_routes
 from player_state_engine.api.ranking_routes import install_ranking_routes
+from player_state_engine.api.shadow_season_routes import install_shadow_season_routes
 
 
 def create_app(**kwargs: Any) -> FastAPI:
@@ -24,6 +25,7 @@ def create_app(**kwargs: Any) -> FastAPI:
         "player_state_graph_root",
         "live_store_root",
         "evidence_factory_root",
+        "shadow_season_root",
     }
     base_kwargs = {key: value for key, value in kwargs.items() if key not in operational_only}
     app = create_base_app(**base_kwargs)
@@ -49,6 +51,10 @@ def create_app(**kwargs: Any) -> FastAPI:
         app,
         evidence_factory_root=kwargs.get("evidence_factory_root"),
     )
+    install_shadow_season_routes(
+        app,
+        artifact_root=kwargs.get("shadow_season_root"),
+    )
     install_ranking_routes(
         app,
         store_root=kwargs.get("store_root"),
@@ -65,10 +71,10 @@ def create_app(**kwargs: Any) -> FastAPI:
     app.description = (
         f"{app.description} Live Draft War Room, player intelligence, cross-league portfolio "
         "exposure, Player State Graph shadow comparison and sensitivity, frozen Evidence Factory, "
-        "model observatory, ranking calibration, guarded draft reliability, guarded "
-        "game-intelligence simulation, expanding frozen replay, factorial attribution, "
-        "simulated-state opportunity, drive-volume, possession-transition, fourth-down decision, "
-        "and terminal-family research surfaces."
+        "immutable 2026 live shadow-season evidence, model observatory, ranking calibration, "
+        "guarded draft reliability, guarded game-intelligence simulation, expanding frozen replay, "
+        "factorial attribution, simulated-state opportunity, drive-volume, possession-transition, "
+        "fourth-down decision, and terminal-family research surfaces."
     )
     return app
 

@@ -7,6 +7,7 @@ import {
 import type { ModelObservatoryResponse } from '../../shared/types';
 import { api } from '../lib/api';
 import { EvidenceFactoryPanel } from './EvidenceFactoryPanel';
+import { LiveShadowSeasonPanel } from './LiveShadowSeasonPanel';
 import { ModeBadge } from './ModeBadge';
 import { ShadowEvaluationPanel } from './ShadowEvaluationPanel';
 
@@ -74,6 +75,7 @@ export function ModelDiagnosticsPanel() {
     </div>
 
     <EvidenceFactoryPanel/>
+    <LiveShadowSeasonPanel/>
     <ShadowEvaluationPanel evaluation={payload?.player_state_graph?.shadow_evaluation}/>
 
     <div className="observatory-chart-grid wide">

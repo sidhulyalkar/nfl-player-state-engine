@@ -18,6 +18,7 @@ import type {
   TradeSuggestion,
 } from '../../shared/types';
 import type { EvidenceFactoryResponse } from './evidenceTypes';
+import type { ShadowSeasonResponse } from './shadowSeasonTypes';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/pse${path}`, {
@@ -108,6 +109,8 @@ export const api = {
   modelObservatory: (target = 'fantasy_points_ppr', method = 'quantile_engine') =>
     request<ModelObservatoryResponse>(`/v1/model/observatory${query({ target, method })}`),
   shadowEvaluation: () => request<ShadowEvaluationResponse>('/v1/model/shadow-evaluation'),
+  shadowSeason: (season = 2026) =>
+    request<ShadowSeasonResponse>(`/v1/model/shadow-season${query({ season })}`),
   evidenceFactory: (target = 'fantasy_points_ppr') =>
     request<EvidenceFactoryResponse>(`/v1/model/evidence-factory${query({ target })}`),
   teamContext: (season?: number, week?: number) =>
