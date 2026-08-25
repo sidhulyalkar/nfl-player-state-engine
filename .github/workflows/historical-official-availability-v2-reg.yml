@@ -1,0 +1,110 @@
+name: Historical official availability v2 REG experiment
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Actions run containing the exact registered v2 source-byte artifact"
+        required: true
+        default: "32821290568"
+        type: string
+      bootstrap_samples:
+        description: "Blocked season-week bootstrap samples"
+        required: true
+        default: "2000"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: historical-official-availability-v2-reg-manual
+  cancel-in-progress: false
+
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install experiment environment
+        run: python -m pip install -e '.[dev,intelligence,api]'
+
+      - name: Qualify registered experiment operators
+        run: |
+          ruff check \
+            scripts/acquire_historical_injury_archive.py \
+            scripts/freeze_historical_numerical_baseline_v2.py \
+            scripts/run_rebaselined_historical_intelligence_experiment_v2.py \
+            scripts/run_reg_historical_intelligence_experiment_v2.py \
+            src/player_state_engine/evaluation/historical_intelligence_corpus.py \
+            tests/test_historical_intelligence_corpus.py
+          python -m compileall -q \
+            scripts/acquire_historical_injury_archive.py \
+            scripts/freeze_historical_numerical_baseline_v2.py \
+            scripts/run_rebaselined_historical_intelligence_experiment_v2.py \
+            scripts/run_reg_historical_intelligence_experiment_v2.py \
+            src/player_state_engine/evaluation/historical_intelligence_corpus.py
+          pytest -q tests/test_historical_intelligence_corpus.py
+
+      - name: Download registered frozen input bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: historical-official-availability-v2-results
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+          path: recovered/v2-registered
+
+      - name: Restore exact registered source paths
+        run: |
+          mkdir -p data/raw
+          cp -a recovered/v2-registered/data/raw/historical_numerical_baseline_v2 data/raw/
+          cp -a recovered/v2-registered/data/raw/historical_injury_archive_v2 data/raw/
+          test -f data/raw/historical_numerical_baseline_v2/NUMERICAL_BASELINE_MANIFEST.json
+          test -f data/raw/historical_injury_archive_v2/SOURCE_MANIFEST.csv
+
+      - name: Capture execution environment
+        run: |
+          mkdir -p artifacts/intelligence_ablations/historical_official_v2_reg
+          python --version > artifacts/intelligence_ablations/historical_official_v2_reg/python_version.txt
+          python -m pip freeze > artifacts/intelligence_ablations/historical_official_v2_reg/pip_freeze.txt
+          git rev-parse HEAD > artifacts/intelligence_ablations/historical_official_v2_reg/git_head.txt
+
+      - name: Run registered REG experiment
+        run: |
+          python scripts/run_reg_historical_intelligence_experiment_v2.py \
+            --numerical-root data/raw/historical_numerical_baseline_v2 \
+            --injury-root data/raw/historical_injury_archive_v2 \
+            --seasons 2020 2021 2022 2023 2024 \
+            --target fantasy_points_ppr \
+            --config configs/base.yaml \
+            --bootstrap-samples "${{ inputs.bootstrap_samples }}" \
+            --minimum-source-coverage 0.80 \
+            --maximum-fdr-q 0.10 \
+            --minimum-consistency 0.55 \
+            --minimum-paired-rows 250 \
+            --minimum-seasons 2 \
+            --minimum-blocks 8 \
+            --minimum-position-rows 50 \
+            --maximum-overall-coverage-gap-regression 0.02 \
+            --maximum-position-coverage-gap-regression 0.05 \
+            --output-dir artifacts/intelligence_ablations/historical_official_v2_reg
+
+      - name: Upload complete evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-official-availability-v2-reg-results
+          if-no-files-found: warn
+          retention-days: 90
+          path: |
+            experiments/historical_official_availability_v2/registered_inputs.json
+            data/raw/historical_numerical_baseline_v2
+            data/raw/historical_injury_archive_v2
+            artifacts/intelligence_ablations/historical_official_v2_reg
