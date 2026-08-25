@@ -57,8 +57,7 @@ def _stable_frame_digest(frame: pd.DataFrame) -> str:
     if frame.empty:
         digest.update(b"<empty>")
         return digest.hexdigest()
-    normalized = frame.copy()
-    normalized = normalized.reindex(sorted(normalized.columns), axis=1)
+    normalized = frame.reindex(sorted(frame.columns), axis=1).copy()
     sort_columns = [
         column
         for column in ("season", "week", "player_id", "evidence_id", "game_id")
@@ -70,15 +69,15 @@ def _stable_frame_digest(frame: pd.DataFrame) -> str:
     return digest.hexdigest()
 
 
+def _clean_manifest_value(value: object) -> str:
+    return "" if pd.isna(value) else str(value).strip()
+
+
 def verify_source_archive_manifest(
     paths: Iterable[str | Path],
     manifest: pd.DataFrame,
 ) -> SourceArchiveVerification:
-    """Verify archived evidence files against the immutable acquisition manifest.
-
-    Matching is by basename so a frozen archive can be moved between machines without
-    invalidating provenance. Ambiguous basenames fail closed.
-    """
+    """Verify archived evidence files against the immutable acquisition manifest."""
 
     required = {"path", "sha256", "status"}
     missing = required - set(manifest.columns)
@@ -97,8 +96,8 @@ def verify_source_archive_manifest(
             failures.append(f"manifest_match_count:{path.name}:{len(matches)}")
             continue
         record = matches.iloc[0]
-        expected = str(record["sha256"] or "").strip().lower()
-        status = str(record["status"] or "").strip().lower()
+        expected = _clean_manifest_value(record["sha256"]).lower()
+        status = _clean_manifest_value(record["status"]).lower()
         if not path.is_file():
             failures.append(f"missing_file:{path.as_posix()}")
             continue
@@ -149,16 +148,14 @@ def _panel_with_cutoffs(
     data = panel[["season", "week", "game_id", "player_id", "recent_team"]].copy()
     data["season"] = pd.to_numeric(data["season"], errors="raise").astype(int)
     data["week"] = pd.to_numeric(data["week"], errors="raise").astype(int)
-    data["game_id"] = data["game_id"].astype(str).str.strip()
-    data["player_id"] = data["player_id"].astype(str).str.strip()
-    data["recent_team"] = data["recent_team"].astype(str).str.strip()
+    for column in ("game_id", "player_id", "recent_team"):
+        data[column] = data[column].astype(str).str.strip()
     if data[["game_id", "player_id", "recent_team"]].eq("").any().any():
         raise ValueError("Historical intelligence panel contains blank identity fields")
     if data.duplicated(_PANEL_KEYS).any():
         raise ValueError("Historical intelligence panel contains duplicate season/week/player_id rows")
 
     cutoffs = _kickoff_cutoffs(schedules, hours_before=cutoff_hours_before)
-    data["game_id"] = data["game_id"].astype(str)
     data = data.merge(cutoffs, on="game_id", how="left", validate="many_to_one")
     data["prediction_cutoff"] = pd.to_datetime(
         data["prediction_cutoff"], utc=True, errors="coerce"
@@ -166,9 +163,14 @@ def _panel_with_cutoffs(
     return data
 
 
+def _normalized_text(value: object) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    return " ".join(str(value).strip().lower().replace("_", " ").split())
+
+
 def _practice_status(value: object) -> str:
-    text = " ".join(str(value or "").strip().lower().replace("_", " ").split())
-    mapping = {
+    return {
         "full": "full",
         "full participation": "full",
         "limited": "limited",
@@ -176,13 +178,11 @@ def _practice_status(value: object) -> str:
         "did not participate": "did_not_participate",
         "dnp": "did_not_participate",
         "not listed": "not_listed",
-    }
-    return mapping.get(text, "unknown")
+    }.get(_normalized_text(value), "unknown")
 
 
 def _game_status(value: object) -> str:
-    text = " ".join(str(value or "").strip().lower().replace("_", " ").split())
-    mapping = {
+    return {
         "active": "active",
         "probable": "active",
         "questionable": "questionable",
@@ -192,18 +192,16 @@ def _game_status(value: object) -> str:
         "injured reserve": "ir",
         "pup": "pup",
         "suspended": "suspended",
-    }
-    return mapping.get(text, "unknown")
+    }.get(_normalized_text(value), "unknown")
 
 
 def _depth_role(rank: object) -> str:
     numeric = pd.to_numeric(pd.Series([rank]), errors="coerce").iloc[0]
     if pd.isna(numeric):
         return "unknown"
-    value = int(numeric)
-    if value <= 1:
+    if int(numeric) <= 1:
         return "starter"
-    if value == 2:
+    if int(numeric) == 2:
         return "committee"
     return "backup"
 
@@ -284,6 +282,36 @@ def _latest_injury_rows(
     return selected, coverage
 
 
+def _latest_team_depth_observation(
+    coverage: pd.DataFrame,
+    timestamped: pd.DataFrame,
+) -> pd.Series:
+    grouped_times: dict[tuple[int, str], pd.DatetimeIndex] = {}
+    for (season, team), group in timestamped.groupby(["season", "recent_team"], sort=False):
+        if pd.isna(season):
+            continue
+        grouped_times[(int(season), str(team))] = pd.DatetimeIndex(
+            group["observed_at"].dropna().sort_values().unique()
+        )
+
+    observed = pd.Series(pd.NaT, index=coverage.index, dtype="datetime64[ns, UTC]")
+    for (season, team), indexes in coverage.groupby(["season", "recent_team"], sort=False).groups.items():
+        times = grouped_times.get((int(season), str(team)))
+        if times is None or len(times) == 0:
+            continue
+        valid_indexes = [
+            index for index in indexes if pd.notna(coverage.at[index, "prediction_cutoff"])
+        ]
+        if not valid_indexes:
+            continue
+        cutoffs = pd.DatetimeIndex(coverage.loc[valid_indexes, "prediction_cutoff"])
+        positions = times.searchsorted(cutoffs, side="right") - 1
+        for index, position in zip(valid_indexes, positions, strict=True):
+            if position >= 0:
+                observed.at[index] = times[int(position)]
+    return observed
+
+
 def _latest_depth_rows(
     panel: pd.DataFrame,
     panel_cutoffs: pd.DataFrame,
@@ -310,30 +338,7 @@ def _latest_depth_rows(
     if timestamped.empty:
         return pd.DataFrame(), coverage
 
-    grouped_times: dict[tuple[int, str], pd.DatetimeIndex] = {}
-    for (season, team), group in timestamped.groupby(["season", "recent_team"], sort=False):
-        if pd.isna(season):
-            continue
-        times = pd.DatetimeIndex(group["observed_at"].dropna().sort_values().unique())
-        grouped_times[(int(season), str(team))] = times
-
-    observed = pd.Series(pd.NaT, index=coverage.index, dtype="datetime64[ns, UTC]")
-    for (season, team), indexes in coverage.groupby(["season", "recent_team"], sort=False).groups.items():
-        times = grouped_times.get((int(season), str(team)))
-        if times is None or len(times) == 0:
-            continue
-        valid_indexes = [
-            index for index in indexes if pd.notna(coverage.at[index, "prediction_cutoff"])
-        ]
-        if not valid_indexes:
-            continue
-        cutoffs = pd.DatetimeIndex(coverage.loc[valid_indexes, "prediction_cutoff"])
-        positions = times.asi8.searchsorted(cutoffs.asi8, side="right") - 1
-        for index, position in zip(valid_indexes, positions, strict=True):
-            if position >= 0:
-                observed.at[index] = times[int(position)]
-
-    coverage["depth_source_observed_at"] = observed
+    coverage["depth_source_observed_at"] = _latest_team_depth_observation(coverage, timestamped)
     coverage["depth_source_age_hours"] = (
         coverage["prediction_cutoff"] - coverage["depth_source_observed_at"]
     ).dt.total_seconds() / 3600.0
@@ -394,8 +399,8 @@ def _official_evidence_frame(
         source_url = _source_url(injury_source_urls, season, family="injuries")
         practice = _practice_status(row.get("practice_status"))
         game = _game_status(row.get("report_status"))
-        injury_name = row.get("primary_injury")
-        injury_text = None if pd.isna(injury_name) else str(injury_name)
+        injury_value = row.get("primary_injury")
+        injury_text = None if injury_value is None or pd.isna(injury_value) else str(injury_value)
         if practice != "unknown":
             payload = {
                 "family": "injuries",
@@ -503,12 +508,7 @@ def build_historical_intelligence_corpus(
     injury_source_urls: Mapping[int, str] | None = None,
     depth_source_urls: Mapping[int, str] | None = None,
 ) -> HistoricalIntelligenceCorpus:
-    """Build frozen official evidence, source coverage, and authority provenance.
-
-    Coverage is deliberately team-source based. A player with no injury row is considered
-    source-covered only when the team-week report itself was observed before that game's cutoff.
-    This keeps "not observed" distinct from "observed and not listed".
-    """
+    """Build frozen official evidence, source coverage, and authority provenance."""
 
     if not include_injuries and not include_depth_charts:
         raise ValueError("At least one historical intelligence source family must be enabled")
@@ -524,7 +524,6 @@ def build_historical_intelligence_corpus(
         schedules,
         cutoff_hours_before=cutoff_hours_before,
     )
-
     injury_rows, injury_coverage = _latest_injury_rows(
         panel_cutoffs,
         injuries if include_injuries else None,
@@ -549,28 +548,37 @@ def build_historical_intelligence_corpus(
     )
 
     coverage = panel_cutoffs.copy()
-    injury_columns = [
-        *_PANEL_KEYS,
-        "official_injury_report_source_covered",
-        "injury_source_first_observed_at",
-    ]
-    depth_columns = [
-        *_PANEL_KEYS,
-        "official_depth_chart_source_covered",
-        "depth_source_observed_at",
-        "depth_source_age_hours",
-    ]
     coverage = coverage.merge(
-        injury_coverage[injury_columns], on=_PANEL_KEYS, how="left", validate="one_to_one"
+        injury_coverage[
+            [
+                *_PANEL_KEYS,
+                "official_injury_report_source_covered",
+                "injury_source_first_observed_at",
+            ]
+        ],
+        on=_PANEL_KEYS,
+        how="left",
+        validate="one_to_one",
     )
     coverage = coverage.merge(
-        depth_coverage[depth_columns], on=_PANEL_KEYS, how="left", validate="one_to_one"
+        depth_coverage[
+            [
+                *_PANEL_KEYS,
+                "official_depth_chart_source_covered",
+                "depth_source_observed_at",
+                "depth_source_age_hours",
+            ]
+        ],
+        on=_PANEL_KEYS,
+        how="left",
+        validate="one_to_one",
     )
     for column in (
         "official_injury_report_source_covered",
         "official_depth_chart_source_covered",
     ):
         coverage[column] = coverage[column].fillna(False).astype(bool)
+
     enabled_coverage_columns: list[str] = []
     if include_injuries:
         enabled_coverage_columns.append("official_injury_report_source_covered")
@@ -606,7 +614,6 @@ def build_historical_intelligence_corpus(
         injury_source_urls=injury_source_urls,
         depth_source_urls=depth_source_urls,
     )
-
     covered_seasons = sorted(
         coverage.loc[coverage["official_availability_source_covered"], "season"]
         .dropna()
@@ -693,24 +700,25 @@ def build_historical_intelligence_corpus(
         "production_projection_changed": False,
     }
 
-    coverage_columns = [
-        "season",
-        "week",
-        "player_id",
-        "game_id",
-        "recent_team",
-        "prediction_cutoff",
-        "official_availability_source_covered",
-        "official_injury_report_source_covered",
-        "official_depth_chart_source_covered",
-        "official_availability_evidence_found",
-        "injury_source_first_observed_at",
-        "depth_source_observed_at",
-        "depth_source_age_hours",
-    ]
     return HistoricalIntelligenceCorpus(
         official_evidence=official_evidence.reset_index(drop=True),
-        source_coverage=coverage[coverage_columns].reset_index(drop=True),
+        source_coverage=coverage[
+            [
+                "season",
+                "week",
+                "player_id",
+                "game_id",
+                "recent_team",
+                "prediction_cutoff",
+                "official_availability_source_covered",
+                "official_injury_report_source_covered",
+                "official_depth_chart_source_covered",
+                "official_availability_evidence_found",
+                "injury_source_first_observed_at",
+                "depth_source_observed_at",
+                "depth_source_age_hours",
+            ]
+        ].reset_index(drop=True),
         provenance=provenance,
         audit=audit,
     )
