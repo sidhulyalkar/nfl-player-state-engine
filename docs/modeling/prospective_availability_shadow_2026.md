@@ -1,0 +1,136 @@
+# Prospective 2026 official-availability shadow
+
+## Purpose
+
+This lane exists to create a genuinely prospective confirmation dataset for official injury and practice evidence during the 2026 regular season.
+
+The historical v3 experiment is post-hoc by construction: its current-week formulation was designed after observing the failed v2 result. A historical v3 winner therefore cannot become activation-eligible from the same 2020-2024 universe. The 2026 shadow lane solves that problem by freezing the evidence that was actually available to this project before each game's prediction cutoff.
+
+Everything produced here has authority `prospective_shadow_evidence_only`. It cannot alter production projections, player rankings, draft values, or the activation registry.
+
+## Core point-in-time rule
+
+**Collection time is authoritative.**
+
+For every source snapshot, the system records `source_collected_at_utc` from the machine clock at download time. Publisher metadata such as `date_modified` is retained for audit, but it cannot backdate evidence availability.
+
+A row is eligible for a future prospective confirmation only when:
+
+```text
+source_collected_at_utc <= kickoff_utc - 1.5 hours
+```
+
+A source row downloaded after the prediction cutoff remains in the immutable audit bundle but has `usable_before_cutoff = false` for that game.
+
+This deliberately prefers false negatives over hindsight leakage.
+
+## Why this differs from historical reconstruction
+
+Historical archives answer: "What does the final archive say happened?"
+
+The prospective shadow answers: "What bytes had this project actually observed by the decision time?"
+
+That distinction matters when mutable feeds are corrected, republished, delayed, or unavailable. The 2026 confirmation dataset must never infer an earlier availability time from a later download.
+
+## Snapshot contents
+
+Each successful capture stores:
+
+- the exact mutable injury source bytes as `injuries_source.csv`;
+- a normalized `availability_snapshot.csv` containing only current-week availability fields and game cutoffs;
+- `manifest.json` with the collection time, source URL, byte count, SHA-256, commit-pinned schedule identity, row counts, and authority metadata.
+
+The normalized snapshot intentionally excludes player game outcomes. Its manifest asserts `contains_player_outcomes = false`.
+
+Snapshot directories are content/time addressed:
+
+```text
+artifacts/prospective_availability_shadow/
+  season_2026/
+    week_01/
+      20260913T150000Z_<injury-sha-prefix>/
+```
+
+Existing snapshot directories cannot be overwritten.
+
+## Source-unavailable behavior
+
+A missing injury release is evidence about source availability, not evidence about players.
+
+If the configured injury URL returns HTTP 404, the collector writes a `source_unavailable_*.json` record with zero evidence rows and exits cleanly. It never interprets source failure as "healthy", "not listed", or zero injury risk.
+
+This is important because nflverse injury releases have had availability gaps in prior seasons.
+
+## Schedule authority
+
+Each capture resolves the latest Git commit touching `nfldata/data/games.csv` at capture time and then downloads `games.csv` from that exact commit SHA. The snapshot manifest records:
+
+- schedule commit;
+- commit-pinned schedule URL;
+- schedule byte count;
+- schedule SHA-256.
+
+The schedule source is therefore reproducible even though the injury feed itself is mutable.
+
+## Current-week semantics
+
+The collector canonicalizes only the requested 2026 regular-season week. When multiple source rows exist for the same player/team/week, the latest row in the bytes observed at collection time is retained.
+
+For each player evidence row it stores:
+
+- team and game identity;
+- practice status;
+- game/report status;
+- primary injury;
+- publisher `date_modified` as audit metadata;
+- actual collection timestamp;
+- 1.5-hour prediction cutoff;
+- `usable_before_cutoff`.
+
+The prospective confirmation model will later derive its treatment features from these immutable snapshots. The collector itself does not score or model players.
+
+## Capture cadence
+
+The initial workflow is deliberately **manual-only**. Before the regular season begins, this avoids generating meaningless off-season artifacts or silently creating a cadence we have not audited.
+
+During the season, the safest collection policy is multiple immutable captures during each reporting week, including one sufficiently close to the 1.5-hour cutoff. Later confirmation should select the latest capture that was actually collected before each game's cutoff.
+
+A scheduled capture workflow can be added only after the manual path is qualified and the 2026 source URL is observed to be stable enough for unattended collection.
+
+## Artifact-retention limitation
+
+GitHub Actions artifacts are useful operational transport but are not permanent scientific storage. The initial workflow uses them to qualify the collector and capture snapshots, but 90-day artifact retention is not a sufficient season-long archival strategy.
+
+Before relying on this lane for end-of-season confirmation, the project should add durable immutable storage with the same SHA-addressed snapshot contract. Until then, the raw snapshot directory produced by each run is the scientific payload, while the Actions artifact is only its temporary carrier.
+
+## Manual workflow
+
+Run `Prospective 2026 availability shadow capture` and provide the regular-season week. The workflow:
+
+1. checks out the exact code head;
+2. installs and tests the prospective collector;
+3. resolves the current commit touching `nfldata/data/games.csv`;
+4. downloads the commit-pinned schedule and current `injuries_2026.csv` source;
+5. records the real collection time;
+6. writes either an immutable snapshot or an explicit source-unavailable record;
+7. captures the code SHA and Python/package environment;
+8. uploads the complete shadow bundle as a non-production artifact.
+
+The direct local operator is:
+
+```bash
+python scripts/capture_prospective_availability_snapshot.py \
+  --season 2026 \
+  --week 1 \
+  --injury-url https://github.com/nflverse/nflverse-data/releases/download/injuries/injuries_2026.csv \
+  --schedule-url https://raw.githubusercontent.com/nflverse/nfldata/<COMMIT>/data/games.csv \
+  --schedule-commit <COMMIT>
+```
+
+Do not manually substitute an old collection timestamp. The CLI intentionally derives collection time from `datetime.now(UTC)`.
+
+## Confirmation boundary
+
+A later prospective confirmation must be preregistered before outcome settlement and must evaluate the exact v3 formulation that survived the historical exploratory screen. It should not re-search practice/game feature combinations on 2026 outcomes.
+
+Passing that untouched prospective test can make the formulation eligible for **manual activation review**. It still must not auto-promote.
