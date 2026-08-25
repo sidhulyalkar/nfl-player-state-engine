@@ -2,17 +2,6 @@ name: Historical official availability v2 REG experiment
 
 on:
   workflow_dispatch:
-    inputs:
-      source_run_id:
-        description: "Actions run containing the exact registered v2 source-byte artifact"
-        required: true
-        default: "32821290568"
-        type: string
-      bootstrap_samples:
-        description: "Blocked season-week bootstrap samples"
-        required: true
-        default: "2000"
-        type: string
 
 permissions:
   contents: read
@@ -51,13 +40,32 @@ jobs:
             scripts/run_rebaselined_historical_intelligence_experiment_v2.py \
             scripts/run_reg_historical_intelligence_experiment_v2.py \
             src/player_state_engine/evaluation/historical_intelligence_corpus.py
+          python scripts/run_reg_historical_intelligence_experiment_v2.py --help >/dev/null
           pytest -q tests/test_historical_intelligence_corpus.py
+
+      - name: Resolve registered source artifact
+        id: registry
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          registry = json.loads(
+              Path('experiments/historical_official_availability_v2/registered_inputs.json')
+              .read_text(encoding='utf-8')
+          )
+          artifact = registry['retained_source_artifact']
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as handle:
+              handle.write(f"source_run_id={artifact['workflow_run_id']}\n")
+              handle.write(f"artifact_name={artifact['artifact_name']}\n")
+          PY
 
       - name: Download registered frozen input bundle
         uses: actions/download-artifact@v4
         with:
-          name: historical-official-availability-v2-results
-          run-id: ${{ inputs.source_run_id }}
+          name: ${{ steps.registry.outputs.artifact_name }}
+          run-id: ${{ steps.registry.outputs.source_run_id }}
           github-token: ${{ github.token }}
           path: recovered/v2-registered
 
@@ -81,19 +89,6 @@ jobs:
           python scripts/run_reg_historical_intelligence_experiment_v2.py \
             --numerical-root data/raw/historical_numerical_baseline_v2 \
             --injury-root data/raw/historical_injury_archive_v2 \
-            --seasons 2020 2021 2022 2023 2024 \
-            --target fantasy_points_ppr \
-            --config configs/base.yaml \
-            --bootstrap-samples "${{ inputs.bootstrap_samples }}" \
-            --minimum-source-coverage 0.80 \
-            --maximum-fdr-q 0.10 \
-            --minimum-consistency 0.55 \
-            --minimum-paired-rows 250 \
-            --minimum-seasons 2 \
-            --minimum-blocks 8 \
-            --minimum-position-rows 50 \
-            --maximum-overall-coverage-gap-regression 0.02 \
-            --maximum-position-coverage-gap-regression 0.05 \
             --output-dir artifacts/intelligence_ablations/historical_official_v2_reg
 
       - name: Upload complete evidence bundle
