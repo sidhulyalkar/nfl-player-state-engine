@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import numpy as np
 import pandas as pd
 
-from player_state_engine.config import AppConfig
+from player_state_engine.config import EngineConfig
 from player_state_engine.evaluation.frozen_opportunity import load_frozen_prediction_panel
 from player_state_engine.evaluation.intelligence_evidence import (
     IntelligenceEvidenceRun,
@@ -226,7 +226,7 @@ def build_historical_feature_replay(
     benchmark_root: str | Path,
     seasons: tuple[int, ...] = (2021, 2022, 2023, 2024),
     target: str = "fantasy_points_ppr",
-    config: AppConfig | None = None,
+    config: EngineConfig | None = None,
     outcome_tolerance: float = 1e-8,
 ) -> HistoricalFeatureReplay:
     """Rebuild current-code point-in-time features on the frozen benchmark universe.
@@ -414,7 +414,7 @@ def run_historical_intelligence_experiment(
     provenance: IntelligenceEvidenceProvenance,
     source_verification: FrozenBenchmarkSourceVerification,
     *,
-    config: AppConfig,
+    config: EngineConfig,
     target: str = "fantasy_points_ppr",
     output_dir: str | Path | None = None,
     bootstrap_samples: int = 2000,
