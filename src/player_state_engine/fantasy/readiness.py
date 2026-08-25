@@ -37,6 +37,7 @@ class LeagueReadinessReport:
     missing_positions: tuple[str, ...]
     projection_rows: int
     unique_player_coverage: float
+    market_adp_coverage: float
     market_coverage: float
     market_source: str | None
     exact_scoring_coverage: float
@@ -194,6 +195,7 @@ def assess_league_readiness(
         missing_positions=missing_positions,
         projection_rows=rows,
         unique_player_coverage=unique_coverage,
+        market_adp_coverage=market_coverage,
         market_coverage=market_coverage,
         market_source=market_source,
         exact_scoring_coverage=exact_scoring_coverage,
