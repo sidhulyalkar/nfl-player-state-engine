@@ -1,0 +1,143 @@
+name: Current-week official availability v3 exploration
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/current-week-official-availability-v3.yml"
+      - "experiments/current_week_official_availability_v3/**"
+      - "scripts/run_current_week_official_availability_v3.py"
+      - "scripts/run_registered_current_week_official_availability_v3.py"
+      - "tests/test_current_week_official_availability_v3.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: current-week-official-availability-v3-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  experiment:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.14"
+
+      - name: Install exact experiment environment
+        run: |
+          python -m pip install -r experiments/historical_official_availability_v2/environment_requirements.txt
+          python -m pip install --no-deps -e .
+
+      - name: Qualify v3 contracts and reset semantics
+        run: |
+          ruff check \
+            scripts/run_current_week_official_availability_v3.py \
+            scripts/run_registered_current_week_official_availability_v3.py \
+            tests/test_current_week_official_availability_v3.py
+          python -m compileall -q \
+            scripts/run_current_week_official_availability_v3.py \
+            scripts/run_registered_current_week_official_availability_v3.py \
+            tests/test_current_week_official_availability_v3.py
+          python scripts/run_registered_current_week_official_availability_v3.py --help >/dev/null
+          pytest -q tests/test_current_week_official_availability_v3.py
+
+      - name: Resolve registered v2 source artifact
+        id: registry
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          registry = json.loads(
+              Path('experiments/historical_official_availability_v2/registered_inputs.json')
+              .read_text(encoding='utf-8')
+          )
+          artifact = registry['retained_source_artifact']
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as handle:
+              handle.write(f"source_run_id={artifact['workflow_run_id']}\n")
+              handle.write(f"artifact_name={artifact['artifact_name']}\n")
+          PY
+
+      - name: Download retained frozen source bundle
+        id: retained_artifact
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.registry.outputs.artifact_name }}
+          run-id: ${{ steps.registry.outputs.source_run_id }}
+          github-token: ${{ github.token }}
+          path: recovered/v2-registered
+
+      - name: Restore or rehydrate exact frozen sources
+        run: |
+          mkdir -p data/raw artifacts/intelligence_ablations/current_week_official_v3
+          if [[ -d recovered/v2-registered/data/raw/historical_numerical_baseline_v2 \
+                && -d recovered/v2-registered/data/raw/historical_injury_archive_v2 ]]; then
+            cp -a recovered/v2-registered/data/raw/historical_numerical_baseline_v2 data/raw/
+            cp -a recovered/v2-registered/data/raw/historical_injury_archive_v2 data/raw/
+            echo "retained_actions_artifact" \
+              > artifacts/intelligence_ablations/current_week_official_v3/source_recovery_mode.txt
+          else
+            python scripts/rehydrate_registered_historical_sources_v2.py \
+              --numerical-root data/raw/historical_numerical_baseline_v2 \
+              --injury-root data/raw/historical_injury_archive_v2
+            echo "registry_hash_verified_rehydration" \
+              > artifacts/intelligence_ablations/current_week_official_v3/source_recovery_mode.txt
+          fi
+          python scripts/verify_registered_historical_archive_v2.py \
+            --injury-root data/raw/historical_injury_archive_v2
+
+      - name: Capture exact execution environment
+        run: |
+          python --version > artifacts/intelligence_ablations/current_week_official_v3/python_version.txt
+          python -m pip freeze > artifacts/intelligence_ablations/current_week_official_v3/pip_freeze.txt
+          git rev-parse HEAD > artifacts/intelligence_ablations/current_week_official_v3/git_head.txt
+
+      - name: Run registered current-week exploration
+        run: |
+          python scripts/run_registered_current_week_official_availability_v3.py \
+            --numerical-root data/raw/historical_numerical_baseline_v2 \
+            --injury-root data/raw/historical_injury_archive_v2 \
+            --output-dir artifacts/intelligence_ablations/current_week_official_v3
+
+      - name: Summarize registered exploratory screens
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path('artifacts/intelligence_ablations/current_week_official_v3/run_manifest.json')
+          if not path.exists():
+              print('v3 run manifest was not produced')
+              raise SystemExit(0)
+          payload = json.loads(path.read_text(encoding='utf-8'))
+          print('AUTHORITY', payload.get('authority'))
+          for row in payload.get('formulations', []):
+              print(
+                  row.get('formulation'),
+                  'effect=', row.get('effect'),
+                  'ci=', [row.get('ci_low'), row.get('ci_high')],
+                  'q=', row.get('exploratory_joint_fdr_q'),
+                  'screen=', row.get('registered_exploratory_screen_passed'),
+                  'blockers=', row.get('registered_exploratory_screen_blockers'),
+              )
+          PY
+
+      - name: Upload complete v3 evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-week-official-availability-v3-results
+          if-no-files-found: warn
+          retention-days: 90
+          path: |
+            experiments/current_week_official_availability_v3/registered_inputs.json
+            artifacts/intelligence_ablations/current_week_official_v3
