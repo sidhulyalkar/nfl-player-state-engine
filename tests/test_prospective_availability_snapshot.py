@@ -13,20 +13,20 @@ import capture_prospective_availability_snapshot as capture  # noqa: E402
 
 def _schedule_bytes() -> bytes:
     return (
-        "game_id,season,game_type,week,gameday,gametime,away_team,home_team\n"
-        "2026_01_A_B,2026,REG,1,2026-09-13,13:00,A,B\n"
-    ).encode()
+        b"game_id,season,game_type,week,gameday,gametime,away_team,home_team\n"
+        b"2026_01_A_B,2026,REG,1,2026-09-13,13:00,A,B\n"
+    )
 
 
 def _injury_bytes() -> bytes:
     return (
-        "season,week,gsis_id,full_name,team,position,practice_status,report_status,"
-        "report_primary_injury,date_modified\n"
-        "2026,1,p1,Player One,A,WR,Limited Participation in Practice,Questionable,"
-        "Hamstring,2026-09-12T20:00:00Z\n"
-        "2026,1,p1,Player One,A,WR,Did Not Participate in Practice,Questionable,"
-        "Hamstring,2026-09-11T20:00:00Z\n"
-    ).encode()
+        b"season,week,gsis_id,full_name,team,position,practice_status,report_status,"
+        b"report_primary_injury,date_modified\n"
+        b"2026,1,p1,Player One,A,WR,Limited Participation in Practice,Questionable,"
+        b"Hamstring,2026-09-12T20:00:00Z\n"
+        b"2026,1,p1,Player One,A,WR,Did Not Participate in Practice,Questionable,"
+        b"Hamstring,2026-09-11T20:00:00Z\n"
+    )
 
 
 def _build(collected_at: str) -> tuple[pd.DataFrame, dict[str, object]]:
