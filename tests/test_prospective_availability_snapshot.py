@@ -75,6 +75,20 @@ def test_publisher_date_does_not_backdate_evidence_availability() -> None:
     assert not bool(row["usable_before_cutoff"])
 
 
+def test_team_observation_audit_is_conservative_about_zero_row_teams() -> None:
+    _, manifest = _build("2026-09-13T15:00:00Z")
+
+    assert manifest["scheduled_games"] == 1
+    assert manifest["scheduled_teams"] == 2
+    assert manifest["teams_with_source_rows"] == 1
+    assert manifest["conservative_team_row_observation_rate"] == pytest.approx(0.5)
+    audit = {row["recent_team"]: row for row in manifest["team_observation"]}
+    assert audit["A"]["team_row_observed"] is True
+    assert audit["B"]["team_row_observed"] is False
+    assert audit["A"]["collection_before_cutoff"] is True
+    assert audit["B"]["collection_before_cutoff"] is True
+
+
 def test_snapshot_manifest_content_addresses_mutable_source_bytes() -> None:
     snapshot, manifest = _build("2026-09-13T15:00:00Z")
 
@@ -87,16 +101,18 @@ def test_snapshot_manifest_content_addresses_mutable_source_bytes() -> None:
     assert snapshot["source_sha256"].nunique() == 1
 
 
-def test_persist_snapshot_is_immutable(tmp_path: Path) -> None:
+def test_persist_snapshot_is_immutable_and_self_contained(tmp_path: Path) -> None:
     snapshot, manifest = _build("2026-09-13T15:00:00Z")
     destination = capture.persist_snapshot(
         snapshot,
         manifest,
         _injury_bytes(),
+        _schedule_bytes(),
         output_root=tmp_path,
     )
 
     assert (destination / "injuries_source.csv").read_bytes() == _injury_bytes()
+    assert (destination / "schedule_source.csv").read_bytes() == _schedule_bytes()
     assert (destination / "availability_snapshot.csv").is_file()
     assert (destination / "manifest.json").is_file()
     with pytest.raises(FileExistsError):
@@ -104,5 +120,6 @@ def test_persist_snapshot_is_immutable(tmp_path: Path) -> None:
             snapshot,
             manifest,
             _injury_bytes(),
+            _schedule_bytes(),
             output_root=tmp_path,
         )
