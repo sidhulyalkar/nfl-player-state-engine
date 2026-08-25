@@ -1,0 +1,101 @@
+name: historical-official-availability-v2-reg-context-sensitivity
+
+on:
+  push:
+    branches:
+      - experiment/historical-official-availability-v2-reg-context-sensitivity
+    paths:
+      - ".github/workflows/historical-official-availability-v2-reg-context-sensitivity.yml"
+      - "scripts/run_reg_pregame_context_sensitivity_v2.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: historical-official-availability-v2-reg-context-sensitivity
+  cancel-in-progress: true
+
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install experiment environment
+        run: python -m pip install -e '.[dev,intelligence,api]'
+
+      - name: Qualify sensitivity operator and corpus regressions
+        run: |
+          ruff check \
+            scripts/run_reg_pregame_context_sensitivity_v2.py \
+            scripts/resume_rebaselined_historical_intelligence_experiment_v2.py \
+            scripts/run_rebaselined_historical_intelligence_experiment_v2.py \
+            src/player_state_engine/evaluation/historical_intelligence_corpus.py \
+            tests/test_historical_intelligence_corpus.py
+          python -m compileall -q \
+            scripts/run_reg_pregame_context_sensitivity_v2.py \
+            scripts/resume_rebaselined_historical_intelligence_experiment_v2.py \
+            scripts/run_rebaselined_historical_intelligence_experiment_v2.py
+          pytest -q tests/test_historical_intelligence_corpus.py
+
+      - name: Download exact first-run frozen input bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: historical-official-availability-v2-results
+          run-id: 32821290568
+          github-token: ${{ github.token }}
+          path: recovered/v2-first-run
+
+      - name: Restore and verify exact frozen input paths
+        run: |
+          mkdir -p data/raw
+          cp -a recovered/v2-first-run/data/raw/historical_numerical_baseline_v2 data/raw/
+          cp -a recovered/v2-first-run/data/raw/historical_injury_archive_v2 data/raw/
+          test -f data/raw/historical_numerical_baseline_v2/NUMERICAL_BASELINE_MANIFEST.json
+          test -f data/raw/historical_injury_archive_v2/SOURCE_MANIFEST.csv
+
+      - name: Capture exact execution environment
+        run: |
+          mkdir -p artifacts/intelligence_ablations/historical_official_v2_reg_context_sensitivity
+          python --version > artifacts/intelligence_ablations/historical_official_v2_reg_context_sensitivity/python_version.txt
+          python -m pip freeze > artifacts/intelligence_ablations/historical_official_v2_reg_context_sensitivity/pip_freeze.txt
+          git rev-parse HEAD > artifacts/intelligence_ablations/historical_official_v2_reg_context_sensitivity/git_head.txt
+
+      - name: Run REG pregame-context sensitivity
+        run: |
+          python scripts/run_reg_pregame_context_sensitivity_v2.py \
+            --numerical-root data/raw/historical_numerical_baseline_v2 \
+            --injury-root data/raw/historical_injury_archive_v2 \
+            --seasons 2020 2021 2022 2023 2024 \
+            --target fantasy_points_ppr \
+            --config configs/base.yaml \
+            --bootstrap-samples 2000 \
+            --minimum-source-coverage 0.80 \
+            --maximum-fdr-q 0.10 \
+            --minimum-consistency 0.55 \
+            --minimum-paired-rows 250 \
+            --minimum-seasons 2 \
+            --minimum-blocks 8 \
+            --minimum-position-rows 50 \
+            --maximum-overall-coverage-gap-regression 0.02 \
+            --maximum-position-coverage-gap-regression 0.05 \
+            --output-dir artifacts/intelligence_ablations/historical_official_v2_reg_context_sensitivity
+
+      - name: Upload complete sensitivity evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-official-availability-v2-reg-context-sensitivity-results
+          if-no-files-found: warn
+          retention-days: 90
+          path: |
+            data/raw/historical_numerical_baseline_v2
+            data/raw/historical_injury_archive_v2
+            artifacts/intelligence_ablations/historical_official_v2_reg_context_sensitivity
