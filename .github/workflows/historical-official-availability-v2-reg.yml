@@ -20,7 +20,7 @@ permissions:
 
 concurrency:
   group: historical-official-availability-v2-reg
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   experiment:
