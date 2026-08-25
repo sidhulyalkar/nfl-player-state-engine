@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
@@ -425,7 +424,9 @@ def main() -> None:
             )
         )
 
-    q_values = benjamini_hochberg({str(row["formulation"]): float(row["p_value"]) for row in rows})
+    q_values = benjamini_hochberg(
+        {str(row["formulation"]): float(row["p_value"]) for row in rows}
+    )
     for row in rows:
         row["exploratory_joint_fdr_q"] = q_values[str(row["formulation"])]
         screen_blockers: list[str] = []
