@@ -7,11 +7,13 @@ on:
     paths:
       - ".github/workflows/historical-official-availability-v1.yml"
       - "scripts/acquire_historical_injury_archive.py"
-      - "scripts/recover_frozen_benchmark_sources.py"
+      - "scripts/qualify_archived_feature_panel.py"
+      - "scripts/run_archived_historical_intelligence_experiment.py"
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: historical-official-availability-v1
@@ -31,47 +33,35 @@ jobs:
       - name: Install experiment environment
         run: python -m pip install -e '.[dev,intelligence,api]'
 
-      - name: Qualify acquisition and recovery operators
+      - name: Qualify experiment operators
         run: |
           ruff check \
             scripts/acquire_historical_injury_archive.py \
-            scripts/recover_frozen_benchmark_sources.py
+            scripts/qualify_archived_feature_panel.py \
+            scripts/run_archived_historical_intelligence_experiment.py
           python -m compileall -q \
             scripts/acquire_historical_injury_archive.py \
-            scripts/recover_frozen_benchmark_sources.py
+            scripts/qualify_archived_feature_panel.py \
+            scripts/run_archived_historical_intelligence_experiment.py
           python scripts/acquire_historical_injury_archive.py --help >/dev/null
-          python scripts/recover_frozen_benchmark_sources.py --help >/dev/null
+          python scripts/qualify_archived_feature_panel.py --help >/dev/null
+          python scripts/run_archived_historical_intelligence_experiment.py --help >/dev/null
 
-      - name: Restore preserved July benchmark cache
-        uses: actions/cache/restore@v4
+      - name: Download preserved July 30 feature artifact
+        uses: actions/download-artifact@v4
         with:
-          path: |
-            artifacts/models
-            data/raw/nflverse
-          key: player-state-30541589749
-          fail-on-cache-miss: true
+          name: weekly-model-review-30541589749
+          run-id: 30541589749
+          github-token: ${{ github.token }}
+          path: recovered/july30
 
-      - name: Recover exact frozen numerical benchmark sources
+      - name: Qualify preserved feature panel and recover exact frozen schedule
         run: |
-          python scripts/recover_frozen_benchmark_sources.py \
+          python scripts/qualify_archived_feature_panel.py \
+            --artifact-root recovered/july30 \
             --benchmark-manifest artifacts/reports/benchmark_real/DATA_MANIFEST.json \
-            --cache-root data/raw/nflverse \
-            --output-dir data/raw/frozen_benchmark_sources
-
-      - name: Rehydrate or verify every required numerical source
-        run: |
-          python scripts/acquire_frozen_benchmark_sources.py \
-            --benchmark-manifest artifacts/reports/benchmark_real/DATA_MANIFEST.json \
-            --output-dir data/raw/frozen_benchmark_sources \
-            --seasons 2021 2022 2023 2024
-
-      - name: Verify numerical source identity before evidence acquisition
-        run: |
-          python scripts/run_historical_intelligence_experiment.py \
-            --benchmark-root artifacts/reports/benchmark_real \
-            --benchmark-source-dir data/raw/frozen_benchmark_sources \
-            --seasons 2021 2022 2023 2024 \
-            --verify-only
+            --seasons 2020 2021 2022 2023 2024 \
+            --output-dir artifacts/archived_feature_panel_qualification
 
       - name: Acquire and freeze historical injury evidence
         run: |
@@ -85,7 +75,7 @@ jobs:
             --data-dir data/raw/historical_injury_archive \
             --source-manifest data/raw/historical_injury_archive/SOURCE_MANIFEST.csv \
             --benchmark-root artifacts/reports/benchmark_real \
-            --schedules data/raw/frozen_benchmark_sources/games.csv \
+            --schedules artifacts/archived_feature_panel_qualification/frozen_games.csv \
             --seasons 2021 2022 2023 2024 \
             --output-dir artifacts/intelligence_corpus/historical_official_v1
 
@@ -138,12 +128,13 @@ jobs:
           print(summary.to_string(index=False))
           PY
 
-      - name: Run confirmatory official availability ablation
+      - name: Run confirmatory official availability ablation on preserved feature panel
         run: |
-          python scripts/run_historical_intelligence_experiment.py \
-            --benchmark-root artifacts/reports/benchmark_real \
-            --benchmark-source-dir data/raw/frozen_benchmark_sources \
+          python scripts/run_archived_historical_intelligence_experiment.py \
+            --features artifacts/archived_feature_panel_qualification/weekly_features_current.parquet \
+            --panel-qualification artifacts/archived_feature_panel_qualification/qualification_audit.json \
             --corpus-root artifacts/intelligence_corpus/historical_official_v1 \
+            --benchmark-root artifacts/reports/benchmark_real \
             --seasons 2021 2022 2023 2024 \
             --target fantasy_points_ppr \
             --config configs/base.yaml \
@@ -202,8 +193,8 @@ jobs:
           lines = [
               '# Historical Official Availability Experiment v1',
               '',
-              f"- Frozen numerical sources verified: **{manifest['frozen_numerical_baseline_sources_verified']}**",
               f"- Baseline authority: `{manifest['baseline_authority']}`",
+              f"- Exact raw numerical replay verified: **{manifest['frozen_numerical_baseline_sources_verified']}**",
               f"- Historical production parity claimed: **{manifest['historical_production_parity_verified']}**",
               f"- Preflight source coverage: **{preflight['official_source_coverage']:.3f}**",
               f"- Evidence prevalence: **{preflight['evidence_prevalence']:.3f}**",
@@ -225,7 +216,7 @@ jobs:
               f"- Eligible for activation review: **{value('eligible_for_activation_review')}**",
               f"- Activation-review blockers: `{value('activation_review_blockers')}`",
               '',
-              '> Research evidence only. No production activation or automatic promotion occurs in this workflow.',
+              '> Research evidence only. The preserved panel route is deliberately blocked from activation review until an exact raw replay or newly frozen baseline is available.',
           ]
           report = '\n'.join(lines) + '\n'
           (root / 'experiment_summary.md').write_text(report, encoding='utf-8')
@@ -242,17 +233,16 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
           path: |
+            artifacts/archived_feature_panel_qualification
             artifacts/intelligence_corpus/historical_official_v1
             artifacts/intelligence_ablations/historical_official_v1
             artifacts/experiment_preflight
 
-      - name: Upload accepted raw source archive
+      - name: Upload frozen injury archive
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: historical-official-availability-v1-raw-sources
+          name: historical-official-availability-v1-injury-archive
           if-no-files-found: warn
           retention-days: 90
-          path: |
-            data/raw/frozen_benchmark_sources
-            data/raw/historical_injury_archive
+          path: data/raw/historical_injury_archive
