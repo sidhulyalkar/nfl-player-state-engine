@@ -26,7 +26,7 @@ Each rung is incremental. Structured news is therefore not rewarded for rediscov
 
 Canonical official and news claims are not joined by carrying forward a precomputed latest snapshot.
 
-For every football player-week, the research adapter resolves the immutable ledger at that row's prediction cutoff. This matters for two reasons:
+For every football player-week, the research adapter resolves the immutable ledger at that row's prediction cutoff. This matters because:
 
 1. a later retraction or supersession must remove an earlier assertion only after the correction itself becomes available;
 2. evidence half-life decay must be recalculated at the actual prediction cutoff rather than frozen at an earlier snapshot time.
@@ -34,6 +34,19 @@ For every football player-week, the research adapter resolves the immutable ledg
 An explicit `prediction_cutoff` is preferred. When it is unavailable, the operator falls back to `gameday - safety_lag_hours` using the configured safety lag. Invalid cutoffs fail closed.
 
 The attached fields are labeled `research_only`. They are not routed through the activation registry and cannot become production features through this operator.
+
+## Leakage-safe feature discovery
+
+The laboratory does not discover candidate features by scanning every column whose name resembles an intelligence family.
+
+The base and legacy family columns must first be admitted by the repository's leakage-safe `feature_columns_for_target()` allowlist. Only the cutoff-specific canonical prefixes are added explicitly afterward:
+
+```text
+official_structured_*
+news_structured_*
+```
+
+This prevents same-week supervision such as a raw `opportunity_target_share` outcome from entering the objective-opportunity challenger merely because it shares an `opportunity_` prefix. Lagged/rolling opportunity context remains eligible when the normal pregame feature contract allows it.
 
 ## Source coverage is not claim prevalence
 
@@ -44,7 +57,41 @@ A critical distinction is preserved:
 
 No claim can be legitimate information. No source collection cannot.
 
-The ablation operator never infers source coverage from `snapshot_found`, missing values, or a lack of claims. Activation-review eligibility requires an explicit `*_source_covered` field on the evaluated player-weeks. Missing coverage metadata is a blocker.
+The operator never infers source coverage from `snapshot_found`, missing values, or lack of claims. Source coverage must arrive through explicit `*_source_covered` fields. Coverage aliases are resolved row by row. If two populated aliases disagree, the evaluator fails closed. Malformed binary values also fail closed.
+
+Activation-review eligibility requires source coverage to be measured on every evaluated player-week and to clear the configured coverage threshold. A partially populated coverage column is not treated as a complete measurement.
+
+## Evidence provenance and tiers
+
+Statistical success and evidence authority are separate concepts.
+
+The evaluator reports:
+
+```text
+model_gate_passed
+eligible_for_activation_review
+```
+
+`model_gate_passed` means only that the isolated predictive/control/calibration gates cleared. Synthetic data is allowed to exercise this machinery.
+
+`eligible_for_activation_review` additionally requires evidence tier 2 (`MULTI_SEASON_ISOLATED`) or higher plus complete source-coverage measurement. Synthetic or unspecified evidence therefore cannot become activation-review eligible even if every model metric is favorable.
+
+The operator does not expose a free-form `--evidence-tier` switch. Without an evidence provenance manifest it fails closed to Tier 0 (`SYNTHETIC_ONLY`). Tier-2+ provenance must provide all of:
+
+```json
+{
+  "schema_version": 1,
+  "authority": "research_evidence_only",
+  "evidence_tier": 2,
+  "frozen_sample_id": "official-availability-2021-2024-v1",
+  "point_in_time_verified": true,
+  "source_coverage_point_in_time_verified": true
+}
+```
+
+The provenance manifest is SHA-256 recorded in the experiment manifest. A Tier-2+ label is rejected if the frozen sample ID, point-in-time evidence verification, or point-in-time source-coverage verification is missing.
+
+This metadata establishes how the sample was constructed. It does not itself prove predictive lift.
 
 ## Negative controls
 
@@ -97,12 +144,15 @@ The report includes:
 - season, position, and week consistency;
 - identity-control effect and interval;
 - shifted-time leakage advantage;
-- explicit source coverage;
-- claim prevalence;
+- explicit source coverage and measurement rate;
+- claim prevalence and measurement rate;
 - contradiction rate when the canonical family exposes conflict diagnostics;
-- finite-sample p-value and run-wide FDR q-value.
+- finite-sample p-value and run-wide FDR q-value;
+- explicit evidence tier and evidence-tier name.
 
-The default research-review gate blocks a family for insufficient sample size, single-season evidence, weak/inconsistent effect, a confidence interval crossing zero, FDR failure, identity-control failure, missing/insufficient source coverage, or material calibration regression.
+The model gate blocks a family for insufficient sample size, single-season evidence, weak/inconsistent effect, a confidence interval crossing zero, FDR failure, identity-control failure, or material calibration regression.
+
+The activation-review gate adds source-coverage and evidence-tier requirements on top of the model gate.
 
 ## Research-review gate is not promotion
 
@@ -121,15 +171,29 @@ That means only that the isolated family earned human review for a later experim
 - prove downstream fantasy value;
 - replace the 2026 live shadow-season requirement.
 
-Synthetic tests validate the evaluator and its failure boundaries only. They are not evidence that any intelligence family improves real NFL forecasts.
+Synthetic tests validate the evaluator and its failure boundaries only. They are structurally prevented from clearing activation review.
 
 ## Operator
+
+A normal unverified/mechanics run is Tier 0:
 
 ```bash
 python scripts/run_structured_intelligence_ablation.py \
   --features data/processed/weekly_features_with_objective_context.parquet \
   --ledger-root artifacts/structured_intelligence \
   --source-coverage data/processed/intelligence_source_coverage.parquet \
+  --target fantasy_points_ppr \
+  --output-dir artifacts/intelligence_ablations/structured
+```
+
+A frozen historical experiment supplies a separately constructed provenance manifest:
+
+```bash
+python scripts/run_structured_intelligence_ablation.py \
+  --features data/processed/weekly_features_with_objective_context.parquet \
+  --ledger-root artifacts/structured_intelligence \
+  --source-coverage data/processed/intelligence_source_coverage.parquet \
+  --evidence-provenance-manifest artifacts/intelligence_evidence/provenance.json \
   --target fantasy_points_ppr \
   --output-dir artifacts/intelligence_ablations/structured
 ```
@@ -145,4 +209,19 @@ run_manifest.json
 variants/<variant benchmark artifacts>
 ```
 
-The manifest records input hashes, a digest of the immutable claim set, Git SHA, operator thresholds, negative-control definitions, multiple-testing policy, experiment rows, output hashes, and the non-automatic authority boundary.
+The manifest records input hashes, a digest of the immutable claim set, the evidence-provenance record and hash, Git SHA, operator thresholds, negative-control definitions, multiple-testing policy, experiment rows, output hashes, and the non-automatic authority boundary.
+
+## Evidence acquisition strategy
+
+The laboratory can evaluate all four families, but their evidence paths should not be treated as symmetric.
+
+Objective official evidence should be backtested only where the source supplies defensible historical timestamps. Narrative evidence such as structured news or public player context should remain prospective unless its publication-time availability can be reconstructed without hindsight.
+
+The preferred sequence is therefore:
+
+1. build a frozen point-in-time official-availability/depth-role corpus with explicit source-coverage logs;
+2. evaluate mechanism-near targets before fantasy points;
+3. use the 2026 shadow season for prospectively collected structured news/public context;
+4. require downstream fantasy-decision replay before any production activation discussion.
+
+The absence of a recoverable historical narrative corpus is a reason to wait for prospective evidence, not a reason to weaken the timestamp contract.
