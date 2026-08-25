@@ -1,0 +1,40 @@
+name: historical-intelligence-corpus
+
+on:
+  pull_request:
+    paths:
+      - "src/player_state_engine/evaluation/historical_intelligence_corpus.py"
+      - "scripts/build_historical_intelligence_corpus.py"
+      - "tests/test_historical_intelligence_corpus.py"
+      - "docs/modeling/historical_intelligence_corpus.md"
+      - ".github/workflows/historical-intelligence-corpus.yml"
+
+concurrency:
+  group: historical-intelligence-corpus-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e '.[dev,intelligence,api]'
+      - name: Lint corpus implementation
+        run: |
+          ruff check \
+            src/player_state_engine/evaluation/historical_intelligence_corpus.py \
+            scripts/build_historical_intelligence_corpus.py \
+            tests/test_historical_intelligence_corpus.py
+      - name: Compile corpus implementation
+        run: |
+          python -m compileall -q \
+            src/player_state_engine/evaluation/historical_intelligence_corpus.py \
+            scripts/build_historical_intelligence_corpus.py \
+            tests/test_historical_intelligence_corpus.py
+      - name: Validate operator CLI
+        run: python scripts/build_historical_intelligence_corpus.py --help >/dev/null
+      - name: Run adversarial corpus contracts
+        run: pytest -q tests/test_historical_intelligence_corpus.py
