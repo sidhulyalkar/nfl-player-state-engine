@@ -6,146 +6,21 @@ on:
       - experiment/historical-official-availability-v1
     paths:
       - ".github/workflows/historical-official-availability-v2-resume.yml"
-      - "scripts/resume_rebaselined_historical_intelligence_experiment_v2.py"
   workflow_dispatch:
 
 permissions:
   contents: read
-  actions: read
 
 concurrency:
   group: historical-official-availability-v2-resume
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
-  experiment:
+  superseded:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install experiment environment
-        run: python -m pip install -e '.[dev,intelligence,api]'
-
-      - name: Qualify resume shim
+      - name: Record diagnostic retirement
         run: |
-          ruff check scripts/resume_rebaselined_historical_intelligence_experiment_v2.py
-          python -m compileall -q scripts/resume_rebaselined_historical_intelligence_experiment_v2.py
-          python scripts/resume_rebaselined_historical_intelligence_experiment_v2.py --help >/dev/null || true
-
-      - name: Download exact first-run frozen input bundle
-        uses: actions/download-artifact@v4
-        with:
-          name: historical-official-availability-v2-results
-          run-id: 32821290568
-          github-token: ${{ github.token }}
-          path: recovered/v2-first-run
-
-      - name: Restore exact frozen inputs to recorded paths
-        run: |
-          mkdir -p data/raw
-          cp -a recovered/v2-first-run/data/raw/historical_numerical_baseline_v2 data/raw/
-          cp -a recovered/v2-first-run/data/raw/historical_injury_archive_v2 data/raw/
-          test -f data/raw/historical_numerical_baseline_v2/NUMERICAL_BASELINE_MANIFEST.json
-          test -f data/raw/historical_injury_archive_v2/SOURCE_MANIFEST.csv
-
-      - name: Run identical preregistered ablation from frozen inputs
-        run: |
-          python scripts/resume_rebaselined_historical_intelligence_experiment_v2.py \
-            --numerical-root data/raw/historical_numerical_baseline_v2 \
-            --injury-root data/raw/historical_injury_archive_v2 \
-            --seasons 2020 2021 2022 2023 2024 \
-            --target fantasy_points_ppr \
-            --config configs/base.yaml \
-            --bootstrap-samples 2000 \
-            --minimum-source-coverage 0.80 \
-            --maximum-fdr-q 0.10 \
-            --minimum-consistency 0.55 \
-            --minimum-paired-rows 250 \
-            --minimum-seasons 2 \
-            --minimum-blocks 8 \
-            --minimum-position-rows 50 \
-            --maximum-overall-coverage-gap-regression 0.02 \
-            --maximum-position-coverage-gap-regression 0.05 \
-            --output-dir artifacts/intelligence_ablations/historical_official_v2
-
-      - name: Summarize statistical and evidence gates
-        if: success()
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-
-          import pandas as pd
-
-          root = Path('artifacts/intelligence_ablations/historical_official_v2')
-          manifest = json.loads((root / 'run_manifest.json').read_text(encoding='utf-8'))
-          preflight = json.loads((root / 'source_coverage_preflight.json').read_text(encoding='utf-8'))
-          evidence = pd.read_csv(root / 'incremental_evidence.csv')
-          official = evidence.loc[evidence['family'].eq('official_availability')]
-          if len(official) != 1:
-              raise ValueError(f'Expected one official_availability row, found {len(official)}')
-          row = official.iloc[0].to_dict()
-
-          def value(name):
-              result = row.get(name)
-              return 'n/a' if pd.isna(result) else str(result)
-
-          lines = [
-              '# Historical Official Availability Experiment v2',
-              '',
-              f"- Exact numerical baseline identity: `{manifest['numerical_baseline']['identity_sha256']}`",
-              f"- Schedule commit: `{manifest['numerical_baseline']['schedule_commit']}`",
-              f"- Historical production parity claimed: **{manifest['historical_production_parity_verified']}**",
-              f"- Source coverage: **{preflight['official_source_coverage']:.4f}**",
-              f"- Evidence prevalence: **{preflight['evidence_prevalence']:.4f}**",
-              f"- Paired rows: **{value('paired_rows')}**",
-              f"- Reference mean pinball: **{value('reference_mean_pinball')}**",
-              f"- Candidate mean pinball: **{value('candidate_mean_pinball')}**",
-              f"- Effect, reference minus candidate: **{value('effect')}**",
-              f"- 95% CI: **[{value('ci_low')}, {value('ci_high')}]**",
-              f"- Probability improves: **{value('probability_improves')}**",
-              f"- P-value: **{value('p_value')}**",
-              f"- FDR q-value: **{value('fdr_q_value')}**",
-              f"- Season consistency: **{value('season_consistency')}**",
-              f"- Position consistency: **{value('position_consistency')}**",
-              f"- Week consistency: **{value('week_consistency')}**",
-              f"- Reference q50 MAE: **{value('reference_q50_mae')}**",
-              f"- Candidate q50 MAE: **{value('candidate_q50_mae')}**",
-              f"- Reference 80% coverage: **{value('reference_80_coverage')}**",
-              f"- Candidate 80% coverage: **{value('candidate_80_coverage')}**",
-              f"- Coverage-gap regression: **{value('coverage_gap_regression')}**",
-              f"- Max position coverage-gap regression: **{value('max_supported_position_coverage_gap_regression')}**",
-              f"- Identity control effect: **{value('identity_control_effect')}**",
-              f"- Identity control CI: **[{value('identity_control_ci_low')}, {value('identity_control_ci_high')}]**",
-              f"- Identity control passed: **{value('identity_control_passed')}**",
-              f"- Shifted-time diagnostic advantage: **{value('shifted_time_leakage_advantage')}**",
-              f"- Model gate passed: **{value('model_gate_passed')}**",
-              f"- Model blockers: `{value('model_gate_blockers')}`",
-              f"- Eligible for activation review: **{value('eligible_for_activation_review')}**",
-              f"- Activation-review blockers: `{value('activation_review_blockers')}`",
-              '',
-              '> Newly frozen research baseline only. No automatic production promotion is permitted.',
-          ]
-          report = '\n'.join(lines) + '\n'
-          (root / 'experiment_summary.md').write_text(report, encoding='utf-8')
-          print(report)
-          with open(Path(__import__('os').environ['GITHUB_STEP_SUMMARY']), 'a', encoding='utf-8') as handle:
-              handle.write(report)
-          PY
-
-      - name: Upload completed evidence bundle
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: historical-official-availability-v2-resumed-results
-          if-no-files-found: warn
-          retention-days: 90
-          path: |
-            data/raw/historical_numerical_baseline_v2
-            data/raw/historical_injury_archive_v2
-            artifacts/intelligence_ablations/historical_official_v2
+          echo "The all-games v2 resume experiment is superseded."
+          echo "Reason: the historical adapter did not recognize nflverse long-form practice-status strings, and postseason rows are outside the primary fantasy use case."
+          echo "The REG-only experiment on the same frozen baseline is the authoritative follow-up."
