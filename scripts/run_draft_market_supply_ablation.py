@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from player_state_engine.fantasy.draft_market import train_chronological_survival_model
+from player_state_engine.fantasy.draft_market_ablation import evaluate_supply_feature_ablation
 
 
 def _read_table(path: Path) -> pd.DataFrame:
@@ -44,20 +44,15 @@ def _git_sha() -> str | None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Train the empirical survival-to-next-pick challenger using strict chronological "
-            "draft-room holdouts and point-in-time market evidence."
+            "Compare timestamp-safe draft-room supply features with the existing chronological "
+            "draft-survival feature family. This runner is research-only and never promotes a model."
         )
     )
     parser.add_argument("--observations", type=Path, required=True)
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("artifacts/models/draft_survival/draft_survival.joblib"),
-    )
-    parser.add_argument(
-        "--report",
-        type=Path,
-        default=Path("artifacts/models/draft_survival/metrics.json"),
+        default=Path("artifacts/draft_market/supply_ablation.json"),
     )
     parser.add_argument("--min-rows", type=int, default=250)
     parser.add_argument("--min-drafts", type=int, default=5)
@@ -73,15 +68,12 @@ def main() -> None:
     parser.add_argument(
         "--allow-unverified-market",
         action="store_true",
-        help=(
-            "Allow an artifact to clear the market-provenance gate when archived ADP timestamps "
-            "are incomplete. This is intended for research only; strict operation leaves it off."
-        ),
+        help="Research-only override for incomplete point-in-time market provenance.",
     )
     args = parser.parse_args()
 
     observations = _read_table(args.observations)
-    result = train_chronological_survival_model(
+    report = evaluate_supply_feature_ablation(
         observations,
         min_rows=args.min_rows,
         min_drafts=args.min_drafts,
@@ -96,45 +88,30 @@ def main() -> None:
         require_verified_market=not args.allow_unverified_market,
         random_state=args.random_state,
     )
+    report["operator_config"] = {
+        "min_rows": int(args.min_rows),
+        "min_drafts": int(args.min_drafts),
+        "test_fraction": float(args.test_fraction),
+        "min_holdout_drafts": int(args.min_holdout_drafts),
+        "min_brier_improvement": float(args.min_brier_improvement),
+        "max_ece_regression": float(args.max_ece_regression),
+        "min_format_rows": int(args.min_format_rows),
+        "max_format_brier_regression": float(args.max_format_brier_regression),
+        "min_draft_consistency": float(args.min_draft_consistency),
+        "bootstrap_samples": int(args.bootstrap_samples),
+        "random_state": int(args.random_state),
+        "require_verified_market": not bool(args.allow_unverified_market),
+    }
+    report["input"] = {
+        "path": str(args.observations),
+        "bytes": args.observations.stat().st_size,
+        "sha256": _sha256(args.observations),
+    }
+    report["git_sha"] = _git_sha()
 
-    artifact = result.artifact
-    artifact.save(args.output)
-    payload = dict(result.report)
-    payload.update(
-        {
-            "trained_at": artifact.trained_at,
-            "artifact_promoted": artifact.promoted,
-            "artifact_promotion_reason": artifact.promotion_reason,
-            "operator_config": {
-                "min_rows": int(args.min_rows),
-                "min_drafts": int(args.min_drafts),
-                "test_fraction": float(args.test_fraction),
-                "min_holdout_drafts": int(args.min_holdout_drafts),
-                "min_brier_improvement": float(args.min_brier_improvement),
-                "max_ece_regression": float(args.max_ece_regression),
-                "min_format_rows": int(args.min_format_rows),
-                "max_format_brier_regression": float(args.max_format_brier_regression),
-                "min_draft_consistency": float(args.min_draft_consistency),
-                "bootstrap_samples": int(args.bootstrap_samples),
-                "random_state": int(args.random_state),
-                "require_verified_market": not bool(args.allow_unverified_market),
-            },
-            "observations": {
-                "path": str(args.observations),
-                "bytes": args.observations.stat().st_size,
-                "sha256": _sha256(args.observations),
-            },
-            "model": {
-                "path": str(args.output),
-                "bytes": args.output.stat().st_size,
-                "sha256": _sha256(args.output),
-            },
-            "git_sha": _git_sha(),
-        }
-    )
-    args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(json.dumps(payload, indent=2, sort_keys=True))
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(json.dumps(report, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":
