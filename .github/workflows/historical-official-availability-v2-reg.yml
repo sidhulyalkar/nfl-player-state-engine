@@ -33,15 +33,19 @@ jobs:
             scripts/run_rebaselined_historical_intelligence_experiment_v2.py \
             scripts/run_reg_historical_intelligence_experiment_v2.py \
             src/player_state_engine/evaluation/historical_intelligence_corpus.py \
-            tests/test_historical_intelligence_corpus.py
+            tests/test_historical_intelligence_corpus.py \
+            tests/test_registered_historical_official_availability.py
           python -m compileall -q \
             scripts/acquire_historical_injury_archive.py \
             scripts/freeze_historical_numerical_baseline_v2.py \
             scripts/run_rebaselined_historical_intelligence_experiment_v2.py \
             scripts/run_reg_historical_intelligence_experiment_v2.py \
-            src/player_state_engine/evaluation/historical_intelligence_corpus.py
+            src/player_state_engine/evaluation/historical_intelligence_corpus.py \
+            tests/test_registered_historical_official_availability.py
           python scripts/run_reg_historical_intelligence_experiment_v2.py --help >/dev/null
-          pytest -q tests/test_historical_intelligence_corpus.py
+          pytest -q \
+            tests/test_historical_intelligence_corpus.py \
+            tests/test_registered_historical_official_availability.py
 
       - name: Resolve registered source artifact
         id: registry
