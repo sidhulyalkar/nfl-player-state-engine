@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 import pandas as pd
-
 import resume_rebaselined_historical_intelligence_experiment_v2 as resume
 
 _ORIGINAL_BUILD_WEEKLY_FEATURES = resume.runner.build_weekly_features
