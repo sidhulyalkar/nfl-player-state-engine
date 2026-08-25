@@ -1,35 +1,232 @@
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pandas as pd
 import run_rebaselined_historical_intelligence_experiment_v2 as runner
 
-EXPECTED_BASELINE_IDENTITY = "a036c410e0bb1ec670e3fa0f7d6e14e1433322b6eeabdaa81c25c8daee43a29c"
+REGISTRY_PATH = Path("experiments/historical_official_availability_v2/registered_inputs.json")
+_DEFAULT_NUMERICAL_ROOT = Path("data/raw/historical_numerical_baseline_v2")
+_DEFAULT_INJURY_ROOT = Path("data/raw/historical_injury_archive_v2")
+_DEFAULT_OUTPUT_ROOT = Path("artifacts/intelligence_ablations/historical_official_v2_reg")
 _ORIGINAL_BUILD_WEEKLY_FEATURES = runner.build_weekly_features
 _ORIGINAL_EXPERIMENT = runner.run_historical_intelligence_experiment
 
 
-def _numerical_root_from_argv() -> Path:
-    default = Path("data/raw/historical_numerical_baseline_v2")
-    for index, argument in enumerate(sys.argv[:-1]):
-        if argument == "--numerical-root":
-            return Path(sys.argv[index + 1])
-    return default
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
-def _assert_expected_baseline() -> None:
-    manifest_path = _numerical_root_from_argv() / "NUMERICAL_BASELINE_MANIFEST.json"
-    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    actual = str(payload.get("identity_sha256") or "")
-    if actual != EXPECTED_BASELINE_IDENTITY:
+def _load_registry(path: Path) -> dict[str, object]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Registered experiment contract is not a JSON object: {path}")
+    if payload.get("authority") != "research_evidence_only":
+        raise ValueError("Registered experiment authority must remain research_evidence_only")
+    return payload
+
+
+def _file_name(record: dict[str, object]) -> str:
+    source_url = str(record.get("source_url") or "")
+    name = Path(urlparse(source_url).path).name
+    if not name:
+        raise ValueError(f"Registered source record has no file name: {record}")
+    return name
+
+
+def _verify_file(path: Path, record: dict[str, object], *, label: str) -> None:
+    if not path.is_file():
+        raise ValueError(f"Registered {label} source is missing: {path}")
+    expected_bytes = int(record["bytes"])
+    actual_bytes = path.stat().st_size
+    if actual_bytes != expected_bytes:
         raise ValueError(
-            "Refusing to run the registered REG experiment on different numerical bytes: "
-            f"expected {EXPECTED_BASELINE_IDENTITY}, found {actual}"
+            f"Registered {label} byte mismatch for {path.name}: "
+            f"expected {expected_bytes}, found {actual_bytes}"
         )
-    print(f"BASELINE_IDENTITY_VERIFIED={actual}")
+    expected_sha = str(record["sha256"])
+    actual_sha = _sha256(path)
+    if actual_sha != expected_sha:
+        raise ValueError(
+            f"Registered {label} SHA-256 mismatch for {path.name}: "
+            f"expected {expected_sha}, found {actual_sha}"
+        )
+
+
+def _verify_numerical_sources(root: Path, registry: dict[str, object]) -> None:
+    expected = registry.get("numerical_baseline")
+    if not isinstance(expected, dict):
+        raise ValueError("Registry is missing numerical_baseline")
+    manifest_path = root / "NUMERICAL_BASELINE_MANIFEST.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise ValueError("Numerical baseline manifest is not a JSON object")
+
+    for key in ("baseline_id", "identity_sha256", "schedule_commit"):
+        if str(manifest.get(key) or "") != str(expected.get(key) or ""):
+            raise ValueError(
+                f"Registered numerical baseline {key} mismatch: "
+                f"expected {expected.get(key)!r}, found {manifest.get(key)!r}"
+            )
+
+    expected_files = expected.get("files")
+    manifest_files = manifest.get("files")
+    if not isinstance(expected_files, list) or not isinstance(manifest_files, list):
+        raise ValueError("Numerical baseline registry/manifest files must be lists")
+    expected_by_name = {
+        str(record["name"]): record for record in expected_files if isinstance(record, dict)
+    }
+    manifest_by_name = {
+        str(record["name"]): record for record in manifest_files if isinstance(record, dict)
+    }
+    if set(manifest_by_name) != set(expected_by_name):
+        raise ValueError(
+            "Registered numerical source set mismatch: "
+            f"expected {sorted(expected_by_name)}, found {sorted(manifest_by_name)}"
+        )
+
+    for name, record in expected_by_name.items():
+        actual_record = manifest_by_name[name]
+        for field in ("bytes", "sha256"):
+            if str(actual_record.get(field)) != str(record.get(field)):
+                raise ValueError(
+                    f"Registered numerical manifest mismatch for {name}.{field}: "
+                    f"expected {record.get(field)!r}, found {actual_record.get(field)!r}"
+                )
+        if record.get("source_commit") is not None and str(actual_record.get("source_commit")) != str(
+            record.get("source_commit")
+        ):
+            raise ValueError(f"Registered numerical source commit mismatch for {name}")
+        _verify_file(root / _file_name(record), record, label="numerical")
+
+    print(f"NUMERICAL_BASELINE_IDENTITY_VERIFIED={expected['identity_sha256']}")
+
+
+def _verify_injury_sources(root: Path, registry: dict[str, object]) -> None:
+    expected = registry.get("injury_archive")
+    if not isinstance(expected, dict):
+        raise ValueError("Registry is missing injury_archive")
+    expected_files = expected.get("files")
+    if not isinstance(expected_files, list):
+        raise ValueError("Registered injury files must be a list")
+
+    manifest_path = root / "SOURCE_MANIFEST.csv"
+    manifest = pd.read_csv(manifest_path)
+    required = {"name", "bytes", "sha256", "status"}
+    missing = required - set(manifest.columns)
+    if missing:
+        raise ValueError(f"Injury source manifest is missing columns: {sorted(missing)}")
+    available = manifest.loc[manifest["status"].astype(str).str.startswith("available")].copy()
+    manifest_by_name = {
+        str(row["name"]): row for row in available.to_dict(orient="records")
+    }
+    expected_by_name = {
+        str(record["name"]): record for record in expected_files if isinstance(record, dict)
+    }
+    if set(manifest_by_name) != set(expected_by_name):
+        raise ValueError(
+            "Registered injury source set mismatch: "
+            f"expected {sorted(expected_by_name)}, found {sorted(manifest_by_name)}"
+        )
+
+    for name, record in expected_by_name.items():
+        actual_record = manifest_by_name[name]
+        if int(actual_record["bytes"]) != int(record["bytes"]):
+            raise ValueError(f"Registered injury manifest byte mismatch for {name}")
+        if str(actual_record["sha256"]) != str(record["sha256"]):
+            raise ValueError(f"Registered injury manifest SHA-256 mismatch for {name}")
+        _verify_file(root / _file_name(record), record, label="injury")
+
+    print(f"INJURY_ARCHIVE_IDENTITY_VERIFIED={expected['identity_sha256']}")
+
+
+def _verify_model_config(registry: dict[str, object]) -> Path:
+    registered = registry.get("model_config")
+    if not isinstance(registered, dict):
+        raise ValueError("Registry is missing model_config")
+    path = Path(str(registered.get("path") or ""))
+    if not path.is_file():
+        raise ValueError(f"Registered model config is missing: {path}")
+    expected_sha = str(registered.get("sha256") or "")
+    actual_sha = _sha256(path)
+    if actual_sha != expected_sha:
+        raise ValueError(
+            "Registered model config SHA-256 mismatch: "
+            f"expected {expected_sha}, found {actual_sha}"
+        )
+    print(f"MODEL_CONFIG_SHA256_VERIFIED={actual_sha}")
+    return path
+
+
+def _registered_runner_argv(
+    registry: dict[str, object],
+    *,
+    numerical_root: Path,
+    injury_root: Path,
+    output_root: Path,
+    config_path: Path,
+) -> list[str]:
+    contract = registry.get("evaluation_contract")
+    if not isinstance(contract, dict):
+        raise ValueError("Registry is missing evaluation_contract")
+    if str(contract.get("primary_season_type")) != "REG":
+        raise ValueError("Registered fantasy experiment must remain REG-only")
+    if bool(contract.get("automatic_promotion")):
+        raise ValueError("Registered experiment may not enable automatic promotion")
+    if float(contract.get("prediction_cutoff_hours_before_kickoff", -1.0)) != 1.5:
+        raise ValueError("Registered experiment cutoff must remain 1.5 hours before kickoff")
+
+    seasons = contract.get("seasons")
+    if not isinstance(seasons, list) or not seasons:
+        raise ValueError("Registered evaluation seasons must be a non-empty list")
+    target = str(contract.get("target") or "")
+    if not target:
+        raise ValueError("Registered evaluation target is missing")
+
+    return [
+        "run_rebaselined_historical_intelligence_experiment_v2.py",
+        "--numerical-root",
+        str(numerical_root),
+        "--injury-root",
+        str(injury_root),
+        "--seasons",
+        *(str(int(season)) for season in seasons),
+        "--target",
+        target,
+        "--config",
+        str(config_path),
+        "--bootstrap-samples",
+        str(int(contract["bootstrap_samples"])),
+        "--minimum-source-coverage",
+        str(float(contract["minimum_source_coverage"])),
+        "--maximum-fdr-q",
+        str(float(contract["maximum_fdr_q"])),
+        "--minimum-consistency",
+        str(float(contract["minimum_consistency"])),
+        "--minimum-paired-rows",
+        str(int(contract["minimum_paired_rows"])),
+        "--minimum-seasons",
+        str(int(contract["minimum_seasons"])),
+        "--minimum-blocks",
+        str(int(contract["minimum_blocks"])),
+        "--minimum-position-rows",
+        str(int(contract["minimum_position_rows"])),
+        "--maximum-overall-coverage-gap-regression",
+        str(float(contract["maximum_overall_coverage_gap_regression"])),
+        "--maximum-position-coverage-gap-regression",
+        str(float(contract["maximum_position_coverage_gap_regression"])),
+        "--output-dir",
+        str(output_root),
+    ]
 
 
 def _build_reg_only_features(*args: object, **kwargs: object) -> pd.DataFrame:
@@ -112,14 +309,20 @@ def _experiment_with_prefit_coverage(
     )
 
 
-def _annotate_manifest() -> None:
-    output_root = Path("artifacts/intelligence_ablations/historical_official_v2_reg")
-    for index, argument in enumerate(sys.argv[:-1]):
-        if argument == "--output-dir":
-            output_root = Path(sys.argv[index + 1])
-            break
+def _annotate_manifest(output_root: Path, registry_path: Path, registry: dict[str, object]) -> None:
     manifest_path = output_root / "run_manifest.json"
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    numerical = registry["numerical_baseline"]
+    injury = registry["injury_archive"]
+    model_config = registry["model_config"]
+    payload["registered_contract"] = {
+        "path": registry_path.as_posix(),
+        "sha256": _sha256(registry_path),
+        "numerical_baseline_identity_sha256": numerical["identity_sha256"],
+        "injury_archive_identity_sha256": injury["identity_sha256"],
+        "model_config_sha256": model_config["sha256"],
+        "evaluation_contract": registry["evaluation_contract"],
+    }
     payload["evaluation_scope"] = {
         "season_type": "REG",
         "primary_use_case": "fantasy_regular_season",
@@ -131,7 +334,6 @@ def _annotate_manifest() -> None:
             "or evaluation as postseason targets."
         ),
     }
-    payload["registered_numerical_baseline_identity_sha256"] = EXPECTED_BASELINE_IDENTITY
     payload["historical_injury_adapter"] = {
         "nflverse_long_form_practice_statuses_supported_in_core": True,
         "supported_values": [
@@ -142,9 +344,10 @@ def _annotate_manifest() -> None:
     }
     payload["interpretation_boundary"] = (
         "Primary fantasy-relevant regular-season research experiment on the exact registered v2 "
-        "numerical baseline and verified injury archive. The result may support manual activation "
-        "review only if every preregistered statistical, consistency, negative-control, calibration, "
-        "source-coverage, and evidence-tier gate passes. It never grants automatic production authority."
+        "numerical baseline, injury archive, model configuration, and statistical contract. The "
+        "result may support manual activation review only if every preregistered statistical, "
+        "consistency, negative-control, calibration, source-coverage, and evidence-tier gate passes. "
+        "It never grants automatic production authority."
     )
     manifest_path.write_text(
         json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n",
@@ -152,12 +355,37 @@ def _annotate_manifest() -> None:
     )
 
 
-runner.build_weekly_features = _build_reg_only_features
-runner.run_historical_intelligence_experiment = _experiment_with_prefit_coverage
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run the registered REG-only historical official-availability experiment. Data bytes, "
+            "model configuration, seasons, target, and statistical gates are loaded from the "
+            "content-addressed registry and cannot be overridden from the command line."
+        )
+    )
+    parser.add_argument("--registry", type=Path, default=REGISTRY_PATH)
+    parser.add_argument("--numerical-root", type=Path, default=_DEFAULT_NUMERICAL_ROOT)
+    parser.add_argument("--injury-root", type=Path, default=_DEFAULT_INJURY_ROOT)
+    parser.add_argument("--output-dir", type=Path, default=_DEFAULT_OUTPUT_ROOT)
+    args = parser.parse_args()
+
+    registry = _load_registry(args.registry)
+    _verify_numerical_sources(args.numerical_root, registry)
+    _verify_injury_sources(args.injury_root, registry)
+    config_path = _verify_model_config(registry)
+
+    runner.build_weekly_features = _build_reg_only_features
+    runner.run_historical_intelligence_experiment = _experiment_with_prefit_coverage
+    sys.argv = _registered_runner_argv(
+        registry,
+        numerical_root=args.numerical_root,
+        injury_root=args.injury_root,
+        output_root=args.output_dir,
+        config_path=config_path,
+    )
+    runner.main()
+    _annotate_manifest(args.output_dir, args.registry, registry)
 
 
 if __name__ == "__main__":
-    _assert_expected_baseline()
-    sys.argv[0] = "run_rebaselined_historical_intelligence_experiment_v2.py"
-    runner.main()
-    _annotate_manifest()
+    main()
