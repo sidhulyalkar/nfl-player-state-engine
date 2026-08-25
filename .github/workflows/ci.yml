@@ -32,6 +32,7 @@ jobs:
             scripts/record_shadow_checkpoint.py \
             scripts/settle_shadow_checkpoint.py \
             scripts/build_structured_intelligence_ledger.py \
+            scripts/run_structured_intelligence_ablation.py \
             scripts/run_play_call_benchmark.py \
             scripts/run_game_simulation_replay.py \
             scripts/weekly_game_intelligence_refresh.py \
