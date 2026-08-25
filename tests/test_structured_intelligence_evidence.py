@@ -217,6 +217,9 @@ def test_conflicting_source_coverage_aliases_are_rejected() -> None:
 
 def test_invalid_source_coverage_value_is_rejected() -> None:
     frame = _evaluation_frame(include_coverage=True)
+    frame["structured_news_source_covered"] = frame[
+        "structured_news_source_covered"
+    ].astype(object)
     frame.loc[frame.index[0], "structured_news_source_covered"] = "probably"
 
     with pytest.raises(ValueError, match="unrecognized binary values"):
