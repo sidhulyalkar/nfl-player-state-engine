@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "experiment_id": "current-week-official-availability-v3-posthoc-exploration",
+  "authority": "posthoc_exploratory_research_only",
+  "automatic_promotion": false,
+  "eligible_for_activation_review": false,
+  "hypothesis_origin": {
+    "primary_v2_run_id": 32882130064,
+    "primary_v2_effect": -0.004177917731960682,
+    "primary_v2_ci": [-0.007102054400350047, -0.0015202859699966897],
+    "context_sensitivity_run_id": 32886730381,
+    "context_sensitivity_effect": -0.0008677586014815353,
+    "reason_for_followup": "Designed after observing the v2 negative result and post-hoc stale-claim diagnostics. It tests whether current-week reset semantics and decomposed official practice/game state avoid persistent-claim contamination."
+  },
+  "source_contract": {
+    "v2_registry_path": "experiments/historical_official_availability_v2/registered_inputs.json",
+    "numerical_baseline_identity_sha256": "a036c410e0bb1ec670e3fa0f7d6e14e1433322b6eeabdaa81c25c8daee43a29c",
+    "injury_archive_identity_sha256": "c150ff3f78eb48e90e9c907640af855dd15b8f98564dc214ca0e9b61a541cff1",
+    "schedule_commit": "67fa4d790ba09e5f0e2868b49ef9dbbd8946bb22",
+    "model_config_path": "configs/base.yaml",
+    "model_config_sha256": "fcec5d12b061c7cdf413d159f9486af2b19823b973f6fac4db5f56d2d3435b85",
+    "environment_requirements_path": "experiments/historical_official_availability_v2/environment_requirements.txt"
+  },
+  "evaluation_contract": {
+    "season_type": "REG",
+    "seasons": [2020, 2021, 2022, 2023, 2024],
+    "target": "fantasy_points_ppr",
+    "prediction_cutoff_hours_before_kickoff": 1.5,
+    "bootstrap_samples": 2000,
+    "seed": 4203,
+    "minimum_source_coverage": 0.8,
+    "maximum_joint_fdr_q": 0.1,
+    "minimum_consistency": 0.55,
+    "minimum_paired_rows": 250,
+    "minimum_seasons": 2,
+    "minimum_blocks": 8,
+    "minimum_position_rows": 50,
+    "maximum_overall_coverage_gap_regression": 0.02,
+    "maximum_position_coverage_gap_regression": 0.05,
+    "unverified_final_context_removed": [
+      "roof",
+      "spread_line",
+      "temp",
+      "total_line",
+      "wind"
+    ]
+  },
+  "formulations": {
+    "practice_current_week": [
+      "cw_practice_score",
+      "cw_practice_is_limited",
+      "cw_practice_is_dnp",
+      "cw_practice_found"
+    ],
+    "game_designation_current_week": [
+      "cw_game_score",
+      "cw_game_is_questionable",
+      "cw_game_is_doubtful",
+      "cw_game_is_out",
+      "cw_game_found"
+    ],
+    "combined_current_week": [
+      "cw_practice_score",
+      "cw_practice_is_limited",
+      "cw_practice_is_dnp",
+      "cw_practice_found",
+      "cw_game_score",
+      "cw_game_is_questionable",
+      "cw_game_is_doubtful",
+      "cw_game_is_out",
+      "cw_game_found",
+      "cw_any_report_found"
+    ]
+  },
+  "negative_controls": {
+    "identity_shuffle": "Shuffle only the candidate current-week columns within season/week/position strata.",
+    "shifted_time_leakage": "Move the next same-season player current-week state backward by one observed player row. This is a leakage-sensitivity diagnostic, never valid predictive evidence."
+  },
+  "missingness_semantics": {
+    "source_covered_player_absent": "Current-week score fields remain null and explicit found flags are zero. Absence from the report is not hard-coded as healthy/full participation.",
+    "stale_prior_week_claims": "Never carried into the current-week candidate features.",
+    "future_modified_rows": "Excluded unless date_modified is at or before the 1.5-hour prediction cutoff."
+  },
+  "multiplicity": "Benjamini-Hochberg correction is applied jointly across all three registered v3 formulations.",
+  "confirmation_boundary": "A formulation that passes every exploratory screen still requires an independent untouched or prospective confirmation experiment before it can become eligible for manual activation review."
+}
