@@ -58,7 +58,12 @@ def main() -> None:
             "ablation and freeze their exact bytes in a checksum manifest."
         )
     )
-    parser.add_argument("--seasons", nargs="+", type=int, default=[2021, 2022, 2023, 2024])
+    parser.add_argument(
+        "--seasons",
+        nargs="+",
+        type=int,
+        default=[2020, 2021, 2022, 2023, 2024],
+    )
     parser.add_argument(
         "--output-dir",
         type=Path,
