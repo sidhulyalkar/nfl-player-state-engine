@@ -7,6 +7,7 @@ on:
     paths:
       - ".github/workflows/historical-official-availability-v1.yml"
       - "scripts/acquire_historical_injury_archive.py"
+      - "scripts/recover_frozen_benchmark_sources.py"
   workflow_dispatch:
 
 permissions:
@@ -30,13 +31,34 @@ jobs:
       - name: Install experiment environment
         run: python -m pip install -e '.[dev,intelligence,api]'
 
-      - name: Qualify focused acquisition operator
+      - name: Qualify acquisition and recovery operators
         run: |
-          ruff check scripts/acquire_historical_injury_archive.py
-          python -m compileall -q scripts/acquire_historical_injury_archive.py
+          ruff check \
+            scripts/acquire_historical_injury_archive.py \
+            scripts/recover_frozen_benchmark_sources.py
+          python -m compileall -q \
+            scripts/acquire_historical_injury_archive.py \
+            scripts/recover_frozen_benchmark_sources.py
           python scripts/acquire_historical_injury_archive.py --help >/dev/null
+          python scripts/recover_frozen_benchmark_sources.py --help >/dev/null
 
-      - name: Acquire exact frozen numerical benchmark sources
+      - name: Restore preserved July benchmark cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            artifacts/models
+            data/raw/nflverse
+          key: player-state-30541589749
+          fail-on-cache-miss: true
+
+      - name: Recover exact frozen numerical benchmark sources
+        run: |
+          python scripts/recover_frozen_benchmark_sources.py \
+            --benchmark-manifest artifacts/reports/benchmark_real/DATA_MANIFEST.json \
+            --cache-root data/raw/nflverse \
+            --output-dir data/raw/frozen_benchmark_sources
+
+      - name: Rehydrate or verify every required numerical source
         run: |
           python scripts/acquire_frozen_benchmark_sources.py \
             --benchmark-manifest artifacts/reports/benchmark_real/DATA_MANIFEST.json \
