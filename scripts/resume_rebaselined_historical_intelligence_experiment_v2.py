@@ -6,7 +6,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-
 import run_rebaselined_historical_intelligence_experiment_v2 as runner
 
 EXPECTED_BASELINE_IDENTITY = "a036c410e0bb1ec670e3fa0f7d6e14e1433322b6eeabdaa81c25c8daee43a29c"
