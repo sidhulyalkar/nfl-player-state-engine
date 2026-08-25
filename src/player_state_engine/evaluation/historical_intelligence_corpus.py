@@ -173,9 +173,12 @@ def _practice_status(value: object) -> str:
     return {
         "full": "full",
         "full participation": "full",
+        "full participation in practice": "full",
         "limited": "limited",
         "limited participation": "limited",
+        "limited participation in practice": "limited",
         "did not participate": "did_not_participate",
+        "did not participate in practice": "did_not_participate",
         "dnp": "did_not_participate",
         "not listed": "not_listed",
     }.get(_normalized_text(value), "unknown")
@@ -615,9 +618,11 @@ def build_historical_intelligence_corpus(
         depth_source_urls=depth_source_urls,
     )
     covered_seasons = sorted(
-        coverage.loc[coverage["official_availability_source_covered"], "season"]
+        int(value)
+        for value in coverage.loc[
+            coverage["official_availability_source_covered"], "season"
+        ]
         .dropna()
-        .astype(int)
         .unique()
     )
     missing_cutoff_rows = int(coverage["prediction_cutoff"].isna().sum())

@@ -1,0 +1,135 @@
+name: Historical official availability v2 REG experiment
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: historical-official-availability-v2-reg-manual
+  cancel-in-progress: false
+
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.14"
+
+      - name: Install exact completed-experiment environment
+        run: |
+          python -m pip install -r experiments/historical_official_availability_v2/environment_requirements.txt
+          python -m pip install --no-deps -e .
+
+      - name: Qualify registered experiment operators
+        run: |
+          ruff check \
+            scripts/acquire_historical_injury_archive.py \
+            scripts/freeze_historical_numerical_baseline_v2.py \
+            scripts/rehydrate_registered_historical_sources_v2.py \
+            scripts/verify_registered_historical_archive_v2.py \
+            scripts/run_rebaselined_historical_intelligence_experiment_v2.py \
+            scripts/run_reg_historical_intelligence_experiment_v2.py \
+            src/player_state_engine/evaluation/historical_intelligence_corpus.py \
+            tests/test_historical_intelligence_corpus.py \
+            tests/test_registered_historical_official_availability.py \
+            tests/test_registered_historical_archive_identity.py
+          python -m compileall -q \
+            scripts/acquire_historical_injury_archive.py \
+            scripts/freeze_historical_numerical_baseline_v2.py \
+            scripts/rehydrate_registered_historical_sources_v2.py \
+            scripts/verify_registered_historical_archive_v2.py \
+            scripts/run_rebaselined_historical_intelligence_experiment_v2.py \
+            scripts/run_reg_historical_intelligence_experiment_v2.py \
+            src/player_state_engine/evaluation/historical_intelligence_corpus.py \
+            tests/test_registered_historical_official_availability.py \
+            tests/test_registered_historical_archive_identity.py
+          python scripts/rehydrate_registered_historical_sources_v2.py --help >/dev/null
+          python scripts/verify_registered_historical_archive_v2.py --help >/dev/null
+          python scripts/run_reg_historical_intelligence_experiment_v2.py --help >/dev/null
+          pytest -q \
+            tests/test_historical_intelligence_corpus.py \
+            tests/test_registered_historical_official_availability.py \
+            tests/test_registered_historical_archive_identity.py
+
+      - name: Resolve registered source artifact
+        id: registry
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          registry = json.loads(
+              Path('experiments/historical_official_availability_v2/registered_inputs.json')
+              .read_text(encoding='utf-8')
+          )
+          artifact = registry['retained_source_artifact']
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as handle:
+              handle.write(f"source_run_id={artifact['workflow_run_id']}\n")
+              handle.write(f"artifact_name={artifact['artifact_name']}\n")
+          PY
+
+      - name: Download retained registered source bundle
+        id: retained_artifact
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.registry.outputs.artifact_name }}
+          run-id: ${{ steps.registry.outputs.source_run_id }}
+          github-token: ${{ github.token }}
+          path: recovered/v2-registered
+
+      - name: Restore or rehydrate exact registered sources
+        run: |
+          mkdir -p data/raw artifacts/intelligence_ablations/historical_official_v2_reg
+          if [[ -d recovered/v2-registered/data/raw/historical_numerical_baseline_v2 \
+                && -d recovered/v2-registered/data/raw/historical_injury_archive_v2 ]]; then
+            cp -a recovered/v2-registered/data/raw/historical_numerical_baseline_v2 data/raw/
+            cp -a recovered/v2-registered/data/raw/historical_injury_archive_v2 data/raw/
+            echo "retained_actions_artifact" \
+              > artifacts/intelligence_ablations/historical_official_v2_reg/source_recovery_mode.txt
+          else
+            python scripts/rehydrate_registered_historical_sources_v2.py \
+              --numerical-root data/raw/historical_numerical_baseline_v2 \
+              --injury-root data/raw/historical_injury_archive_v2
+            echo "registry_hash_verified_rehydration" \
+              > artifacts/intelligence_ablations/historical_official_v2_reg/source_recovery_mode.txt
+          fi
+          test -f data/raw/historical_numerical_baseline_v2/NUMERICAL_BASELINE_MANIFEST.json
+          test -f data/raw/historical_injury_archive_v2/SOURCE_MANIFEST.csv
+          python scripts/verify_registered_historical_archive_v2.py \
+            --injury-root data/raw/historical_injury_archive_v2
+
+      - name: Capture execution environment
+        run: |
+          python --version > artifacts/intelligence_ablations/historical_official_v2_reg/python_version.txt
+          python -m pip freeze > artifacts/intelligence_ablations/historical_official_v2_reg/pip_freeze.txt
+          git rev-parse HEAD > artifacts/intelligence_ablations/historical_official_v2_reg/git_head.txt
+
+      - name: Run registered REG experiment
+        run: |
+          python scripts/run_reg_historical_intelligence_experiment_v2.py \
+            --numerical-root data/raw/historical_numerical_baseline_v2 \
+            --injury-root data/raw/historical_injury_archive_v2 \
+            --output-dir artifacts/intelligence_ablations/historical_official_v2_reg
+
+      - name: Upload complete evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-official-availability-v2-reg-results
+          if-no-files-found: warn
+          retention-days: 90
+          path: |
+            experiments/historical_official_availability_v2/registered_inputs.json
+            experiments/historical_official_availability_v2/environment_requirements.txt
+            data/raw/historical_numerical_baseline_v2
+            data/raw/historical_injury_archive_v2
+            artifacts/intelligence_ablations/historical_official_v2_reg

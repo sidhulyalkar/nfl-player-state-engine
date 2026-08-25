@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "experiment_family": "historical_official_availability_v2",
+  "result_type": "primary_registered_reg_confirmatory",
+  "authority": "research_evidence_only",
+  "decision": "reject_current_official_availability_formulation",
+  "eligible_for_activation_review": false,
+  "automatic_promotion": false,
+  "production_projection_changed": false,
+  "workflow": {
+    "run_id": 32882130064,
+    "job_id": 97914207407,
+    "head_sha": "19f03373358eaaf0dd4c2976c5649e5839801662",
+    "artifact_id": 9577839705,
+    "artifact_name": "historical-official-availability-v2-reg-results",
+    "artifact_size_bytes": 76740640,
+    "artifact_zip_sha256": "73f1c1dd43901cca7c877f485fbd84b6d8fc22e7e212ea4aaacda416b8fee2e9",
+    "artifact_expires_at_utc": "2026-11-23T18:09:43Z"
+  },
+  "registered_inputs": {
+    "numerical_baseline_identity_sha256": "a036c410e0bb1ec670e3fa0f7d6e14e1433322b6eeabdaa81c25c8daee43a29c",
+    "injury_archive_identity_sha256": "c150ff3f78eb48e90e9c907640af855dd15b8f98564dc214ca0e9b61a541cff1",
+    "schedule_commit": "67fa4d790ba09e5f0e2868b49ef9dbbd8946bb22",
+    "target": "fantasy_points_ppr",
+    "season_type": "REG",
+    "source_rows": 28882,
+    "source_coverage": 0.9974724742053874,
+    "raw_evidence_prevalence": 0.17426078526417837,
+    "evidence_tier": 2
+  },
+  "primary_evidence": {
+    "paired_rows": 20276,
+    "paired_seasons": 4,
+    "paired_blocks": 64,
+    "reference_mean_pinball": 1.3910124566331377,
+    "candidate_mean_pinball": 1.3951903743650984,
+    "relative_pinball_regression_pct": 0.3003508496302862,
+    "effect_reference_minus_candidate": -0.004177917731960682,
+    "ci_95_low": -0.007102054400350047,
+    "ci_95_high": -0.0015202859699966897,
+    "probability_improves": 0.001,
+    "p_value": 0.999000499750125,
+    "fdr_q_value": 1.0,
+    "season_consistency": 0.0,
+    "position_consistency": 0.0,
+    "week_consistency": 0.421875,
+    "reference_q50_mae": 4.354269456295304,
+    "candidate_q50_mae": 4.356645986907017,
+    "reference_80_coverage": 0.8102189781021898,
+    "candidate_80_coverage": 0.8219076740974551,
+    "coverage_gap_regression": 0.011688695995265341,
+    "max_supported_position_coverage_gap_regression": 0.015194346289752692,
+    "identity_control_effect": -0.0035056445533254,
+    "identity_control_ci_low": -0.006254393695791953,
+    "identity_control_ci_high": -0.0009728913849365986,
+    "identity_control_passed": false,
+    "shifted_time_leakage_advantage": 0.005362815175420292,
+    "shifted_time_leakage_ci_low": 0.0026144867568776682,
+    "shifted_time_leakage_ci_high": 0.008142636672495436,
+    "paired_source_coverage": 0.9976819885579009,
+    "structured_snapshot_prevalence": 0.8129315446833695,
+    "structured_contradiction_rate": 0.5376800157822056,
+    "model_gate_passed": false,
+    "model_gate_blockers": [
+      "incremental_effect_not_positive",
+      "incremental_effect_ci_not_positive",
+      "fdr_q_above_threshold_or_missing",
+      "inconsistent_season_effect",
+      "inconsistent_position_effect",
+      "inconsistent_week_effect",
+      "identity_negative_control_failed"
+    ]
+  },
+  "slice_diagnostics": {
+    "preregistered_consistency_summary": "The effect was unfavorable in every evaluated season and every supported position.",
+    "season_effect_reference_minus_candidate": {
+      "2021": -0.003579,
+      "2022": -0.005098,
+      "2023": -0.001826,
+      "2024": -0.005923
+    },
+    "position_effect_reference_minus_candidate": {
+      "QB": -0.011955,
+      "RB": -0.005454,
+      "TE": -0.002406,
+      "WR": -0.002162
+    }
+  },
+  "posthoc_diagnostics": {
+    "authority": "diagnostic_only_not_confirmatory",
+    "latest_claim_age_days_median": 43.818912,
+    "latest_claim_age_days_p75": 319.152477,
+    "rows_with_any_prior_structured_claim_fraction": 0.8129315446833695,
+    "interpretation": "The generic structured ledger retains unsuperseded official claims indefinitely while only their consensus weights decay. Snapshot presence and raw claim counts therefore remain active long after the source week. The large gap between raw current-week evidence prevalence (17.43%) and structured snapshot prevalence (81.29%), plus a 53.77% contradiction rate, motivates a separately registered current-week state experiment. These diagnostics do not rescue or modify the failed primary result."
+  },
+  "next_registered_questions": [
+    "Repeat the experiment with current-week official state semantics that reset stale injury state when a source-covered player is absent from the current report.",
+    "Decompose current-week practice participation and game designation into separately registered feature families.",
+    "Require the pregame-context sensitivity excluding spread_line, total_line, roof, temp, and wind before any future activation decision.",
+    "Independently validate the positive objective-opportunity signal, whose model gate passed in this staircase but whose source-coverage authority was not measured."
+  ]
+}

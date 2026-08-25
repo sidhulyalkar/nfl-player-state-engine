@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -68,7 +69,12 @@ def _injuries() -> pd.DataFrame:
             "full_name": ["Player One", "Player One", "Player Three", "Player Three"],
             "team": ["AAA", "AAA", "CCC", "CCC"],
             "report_status": ["Questionable", "Out", "Questionable", "Out"],
-            "practice_status": ["Limited Participation", "DNP", "Limited", "DNP"],
+            "practice_status": [
+                "Limited Participation in Practice",
+                "DNP",
+                "Full Participation in Practice",
+                "Did Not Participate in Practice",
+            ],
             # 13:00 ET cutoff at 1.5h is 15:30Z. The second row in each season is late.
             "date_modified": [
                 "2023-09-24T15:00:00Z",
@@ -103,7 +109,7 @@ def test_injury_corpus_separates_source_coverage_from_claim_prevalence() -> None
     evidence = corpus.official_evidence
     assert len(evidence) == 4
     assert set(evidence["player_id"]) == {"P1", "P3"}
-    assert set(evidence["practice_status"]) >= {"limited", "unknown"}
+    assert set(evidence["practice_status"]) >= {"limited", "full", "unknown"}
     assert set(evidence["game_status"]) >= {"questionable", "unknown"}
     assert "out" not in set(evidence["game_status"])
 
@@ -112,6 +118,38 @@ def test_injury_corpus_separates_source_coverage_from_claim_prevalence() -> None
     assert corpus.provenance.source_coverage_point_in_time_verified is True
     assert corpus.audit["automatic_promotion"] is False
     assert corpus.audit["production_projection_changed"] is False
+
+
+def test_nflverse_long_form_practice_statuses_are_canonicalized() -> None:
+    injuries = _injuries().iloc[[0]].copy()
+    injuries["practice_status"] = "Did Not Participate in Practice"
+    corpus = build_historical_intelligence_corpus(
+        _panel().iloc[[0]],
+        _schedules().iloc[[0]],
+        injuries=injuries,
+        source_archive_verified=True,
+        archive_identity_sha256="archive-long-form-practice",
+    )
+
+    practice = corpus.official_evidence.loc[
+        corpus.official_evidence["event_type"].eq("practice_participation")
+    ]
+    assert len(practice) == 1
+    assert practice.iloc[0]["practice_status"] == "did_not_participate"
+
+
+def test_verified_corpus_provenance_serializes_to_json_native_scalars() -> None:
+    corpus = build_historical_intelligence_corpus(
+        _panel(),
+        _schedules(),
+        injuries=_injuries(),
+        source_archive_verified=True,
+        archive_identity_sha256="archive-json-safe",
+    )
+
+    payload = json.loads(corpus.provenance.model_dump_json())
+    assert payload["metadata"]["covered_seasons"] == [2023, 2024]
+    assert all(type(season) is int for season in payload["metadata"]["covered_seasons"])
 
 
 def test_unverified_archive_cannot_self_promote_to_tier_two() -> None:
