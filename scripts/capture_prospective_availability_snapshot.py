@@ -74,7 +74,7 @@ def _team_games(schedules: pd.DataFrame, *, season: int, week: int) -> pd.DataFr
     teams = pd.concat([home, away], ignore_index=True)
     if teams.duplicated(["season", "week", "recent_team"]).any():
         raise ValueError("Schedule contains multiple games for one team/week")
-    return teams
+    return teams.sort_values(["game_id", "recent_team"]).reset_index(drop=True)
 
 
 def _latest_current_week_rows(
@@ -112,6 +112,34 @@ def _latest_current_week_rows(
     return canonical.drop(columns=["_sort_modified"])
 
 
+def _team_observation_audit(
+    team_games: pd.DataFrame,
+    latest: pd.DataFrame,
+    *,
+    collected_at_utc: pd.Timestamp,
+) -> list[dict[str, object]]:
+    observed_teams = (
+        set(latest["recent_team"].dropna().astype(str)) if not latest.empty else set()
+    )
+    rows: list[dict[str, object]] = []
+    for record in team_games.to_dict(orient="records"):
+        team = str(record["recent_team"])
+        cutoff = _utc(record["prediction_cutoff"])
+        rows.append(
+            {
+                "season": int(record["season"]),
+                "week": int(record["week"]),
+                "game_id": str(record["game_id"]),
+                "recent_team": team,
+                "prediction_cutoff": cutoff.isoformat(),
+                "source_collected_at_utc": collected_at_utc.isoformat(),
+                "collection_before_cutoff": bool(collected_at_utc <= cutoff),
+                "team_row_observed": team in observed_teams,
+            }
+        )
+    return rows
+
+
 def build_snapshot(
     injury_bytes: bytes,
     schedule_bytes: bytes,
@@ -133,6 +161,11 @@ def build_snapshot(
         injuries_raw,
         season=season,
         week=week,
+        collected_at_utc=collected,
+    )
+    team_observation = _team_observation_audit(
+        team_games,
+        latest,
         collected_at_utc=collected,
     )
 
@@ -193,6 +226,7 @@ def build_snapshot(
     snapshot["authority"] = _AUTHORITY
     snapshot["production_feature_enabled"] = False
 
+    observed_team_count = sum(bool(row["team_row_observed"]) for row in team_observation)
     manifest: dict[str, object] = {
         "schema_version": 1,
         "authority": _AUTHORITY,
@@ -218,8 +252,19 @@ def build_snapshot(
         "usable_before_cutoff_rows": int(snapshot["usable_before_cutoff"].sum())
         if not snapshot.empty
         else 0,
-        "games": int(snapshot["game_id"].nunique()) if not snapshot.empty else 0,
+        "scheduled_games": int(team_games["game_id"].nunique()),
+        "scheduled_teams": int(len(team_games)),
+        "teams_with_source_rows": int(observed_team_count),
+        "conservative_team_row_observation_rate": float(observed_team_count / len(team_games)),
+        "games_with_source_rows": int(snapshot["game_id"].nunique()) if not snapshot.empty else 0,
         "players": int(snapshot["player_id"].nunique()) if not snapshot.empty else 0,
+        "team_observation": team_observation,
+        "team_coverage_semantics": (
+            "team_row_observed means at least one current-week row for the scheduled team existed "
+            "in the downloaded injury bytes. A scheduled team with zero rows is not assumed "
+            "healthy or complete; later confirmation must treat that state conservatively unless "
+            "source completeness is independently established."
+        ),
         "availability_semantics": (
             "source_collected_at_utc is the authoritative availability timestamp. "
             "A row captured after its game prediction cutoff is retained for audit but may not "
@@ -233,11 +278,15 @@ def persist_snapshot(
     snapshot: pd.DataFrame,
     manifest: dict[str, object],
     injury_bytes: bytes,
+    schedule_bytes: bytes,
     *,
     output_root: Path,
 ) -> Path:
     collected = _utc(str(manifest["collected_at_utc"]))
-    injury_sha = str(manifest["injury_source"]["sha256"])
+    injury_source = manifest.get("injury_source")
+    if not isinstance(injury_source, dict):
+        raise ValueError("Snapshot manifest is missing injury_source")
+    injury_sha = str(injury_source["sha256"])
     stamp = collected.strftime("%Y%m%dT%H%M%SZ")
     destination = (
         output_root
@@ -249,9 +298,10 @@ def persist_snapshot(
         raise FileExistsError(f"Prospective snapshot already exists: {destination}")
     destination.mkdir(parents=True)
 
-    # Preserve the exact mutable injury bytes. The schedule itself is commit-pinned and can be
-    # rehydrated from schedule_url; the selected current-week cutoffs are persisted below.
+    # Preserve both exact source payloads. The schedule is also commit-pinned, but retaining its
+    # bytes makes the evidence bundle self-contained if an upstream repository later disappears.
     (destination / "injuries_source.csv").write_bytes(injury_bytes)
+    (destination / "schedule_source.csv").write_bytes(schedule_bytes)
     snapshot.to_csv(destination / "availability_snapshot.csv", index=False)
     (destination / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True, default=str) + "\n",
@@ -269,7 +319,9 @@ def _write_unavailable_status(
     collected_at: pd.Timestamp,
 ) -> Path:
     output_root.mkdir(parents=True, exist_ok=True)
-    path = output_root / f"source_unavailable_{season}_w{week:02d}_{collected_at.strftime('%Y%m%dT%H%M%SZ')}.json"
+    path = output_root / (
+        f"source_unavailable_{season}_w{week:02d}_{collected_at.strftime('%Y%m%dT%H%M%SZ')}.json"
+    )
     payload = {
         "schema_version": 1,
         "authority": _AUTHORITY,
@@ -336,6 +388,7 @@ def main() -> None:
         snapshot,
         manifest,
         injury_bytes,
+        schedule_bytes,
         output_root=args.output_root,
     )
     print(destination)
