@@ -28,6 +28,22 @@ export interface DraftReliabilityFields {
 
 export type ReliableDraftPlayer = DraftBoardPlayer & DraftReliabilityFields;
 
+export interface DraftQualificationResponse {
+  status: 'READY' | 'CAUTION' | 'BLOCKED' | string;
+  can_act: boolean;
+  blocking_reasons: string[];
+  caution_reasons: string[];
+  league_inputs_ready: boolean;
+  projection_fresh: boolean;
+  live_snapshot_fresh: boolean;
+  refresh_healthy: boolean;
+  readiness_score: number;
+  projection_age_hours: number | null;
+  max_projection_age_hours: number;
+  snapshot_age_seconds: number;
+  stale_after_seconds: number;
+}
+
 export interface ReliableDraftBoardResponse extends Omit<DraftBoardResponse, 'board'> {
   board: ReliableDraftPlayer[];
   readiness?: {
@@ -46,6 +62,7 @@ export interface ReliableDraftBoardResponse extends Omit<DraftBoardResponse, 'bo
     exact_scoring_coverage: number;
     valuation_coverage: number;
   };
+  qualification?: DraftQualificationResponse;
   research?: {
     room_challenger_promoted: boolean;
     room_simulations: number;
