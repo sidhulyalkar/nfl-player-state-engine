@@ -8,8 +8,6 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-import pandas as pd
-
 from player_state_engine.config import load_config
 from player_state_engine.data.io import read_table, write_table
 from player_state_engine.data.nflverse import download_nflverse
@@ -136,7 +134,16 @@ def run(args: argparse.Namespace) -> None:
     (output / "run_manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
     )
-    print(json.dumps({"output_dir": str(output), "approved": result.gate.approved, "blockers": list(result.gate.blockers)}, indent=2))
+    print(
+        json.dumps(
+            {
+                "output_dir": str(output),
+                "approved": result.gate.approved,
+                "blockers": list(result.gate.blockers),
+            },
+            indent=2,
+        )
+    )
 
 
 def parse_args() -> argparse.Namespace:
