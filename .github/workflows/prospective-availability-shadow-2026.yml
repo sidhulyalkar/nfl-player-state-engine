@@ -1,0 +1,140 @@
+name: Prospective 2026 availability shadow capture
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/prospective-availability-shadow-2026.yml"
+      - "scripts/capture_prospective_availability_snapshot.py"
+      - "tests/test_prospective_availability_snapshot.py"
+      - "docs/modeling/prospective_availability_shadow_2026.md"
+  workflow_dispatch:
+    inputs:
+      week:
+        description: "2026 regular-season week to capture"
+        required: true
+        default: "1"
+
+permissions:
+  contents: read
+
+concurrency:
+  # PR heads share a group so stale qualification runs are canceled. Manual scientific
+  # captures use the unique run ID and therefore never cancel one another.
+  group: prospective-availability-shadow-${{ github.event.pull_request.number || format('manual-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test environment
+        run: python -m pip install -e '.[dev]'
+
+      - name: Qualify prospective collector
+        run: |
+          ruff check \
+            scripts/capture_prospective_availability_snapshot.py \
+            tests/test_prospective_availability_snapshot.py
+          python -m compileall -q \
+            scripts/capture_prospective_availability_snapshot.py \
+            tests/test_prospective_availability_snapshot.py
+          python scripts/capture_prospective_availability_snapshot.py --help >/dev/null
+          pytest -q tests/test_prospective_availability_snapshot.py
+
+  capture:
+    if: github.event_name == 'workflow_dispatch'
+    needs: qualify
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install collector environment
+        run: python -m pip install -e .
+
+      - name: Validate requested week
+        env:
+          REQUESTED_WEEK: ${{ inputs.week }}
+        run: |
+          python - <<'PY'
+          import os
+
+          week = int(os.environ['REQUESTED_WEEK'])
+          if not 1 <= week <= 18:
+              raise SystemExit(f'2026 REG week must be in [1, 18], found {week}')
+          print(f'CAPTURE_WEEK={week}')
+          PY
+
+      - name: Resolve commit-pinned schedule source
+        id: schedule
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+
+          query = urllib.parse.urlencode({'path': 'data/games.csv', 'per_page': 1})
+          request = urllib.request.Request(
+              f'https://api.github.com/repos/nflverse/nfldata/commits?{query}',
+              headers={
+                  'Accept': 'application/vnd.github+json',
+                  'User-Agent': 'nfl-player-state-engine/prospective-availability-shadow',
+              },
+          )
+          with urllib.request.urlopen(request, timeout=60) as response:
+              payload = json.load(response)
+          if not isinstance(payload, list) or not payload:
+              raise SystemExit('Could not resolve nfldata games.csv commit')
+          commit = str(payload[0].get('sha') or '').strip()
+          if not commit:
+              raise SystemExit('nfldata commit response had no SHA')
+          url = f'https://raw.githubusercontent.com/nflverse/nfldata/{commit}/data/games.csv'
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as handle:
+              handle.write(f'commit={commit}\n')
+              handle.write(f'url={url}\n')
+          print(f'SCHEDULE_COMMIT={commit}')
+          PY
+
+      - name: Capture immutable prospective snapshot
+        env:
+          REQUESTED_WEEK: ${{ inputs.week }}
+          SCHEDULE_COMMIT: ${{ steps.schedule.outputs.commit }}
+          SCHEDULE_URL: ${{ steps.schedule.outputs.url }}
+        run: |
+          mkdir -p artifacts/prospective_availability_shadow
+          python scripts/capture_prospective_availability_snapshot.py \
+            --season 2026 \
+            --week "${REQUESTED_WEEK}" \
+            --injury-url https://github.com/nflverse/nflverse-data/releases/download/injuries/injuries_2026.csv \
+            --schedule-url "${SCHEDULE_URL}" \
+            --schedule-commit "${SCHEDULE_COMMIT}" \
+            --output-root artifacts/prospective_availability_shadow
+
+      - name: Capture execution provenance
+        env:
+          REQUESTED_WEEK: ${{ inputs.week }}
+        run: |
+          mkdir -p artifacts/prospective_availability_shadow/run_provenance
+          python --version > artifacts/prospective_availability_shadow/run_provenance/python_version.txt
+          python -m pip freeze > artifacts/prospective_availability_shadow/run_provenance/pip_freeze.txt
+          git rev-parse HEAD > artifacts/prospective_availability_shadow/run_provenance/git_head.txt
+          printf '%s\n' "2026" > artifacts/prospective_availability_shadow/run_provenance/season.txt
+          printf '%s\n' "${REQUESTED_WEEK}" > artifacts/prospective_availability_shadow/run_provenance/week.txt
+
+      - name: Upload prospective research bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: prospective-availability-shadow-2026-w${{ inputs.week }}
+          if-no-files-found: error
+          retention-days: 90
+          path: artifacts/prospective_availability_shadow
