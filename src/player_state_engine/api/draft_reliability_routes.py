@@ -15,6 +15,7 @@ from player_state_engine.fantasy.decision_audit import (
 )
 from player_state_engine.fantasy.decision_board import DecisionType, build_decision_board
 from player_state_engine.fantasy.draft import DraftState
+from player_state_engine.fantasy.draft_actionability import assess_candidate_scope_actionability
 from player_state_engine.fantasy.draft_advisor import augment_live_draft_board_with_reliability
 from player_state_engine.fantasy.draft_qualification import (
     DraftQualificationReport,
@@ -142,6 +143,18 @@ def install_draft_reliability_routes(app: FastAPI, draft_service: DraftBoardServ
             max_projection_age_hours=max_projection_age_hours,
         )
         readiness = assess_league_readiness(projections, config)
+        actionability = assess_candidate_scope_actionability(
+            projections,
+            reliable.head(12),
+            config,
+            global_readiness=readiness,
+        )
+        actionability_payload = {
+            **actionability.as_dict(),
+            "authority": "candidate_scope_diagnostic_only",
+            "overrides_global_qualification": False,
+            "candidate_limit": 12,
+        }
         trust = projection_metadata(
             projections,
             draft_service.projections_path,
@@ -165,6 +178,10 @@ def install_draft_reliability_routes(app: FastAPI, draft_service: DraftBoardServ
         )
 
         if capture_audit:
+            audit_trust = {
+                **trust,
+                "candidate_scope_actionability": actionability_payload,
+            }
             audit = capture_draft_decision_checkpoint(
                 reliable,
                 state,
@@ -175,7 +192,7 @@ def install_draft_reliability_routes(app: FastAPI, draft_service: DraftBoardServ
                     "data/product/decision_audit/draft_decisions.jsonl",
                 ),
                 qualification=qualification,
-                trust=trust,
+                trust=audit_trust,
                 survival_model=survival_metadata,
                 room_simulations=room_simulations,
                 recorded_at=now,
@@ -217,6 +234,7 @@ def install_draft_reliability_routes(app: FastAPI, draft_service: DraftBoardServ
             "board": frame_records(reliable.head(max(1, min(int(limit), 1000)))),
             "readiness": readiness.as_dict(),
             "qualification": qualification.as_dict(),
+            "actionability": actionability_payload,
             "audit": audit,
             "trust": trust,
             "survival_model": survival_metadata,
