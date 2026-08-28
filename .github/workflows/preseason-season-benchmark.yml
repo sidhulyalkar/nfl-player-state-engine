@@ -45,6 +45,47 @@ jobs:
           python scripts/run_preseason_season_benchmark.py --help >/dev/null
           pytest -q tests/test_preseason_season_model.py
 
+  public-data-smoke:
+    if: github.event_name == 'pull_request'
+    needs: qualify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install smoke environment
+        run: python -m pip install -e .
+      - name: Exercise real nflverse roster and metadata schemas
+        run: |
+          python scripts/run_preseason_season_benchmark.py \
+            --acquire \
+            --seasons 2021 2022 2023 2024 2025 \
+            --targets fantasy_points_ppr \
+            --min-train-seasons 3 \
+            --max-iter 20 \
+            --min-samples-leaf 10 \
+            --bootstrap-samples 200 \
+            --output-dir artifacts/reports/preseason_public_data_smoke
+      - name: Assert smoke remains non-production
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(
+              Path('artifacts/reports/preseason_public_data_smoke/run_manifest.json').read_text(
+                  encoding='utf-8'
+              )
+          )
+          assert manifest['authority'] == 'research_challenger_only'
+          assert manifest['automatic_promotion'] is False
+          assert manifest['seasons'] == [2021, 2022, 2023, 2024, 2025]
+          assert manifest['targets'] == ['fantasy_points_ppr']
+          assert manifest['dataset_diagnostics']['rows'] > 0
+          PY
+
   benchmark:
     if: github.event_name == 'workflow_dispatch'
     needs: qualify
