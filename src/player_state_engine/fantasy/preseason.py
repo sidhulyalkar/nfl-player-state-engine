@@ -20,11 +20,72 @@ PRESEASON_TARGETS = (
     "receiving_tds",
 )
 
-# Historical opening-week rosters contain several contract states that still represent a
-# fantasy asset. Practice-squad/free-agent/released states are not part of the ordinary draft
-# pool. Unknown states fail closed so upstream schema changes cannot silently redefine training.
-_INCLUDED_STATUSES = {"ACT", "E14", "EXE", "INA", "PUP", "RES", "RSN", "SUS"}
-_EXCLUDED_STATUSES = {"CUT", "DEV", "NWT", "RET", "RFA", "RSR", "TRC", "TRD", "TRL", "TRT", "UFA"}
+# nflverse roster status representation has changed over time. Some snapshots use terse
+# contract codes (ACT/UFA/etc.), some expose opaque status IDs (A01/R01/etc.), and newer
+# snapshots also carry a human-readable status_short_description. The preseason model must
+# learn football state, not source-schema eras, so all recognized representations collapse to
+# stable semantic classes before inclusion/exclusion and before the field becomes a feature.
+_INCLUDED_STATUS_CLASSES = {"ACTIVE", "INACTIVE", "RESERVE", "SUSPENDED", "EXEMPT"}
+_EXCLUDED_STATUS_CLASSES = {
+    "PRACTICE_SQUAD",
+    "FREE_AGENT",
+    "WAIVED",
+    "RETIRED",
+    "FUTURE_CONTRACT",
+    "NOT_WITH_TEAM",
+    "TRANSACTIONAL",
+}
+_STATUS_COLUMNS = (
+    "status_short_description",
+    "roster_status",
+    "status",
+    "status_description_abbr",
+)
+_STATUS_EXACT_MAP = {
+    # Stable/legacy terse statuses.
+    "ACT": "ACTIVE",
+    "INA": "INACTIVE",
+    "PUP": "RESERVE",
+    "RES": "RESERVE",
+    "RSN": "RESERVE",
+    "SUS": "SUSPENDED",
+    "EXE": "EXEMPT",
+    "E14": "EXEMPT",
+    "CUT": "WAIVED",
+    "DEV": "PRACTICE_SQUAD",
+    "NWT": "NOT_WITH_TEAM",
+    "RET": "RETIRED",
+    "RFA": "FREE_AGENT",
+    "UFA": "FREE_AGENT",
+    "RSR": "FUTURE_CONTRACT",
+    "TRC": "TRANSACTIONAL",
+    "TRD": "TRANSACTIONAL",
+    "TRL": "TRANSACTIONAL",
+    "TRT": "TRANSACTIONAL",
+    # Documented nflverse status-description IDs.
+    "A01": "ACTIVE",
+    "E02": "EXEMPT",
+    "P01": "PRACTICE_SQUAD",
+    "P02": "PRACTICE_SQUAD",
+    "P03": "PRACTICE_SQUAD",
+    "P06": "PRACTICE_SQUAD",
+    "P07": "PRACTICE_SQUAD",
+    "R01": "RESERVE",
+    "R02": "RETIRED",
+    "R03": "RESERVE",
+    "R04": "RESERVE",
+    "R05": "RESERVE",
+    "R06": "RESERVE",
+    "R23": "FUTURE_CONTRACT",
+    "R27": "RESERVE",
+    "R30": "SUSPENDED",
+    "R33": "SUSPENDED",
+    "R40": "SUSPENDED",
+    "R47": "RESERVE",
+    "R48": "RESERVE",
+    "W03": "WAIVED",
+    "U01": "FREE_AGENT",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +117,72 @@ def _first_present(frame: pd.DataFrame, names: Iterable[str]) -> str | None:
     return next((name for name in names if name in frame.columns), None)
 
 
+def _semantic_roster_status(value: object) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+    token = str(value).strip().upper()
+    if not token or token in {"<NA>", "NAN", "NONE"}:
+        return None
+    if token in _STATUS_EXACT_MAP:
+        return _STATUS_EXACT_MAP[token]
+
+    normalized = " ".join(token.replace("_", " ").replace("-", " ").split())
+    if normalized in {"ACTIVE", "ACT"}:
+        return "ACTIVE"
+    if normalized in {"INACTIVE", "INA"}:
+        return "INACTIVE"
+    if "PRACTICE" in normalized or normalized.startswith("PRAC SQ") or normalized.startswith("PS;"):
+        return "PRACTICE_SQUAD"
+    if "WAIVER" in normalized or "RELEASE" in normalized or normalized == "CUT":
+        return "WAIVED"
+    if "RETIRED" in normalized:
+        return "RETIRED"
+    if "RESERVE/FUTURE" in token or "RESERVE FUTURE" in normalized:
+        return "FUTURE_CONTRACT"
+    if "FREE AGENT" in normalized or normalized.endswith("UFA") or normalized.endswith("RFA"):
+        return "FREE_AGENT"
+    if "NOT WITH TEAM" in normalized:
+        return "NOT_WITH_TEAM"
+    if "SUSP" in normalized:
+        return "SUSPENDED"
+    if normalized.startswith("EX/") or normalized.startswith("EX ") or "EXEMPT" in normalized:
+        return "EXEMPT"
+    if (
+        normalized.startswith("R/")
+        or normalized.startswith("RESERVE")
+        or "INJURED RESERVE" in normalized
+        or "PUP" in normalized
+        or "NFIN" in normalized
+        or "NFIL" in normalized
+        or "DNR" in normalized
+        or "LEFT SQUAD" in normalized
+    ):
+        return "RESERVE"
+    return None
+
+
+def _resolve_roster_statuses(data: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+    available = [column for column in _STATUS_COLUMNS if column in data.columns]
+    if not available:
+        raise ValueError(
+            "Roster data requires status_short_description, roster_status, status, or "
+            "status_description_abbr."
+        )
+
+    semantic = pd.Series(pd.NA, index=data.index, dtype="string")
+    provenance = pd.Series(pd.NA, index=data.index, dtype="string")
+    for column in available:
+        unresolved = semantic.isna()
+        if not unresolved.any():
+            break
+        values = data.loc[unresolved, column]
+        mapped = values.map(_semantic_roster_status).astype("string")
+        resolved_index = mapped.loc[mapped.notna()].index
+        semantic.loc[resolved_index] = mapped.loc[resolved_index]
+        provenance.loc[resolved_index] = column + ":" + values.loc[resolved_index].astype("string")
+    return semantic, provenance
+
+
 def _normalize_opening_roster(
     rosters: pd.DataFrame,
     *,
@@ -83,16 +210,12 @@ def _normalize_opening_roster(
     team_column = _first_present(data, ("team", "recent_team", "club_code"))
     position_column = _first_present(data, ("position", "pos", "position_group"))
     name_column = _first_present(data, ("full_name", "player_name", "display_name"))
-    status_column = _first_present(data, ("status", "roster_status", "status_description_abbr"))
     if id_column is None or team_column is None or position_column is None:
         raise ValueError("Roster data requires GSIS/player ID, team, and position columns.")
-    if status_column is None:
-        raise ValueError("Roster data requires an explicit roster status column.")
 
     data["player_id"] = data[id_column].astype("string").str.strip()
     data["recent_team"] = data[team_column].astype("string").str.upper().str.strip()
     data["position"] = data[position_column].astype("string").str.upper().str.strip()
-    data["roster_status"] = data[status_column].astype("string").str.upper().str.strip()
     data["player_name"] = (
         data[name_column].astype("string").fillna(data["player_id"])
         if name_column is not None
@@ -100,15 +223,24 @@ def _normalize_opening_roster(
     )
     data = data.loc[data["position"].isin(SKILL_POSITIONS)].copy()
 
-    status = data["roster_status"]
-    unknown_status = ~status.isin(_INCLUDED_STATUSES | _EXCLUDED_STATUSES)
+    semantic_status, status_provenance = _resolve_roster_statuses(data)
+    data["roster_status"] = semantic_status
+    data["roster_status_provenance"] = status_provenance
+    unknown_status = data["roster_status"].isna()
     unknown_status_rows = int(unknown_status.sum())
     if fail_on_unknown_status and unknown_status_rows:
-        examples = sorted(status.loc[unknown_status].dropna().astype(str).unique())[:5]
-        raise ValueError(f"Unknown roster statuses for season {season}: {examples}")
-    excluded = status.isin(_EXCLUDED_STATUSES) | unknown_status
+        fields = [column for column in _STATUS_COLUMNS if column in data.columns]
+        examples = (
+            data.loc[unknown_status, fields]
+            .astype("string")
+            .drop_duplicates()
+            .head(5)
+            .to_dict(orient="records")
+        )
+        raise ValueError(f"Unknown roster status semantics for season {season}: {examples}")
+    excluded = data["roster_status"].isin(_EXCLUDED_STATUS_CLASSES) | unknown_status
     excluded_status_rows = int(excluded.sum())
-    data = data.loc[status.isin(_INCLUDED_STATUSES)].copy()
+    data = data.loc[data["roster_status"].isin(_INCLUDED_STATUS_CLASSES)].copy()
 
     unresolved = (
         data["player_id"].isna()
@@ -145,7 +277,14 @@ def _normalize_opening_roster(
     data["season"] = int(season)
     return (
         data[
-            ["season", "player_id", "player_name", "recent_team", "position", "roster_status"]
+            [
+                "season",
+                "player_id",
+                "player_name",
+                "recent_team",
+                "position",
+                "roster_status",
+            ]
         ].reset_index(drop=True),
         _RosterDiagnostics(
             unresolved_identity_rows=unresolved_identity_rows,
