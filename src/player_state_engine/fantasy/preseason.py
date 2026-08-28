@@ -126,6 +126,12 @@ def _semantic_roster_status(value: object) -> str | None:
     if token in _STATUS_EXACT_MAP:
         return _STATUS_EXACT_MAP[token]
 
+    # NGS status-description IDs use an E-prefix for exempt states. We collapse only this
+    # homogeneous family to its broad football meaning. Mixed families such as Rxx remain
+    # exact-map-only because they span reserve, retired, future-contract, and suspension states.
+    if len(token) == 3 and token.startswith("E") and token[1:].isdigit():
+        return "EXEMPT"
+
     normalized = " ".join(token.replace("_", " ").replace("-", " ").split())
     if normalized in {"ACTIVE", "ACT"}:
         return "ACTIVE"
