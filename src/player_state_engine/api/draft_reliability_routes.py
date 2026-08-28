@@ -3,14 +3,27 @@ from __future__ import annotations
 import os
 import time
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
 
 from player_state_engine.api.draft_routes import DraftBoardService
+from player_state_engine.fantasy.decision_audit import (
+    append_decision_record,
+    build_draft_audit_record,
+)
 from player_state_engine.fantasy.decision_board import DecisionType, build_decision_board
+from player_state_engine.fantasy.draft import DraftState
 from player_state_engine.fantasy.draft_advisor import augment_live_draft_board_with_reliability
-from player_state_engine.fantasy.draft_qualification import qualify_live_draft
+from player_state_engine.fantasy.draft_qualification import (
+    DraftQualificationReport,
+    qualify_live_draft,
+)
 from player_state_engine.fantasy.draft_survival import (
     artifact_metadata as survival_artifact_metadata,
 )
+from player_state_engine.fantasy.league import LeagueConfig
 from player_state_engine.fantasy.readiness import assess_league_readiness
 from player_state_engine.product.provenance import frame_records, projection_metadata
 
@@ -18,6 +31,61 @@ try:
     from fastapi import FastAPI, HTTPException, Query
 except ImportError as exc:  # pragma: no cover
     raise RuntimeError("Install the API extras: python -m pip install -e '.[api]'") from exc
+
+
+def capture_draft_decision_checkpoint(
+    board: pd.DataFrame,
+    state: DraftState,
+    config: LeagueConfig,
+    *,
+    league_key: str,
+    audit_path: str | Path,
+    qualification: DraftQualificationReport,
+    trust: dict[str, Any],
+    survival_model: dict[str, Any],
+    room_simulations: int,
+    recorded_at: datetime | None = None,
+) -> dict[str, object]:
+    """Persist one exact live decision state without letting refresh polling duplicate it."""
+
+    destination = Path(audit_path)
+    try:
+        record = build_draft_audit_record(
+            board,
+            state,
+            config,
+            league_key=league_key,
+            recorded_at=recorded_at,
+            model_metadata={
+                "qualification": qualification.as_dict(),
+                "trust": trust,
+                "survival_model": survival_model,
+                "research": {
+                    "room_challenger_promoted": False,
+                    "room_simulations": int(room_simulations),
+                    "baseline_survival_authoritative": True,
+                },
+            },
+        )
+        written = append_decision_record(destination, record)
+    except (OSError, TypeError, ValueError) as exc:
+        return {
+            "requested": True,
+            "status": "FAILED",
+            "decision_id": None,
+            "written": False,
+            "path": str(destination),
+            "error": str(exc),
+        }
+
+    return {
+        "requested": True,
+        "status": "RECORDED" if written else "DEDUPLICATED",
+        "decision_id": record.decision_id,
+        "written": bool(written),
+        "path": str(destination),
+        "error": None,
+    }
 
 
 def install_draft_reliability_routes(app: FastAPI, draft_service: DraftBoardService) -> None:
@@ -34,6 +102,7 @@ def install_draft_reliability_routes(app: FastAPI, draft_service: DraftBoardServ
         limit: int = Query(default=250, ge=1, le=1000),
         room_simulations: int = Query(default=600, ge=100, le=5000),
         max_projection_age_hours: float = Query(default=24.0, gt=0.0, le=720.0),
+        capture_audit: bool = False,
     ) -> dict[str, object]:
         try:
             snapshot, projections, config, state, picks, refresh_warning = (
@@ -78,6 +147,7 @@ def install_draft_reliability_routes(app: FastAPI, draft_service: DraftBoardServ
             draft_service.projections_path,
             snapshot=snapshot,
         )
+        survival_metadata = survival_artifact_metadata(survival)
         roster_ids = {str(player_id) for player_id in state.roster_player_ids}
         full_board = build_decision_board(projections, config, DecisionType.DRAFT)
         roster = full_board.loc[full_board["player_id"].astype(str).isin(roster_ids)].copy()
@@ -93,6 +163,32 @@ def install_draft_reliability_routes(app: FastAPI, draft_service: DraftBoardServ
             stale_after_seconds=stale_after,
             refresh_warning=refresh_warning,
         )
+
+        if capture_audit:
+            audit = capture_draft_decision_checkpoint(
+                reliable,
+                state,
+                config,
+                league_key=league_id,
+                audit_path=os.getenv(
+                    "PSE_DRAFT_DECISION_AUDIT_PATH",
+                    "data/product/decision_audit/draft_decisions.jsonl",
+                ),
+                qualification=qualification,
+                trust=trust,
+                survival_model=survival_metadata,
+                room_simulations=room_simulations,
+                recorded_at=now,
+            )
+        else:
+            audit = {
+                "requested": False,
+                "status": "DISABLED",
+                "decision_id": None,
+                "written": False,
+                "path": None,
+                "error": None,
+            }
 
         return {
             "league": {
@@ -121,8 +217,9 @@ def install_draft_reliability_routes(app: FastAPI, draft_service: DraftBoardServ
             "board": frame_records(reliable.head(max(1, min(int(limit), 1000)))),
             "readiness": readiness.as_dict(),
             "qualification": qualification.as_dict(),
+            "audit": audit,
             "trust": trust,
-            "survival_model": survival_artifact_metadata(survival),
+            "survival_model": survival_metadata,
             "research": {
                 "room_challenger_promoted": False,
                 "room_simulations": int(room_simulations),
