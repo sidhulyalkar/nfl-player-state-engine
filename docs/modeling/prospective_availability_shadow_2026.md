@@ -2,9 +2,11 @@
 
 ## Purpose
 
-This lane exists to create a genuinely prospective confirmation dataset for official injury and practice evidence during the 2026 regular season.
+This lane exists to create a genuinely prospective observation dataset for official injury and practice evidence during the 2026 regular season.
 
-The historical v3 experiment is post-hoc by construction: its current-week formulation was designed after observing the failed v2 result. A historical v3 winner therefore cannot become activation-eligible from the same 2020-2024 universe. The 2026 shadow lane solves that problem by freezing the evidence that was actually available to this project before each game's prediction cutoff.
+The historical v3 experiment was post-hoc by construction: its current-week formulation was designed after observing the failed v2 result. The completed v3 artifact subsequently rejected **all three** registered formulations (`practice_current_week`, `game_designation_current_week`, and `combined_current_week`). None passed the exploratory predictive screen, and none is eligible for prospective confirmation or activation review.
+
+The 2026 shadow lane remains useful for a different reason: it freezes the evidence that was actually available to this project before each game's prediction cutoff. Those immutable observations can support future **materially new, preregistered** availability or participation hypotheses without reconstructing publication history after outcomes are known.
 
 Everything produced here has authority `prospective_shadow_evidence_only`. It cannot alter production projections, player rankings, draft values, or the activation registry.
 
@@ -14,7 +16,7 @@ Everything produced here has authority `prospective_shadow_evidence_only`. It ca
 
 For every source snapshot, the system records `source_collected_at_utc` from the machine clock at download time. Publisher metadata such as `date_modified` is retained for audit, but it cannot backdate evidence availability.
 
-A row is eligible for a future prospective confirmation only when:
+A row is eligible for a future prospective evaluation only when:
 
 ```text
 source_collected_at_utc <= kickoff_utc - 1.5 hours
@@ -30,7 +32,7 @@ Historical archives answer: "What does the final archive say happened?"
 
 The prospective shadow answers: "What bytes had this project actually observed by the decision time?"
 
-That distinction matters when mutable feeds are corrected, republished, delayed, or unavailable. The 2026 confirmation dataset must never infer an earlier availability time from a later download.
+That distinction matters when mutable feeds are corrected, republished, delayed, or unavailable. The 2026 observation dataset must never infer an earlier availability time from a later download.
 
 ## Snapshot contents
 
@@ -76,7 +78,7 @@ For every scheduled team, `manifest.json` records a `team_observation` entry con
 
 The manifest also records `scheduled_teams`, `teams_with_source_rows`, and `conservative_team_row_observation_rate`.
 
-A scheduled team with zero source rows is deliberately **not** interpreted as a clean injury report. It may mean no listed injuries, a delayed team report, or incomplete upstream coverage. Later confirmation must keep that state unresolved unless report completeness is established independently.
+A scheduled team with zero source rows is deliberately **not** interpreted as a clean injury report. It may mean no listed injuries, a delayed team report, or incomplete upstream coverage. Later evaluation must keep that state unresolved unless report completeness is established independently.
 
 This mirrors the fail-closed philosophy of the historical corpus: absence of evidence is never promoted into evidence of health merely because a file downloaded successfully.
 
@@ -106,13 +108,13 @@ For each player evidence row it stores:
 - 1.5-hour prediction cutoff;
 - `usable_before_cutoff`.
 
-The prospective confirmation model will later derive its treatment features from these immutable snapshots. The collector itself does not score or model players.
+A future preregistered model may derive treatment features from these immutable snapshots. The collector itself does not score or model players.
 
 ## Capture cadence
 
 The initial workflow is deliberately **manual-only**. Before the regular season begins, this avoids generating meaningless off-season artifacts or silently creating a cadence we have not audited.
 
-During the season, the safest collection policy is multiple immutable captures during each reporting week, including one sufficiently close to the 1.5-hour cutoff. Later confirmation should select the latest capture that was actually collected before each game's cutoff.
+During the season, the safest collection policy is multiple immutable captures during each reporting week, including one sufficiently close to the 1.5-hour cutoff. A later preregistered evaluation should select the latest capture that was actually collected before each game's cutoff.
 
 A scheduled capture workflow can be added only after the manual path is qualified and the 2026 source URL is observed to be stable enough for unattended collection.
 
@@ -129,7 +131,7 @@ This keeps CI economical without discarding a real point-in-time scientific obse
 
 GitHub Actions artifacts are useful operational transport but are not permanent scientific storage. The initial workflow uses them to qualify the collector and capture snapshots, but 90-day artifact retention is not a sufficient season-long archival strategy.
 
-Before relying on this lane for end-of-season confirmation, the project should add durable immutable storage with the same SHA-addressed snapshot contract. Until then, the raw snapshot directory produced by each run is the scientific payload, while the Actions artifact is only its temporary carrier.
+Before relying on this lane for end-of-season prospective evaluation, the project should add durable immutable storage with the same SHA-addressed snapshot contract. Until then, the raw snapshot directory produced by each run is the scientific payload, while the Actions artifact is only its temporary carrier.
 
 ## Manual workflow
 
@@ -157,8 +159,16 @@ python scripts/capture_prospective_availability_snapshot.py \
 
 Do not manually substitute an old collection timestamp. The CLI intentionally derives collection time from `datetime.now(UTC)`.
 
-## Confirmation boundary
+## Evaluation boundary after the negative v3 result
 
-A later prospective confirmation must be preregistered before outcome settlement and must evaluate the exact v3 formulation that survived the historical exploratory screen. It should not re-search practice/game feature combinations on 2026 outcomes.
+There is **no surviving v3 formulation to confirm prospectively**. The 2026 shadow data must therefore not be used to keep re-searching the same practice/game feature combinations until one appears favorable.
 
-Passing that untouched prospective test can make the formulation eligible for **manual activation review**. It still must not auto-promote.
+Any later predictive evaluation must be preregistered before outcome settlement and must state a materially different hypothesis, for example:
+
+- explicit probability-of-active / participation modeling rather than a generic residual feature;
+- hard game-status gating with a separately calibrated missingness policy;
+- a participation head whose output feeds opportunity models rather than direct fantasy-point residual adjustment.
+
+The hypothesis, feature semantics, cutoffs, baselines, negative controls, multiplicity policy, and promotion threshold must be frozen before scoring 2026 outcomes.
+
+A successful future prospective experiment may become eligible for **manual activation review** under its own registered contract. It still must not auto-promote.
