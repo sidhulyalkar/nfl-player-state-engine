@@ -130,12 +130,15 @@ def build_artifact_bundle(
     """
 
     root = Path(bundle_root)
+    normalized_target = target.strip() if isinstance(target, str) and target.strip() else None
     if not files:
         raise ValueError("An artifact bundle requires at least one file.")
     if not artifact_type.strip():
         raise ValueError("artifact_type must be non-empty.")
     if activation_eligible and authority != "production_approved":
         raise ValueError("Only production_approved bundles may be activation eligible.")
+    if activation_eligible and normalized_target is None:
+        raise ValueError("Activation-eligible production bundles must declare an exact target.")
 
     records: list[ArtifactFileRecord] = []
     for role, raw_path in sorted(files.items()):
@@ -162,7 +165,7 @@ def build_artifact_bundle(
         authority=authority,
         activation_eligible=bool(activation_eligible),
         model_id=model_id,
-        target=target,
+        target=normalized_target,
         code_sha=code_sha,
         config_sha256=config_sha256,
         source_cutoff_utc=source_cutoff_utc,
@@ -190,11 +193,7 @@ def verify_artifact_bundle(
         available = path.is_file()
         actual_sha = sha256_file(path) if available else None
         actual_bytes = path.stat().st_size if available else None
-        matches = (
-            available
-            and actual_sha == record.sha256
-            and actual_bytes == record.bytes
-        )
+        matches = available and actual_sha == record.sha256 and actual_bytes == record.bytes
         if not available:
             failures.append(f"missing:{record.role}")
         elif actual_sha != record.sha256:
@@ -251,12 +250,12 @@ def save_artifact_bundle_manifest(
         with path.open("x", encoding="utf-8") as handle:
             handle.write(payload)
             handle.write("\n")
-    except FileExistsError:
+    except FileExistsError as exc:
         existing = ArtifactBundleManifest.model_validate_json(path.read_text(encoding="utf-8"))
         if existing.identity_payload() != manifest.identity_payload():
             raise ArtifactIntegrityError(
                 f"Bundle ID {manifest.bundle_id} already exists with a different immutable identity."
-            )
+            ) from exc
     return path
 
 
@@ -303,7 +302,8 @@ def promote_artifact_bundle(
 ) -> ChampionPointer:
     """Move a champion pointer only after explicit human/manual approval and byte verification."""
 
-    if not target.strip():
+    normalized_target = target.strip()
+    if not normalized_target:
         raise ValueError("target must be non-empty.")
     if not approved_by.strip():
         raise ValueError("approved_by is required; automatic promotion is prohibited.")
@@ -316,13 +316,13 @@ def promote_artifact_bundle(
         )
     if not manifest.activation_eligible:
         raise PermissionError(f"Bundle {bundle_id} is not activation eligible.")
-    if manifest.target and manifest.target != target:
+    if manifest.target != normalized_target:
         raise ValueError(
-            f"Bundle target {manifest.target!r} does not match champion target {target!r}."
+            f"Bundle target {manifest.target!r} does not match champion target {normalized_target!r}."
         )
 
     pointer = load_champion_pointer(registry_root)
-    pointer.champions[target] = ChampionRecord(
+    pointer.champions[normalized_target] = ChampionRecord(
         bundle_id=bundle_id,
         approved_by=approved_by.strip(),
         note=note,
@@ -336,14 +336,18 @@ def resolve_champion_bundle(
     bundle_root: str | Path,
     target: str,
 ) -> ArtifactBundleManifest:
+    normalized_target = target.strip()
+    if not normalized_target:
+        raise ValueError("target must be non-empty.")
     pointer = load_champion_pointer(registry_root)
-    record = pointer.champions.get(target)
+    record = pointer.champions.get(normalized_target)
     if record is None:
-        raise KeyError(f"No champion bundle registered for target {target!r}.")
+        raise KeyError(f"No champion bundle registered for target {normalized_target!r}.")
     manifest = load_artifact_bundle_manifest(registry_root, record.bundle_id)
     require_valid_bundle(manifest, bundle_root)
-    if manifest.target and manifest.target != target:
+    if manifest.target != normalized_target:
         raise ArtifactIntegrityError(
-            f"Champion pointer target {target!r} resolves to bundle target {manifest.target!r}."
+            f"Champion pointer target {normalized_target!r} resolves to bundle target "
+            f"{manifest.target!r}."
         )
     return manifest
