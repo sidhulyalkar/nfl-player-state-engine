@@ -16,6 +16,7 @@ import {
 } from '../lib/draftApi';
 import { Copilot } from './Copilot';
 import '../decision-console.css';
+import '../draft-qualification.css';
 
 const ACTIVE = new Set(['pre_draft', 'drafting', 'in_progress']);
 const POSITIONS = ['ALL', 'QB', 'RB', 'WR', 'TE'];
@@ -87,6 +88,10 @@ function DetailMetric({ label, value, note }: { label: string; value: string; no
 
 function actionClass(action: string) {
   return action.toLowerCase().replaceAll(' ', '-');
+}
+
+function reasonLabel(reason: string) {
+  return reason.toLowerCase().replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 export function DraftDecisionConsole({ onOpenConsole }: { onOpenConsole: () => void }) {
@@ -287,6 +292,7 @@ export function DraftDecisionConsole({ onOpenConsole }: { onOpenConsole: () => v
   );
 
   const recommendation = board?.board[0];
+  const qualification = board?.qualification;
   const nextPickDistance = board?.draft_state.next_pick
     ? board.draft_state.next_pick - board.draft_state.current_pick
     : null;
@@ -319,6 +325,9 @@ export function DraftDecisionConsole({ onOpenConsole }: { onOpenConsole: () => v
     setNeedsSlot(false);
   }
 
+  const qualificationReason = qualification?.blocking_reasons[0]
+    ?? qualification?.caution_reasons[0];
+
   return <div className="decision-console">
     <header className="decision-topbar">
       <div className="decision-brand"><div className="decision-mark">4D</div><div><span>FOURTH DOWN LAB</span><strong>Decision Console</strong></div></div>
@@ -331,7 +340,7 @@ export function DraftDecisionConsole({ onOpenConsole }: { onOpenConsole: () => v
         </select></label>
       </div>
       <div className="decision-state">
-        <span className={`live-state ${board?.is_stale ? 'stale' : ''}`}>{board?.is_stale ? 'STALE' : board ? 'LIVE' : 'CONNECTING'}</span>
+        <span className={`live-state ${qualification?.status === 'BLOCKED' || board?.is_stale ? 'stale' : qualification?.status === 'CAUTION' ? 'caution' : ''}`}>{qualification?.status ?? (board?.is_stale ? 'STALE' : board ? 'LIVE' : 'CONNECTING')}</span>
         <strong>{board?.league.format_label ?? 'Loading league rules'}</strong>
         <small>Pick {board?.draft_state.current_pick ?? '—'} · next {board?.draft_state.next_pick ?? '—'}</small>
       </div>
@@ -365,7 +374,7 @@ export function DraftDecisionConsole({ onOpenConsole }: { onOpenConsole: () => v
         <ConfidenceRing value={recommendation?.draft_reliability_score}/>
         <div className="trust-copy"><span>Decision confidence</span><strong>{recommendation?.draft_reliability ?? (reliabilityAvailable ? 'CALCULATING' : 'BASELINE')}</strong><small>{recommendation?.projection_freshness_status ? `Projection data ${recommendation.projection_freshness_status.toLowerCase()}` : 'Confidence stays separate from player quality.'}</small></div>
         <div className="turn-card"><div><Clock3 size={15}/><span>Next decision window</span></div><strong>{nextPickDistance == null ? '—' : `${nextPickDistance} picks`}</strong><small>{board?.draft_state.next_pick ? `Your next turn is pick ${board.draft_state.next_pick}.` : 'Turn timing unavailable.'}</small></div>
-        <div className="readiness-card"><div><Gauge size={15}/><span>League readiness</span></div><strong>{board?.readiness ? Math.round(board.readiness.score) : '—'}</strong><small>{board?.readiness?.ready ? 'Core inputs ready for decisions.' : board?.readiness?.flags?.slice(0, 2).join(' · ') || 'Readiness audit unavailable.'}</small></div>
+        <div className={`readiness-card ${qualification?.status.toLowerCase() ?? ''}`}><div><Gauge size={15}/><span>{qualification ? 'Draft qualification' : 'League readiness'}</span></div><strong>{qualification?.status ?? (board?.readiness ? Math.round(board.readiness.score) : '—')}</strong><small>{qualification ? (qualificationReason ? reasonLabel(qualificationReason) : `Inputs ${Math.round(qualification.readiness_score)} · projections and room state fresh.`) : board?.readiness?.ready ? 'Core inputs ready for decisions.' : board?.readiness?.flags?.slice(0, 2).join(' · ') || 'Readiness audit unavailable.'}</small></div>
       </aside>
     </section>
 
@@ -416,8 +425,8 @@ export function DraftDecisionConsole({ onOpenConsole }: { onOpenConsole: () => v
 
         <section className="decision-panel data-panel">
           <div className="section-heading compact"><div><span>TRUST LAYER</span><h2>Can I act on this?</h2></div><ShieldCheck size={18}/></div>
-          <div className="data-checks"><div><span>Scoring translation</span><strong className={scoringExact ? 'ok' : 'warn'}>{scoringExact ? 'Exact' : 'Partial'}</strong></div><div><span>Projection freshness</span><strong className={recommendation?.projection_freshness_status === 'FRESH' ? 'ok' : 'warn'}>{recommendation?.projection_freshness_status ?? 'Unknown'}</strong></div><div><span>External expert sources</span><strong>{externalSources}</strong></div><div><span>Room challenger</span><strong>{reliabilityAvailable ? 'Shadow only' : 'Unavailable'}</strong></div><div><span>Survival model</span><strong>{board?.survival_model.source === 'empirical' ? 'Empirical' : 'ADP fallback'}</strong></div></div>
-          {board?.readiness?.flags?.length ? <p className="data-flags">{board.readiness.flags.slice(0, 3).join(' · ')}</p> : <p className="data-flags good">No hard readiness flags.</p>}
+          <div className="data-checks"><div><span>Draft qualification</span><strong className={qualification?.status === 'READY' ? 'ok' : qualification?.status === 'BLOCKED' ? 'bad' : 'warn'}>{qualification?.status ?? 'Unknown'}</strong></div><div><span>Scoring translation</span><strong className={scoringExact ? 'ok' : 'warn'}>{scoringExact ? 'Exact' : 'Partial'}</strong></div><div><span>Projection freshness</span><strong className={recommendation?.projection_freshness_status === 'FRESH' ? 'ok' : 'warn'}>{recommendation?.projection_freshness_status ?? 'Unknown'}</strong></div><div><span>External expert sources</span><strong>{externalSources}</strong></div><div><span>Room challenger</span><strong>{reliabilityAvailable ? 'Shadow only' : 'Unavailable'}</strong></div><div><span>Survival model</span><strong>{board?.survival_model.source === 'empirical' ? 'Empirical' : 'ADP fallback'}</strong></div></div>
+          {qualification?.blocking_reasons.length ? <p className="data-flags blocked">{qualification.blocking_reasons.map(reasonLabel).slice(0, 3).join(' · ')}</p> : qualification?.caution_reasons.length ? <p className="data-flags">{qualification.caution_reasons.map(reasonLabel).slice(0, 3).join(' · ')}</p> : board?.readiness?.flags?.length ? <p className="data-flags">{board.readiness.flags.slice(0, 3).join(' · ')}</p> : <p className="data-flags good">No hard readiness flags.</p>}
         </section>
 
         <section className="decision-panel room-panel">
