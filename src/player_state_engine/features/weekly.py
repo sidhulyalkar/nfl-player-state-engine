@@ -62,6 +62,28 @@ CURRENT_OUTCOME_COLUMNS = (
     | {"attempts", "carries_inside_10", "targets_inside_10"}
 )
 
+_SCHEDULE_CONTEXT_DEFAULTS: dict[str, object] = {
+    "is_home": 0,
+    "spread_line": np.nan,
+    "total_line": np.nan,
+    "team_rest": np.nan,
+    "opponent_rest": np.nan,
+    "roof": "unknown",
+    "surface": "unknown",
+    "temp": np.nan,
+    "wind": np.nan,
+}
+
+
+def _ensure_schedule_context_defaults(frame: pd.DataFrame) -> pd.DataFrame:
+    """Guarantee optional schedule context exists whether or not the source publishes it."""
+
+    data = frame.copy()
+    for column, default in _SCHEDULE_CONTEXT_DEFAULTS.items():
+        if column not in data.columns:
+            data[column] = default
+    return data
+
 
 def _first_present(frame: pd.DataFrame, candidates: Iterable[str]) -> str | None:
     return next((name for name in candidates if name in frame.columns), None)
@@ -222,21 +244,7 @@ def schedule_to_team_rows(schedules: pd.DataFrame) -> pd.DataFrame:
 
 def merge_schedule_context(stats: pd.DataFrame, schedules: pd.DataFrame | None) -> pd.DataFrame:
     if schedules is None or schedules.empty:
-        data = stats.copy()
-        for column, default in {
-            "is_home": 0,
-            "spread_line": np.nan,
-            "total_line": np.nan,
-            "team_rest": np.nan,
-            "opponent_rest": np.nan,
-            "roof": "unknown",
-            "surface": "unknown",
-            "temp": np.nan,
-            "wind": np.nan,
-        }.items():
-            if column not in data.columns:
-                data[column] = default
-        return data
+        return _ensure_schedule_context_defaults(stats)
 
     team_schedule = schedule_to_team_rows(schedules)
     existing_schedule_columns = {
@@ -265,7 +273,8 @@ def merge_schedule_context(stats: pd.DataFrame, schedules: pd.DataFrame | None) 
         merged["opponent_team"] = (
             merged["opponent_team"].replace({"": np.nan}).fillna(merged["schedule_opponent"])
         )
-    return merged.drop(columns=["schedule_opponent"], errors="ignore")
+    merged = merged.drop(columns=["schedule_opponent"], errors="ignore")
+    return _ensure_schedule_context_defaults(merged)
 
 
 def _shifted_rolling(series: pd.Series, window: int, statistic: str) -> pd.Series:
@@ -418,10 +427,10 @@ def build_weekly_features(
         data.get("opponent_rest"), errors="coerce"
     )
     data["is_dome"] = (
-        data.get("roof", "unknown").astype(str).str.lower().isin({"dome", "closed"}).astype(int)
+        data["roof"].astype(str).str.lower().isin({"dome", "closed"}).astype(int)
     )
     data["is_grass"] = (
-        data.get("surface", "unknown").astype(str).str.lower().str.contains("grass").astype(int)
+        data["surface"].astype(str).str.lower().str.contains("grass").astype(int)
     )
     data["week_sin"] = np.sin(2 * np.pi * data["week"] / 18.0)
     data["week_cos"] = np.cos(2 * np.pi * data["week"] / 18.0)
