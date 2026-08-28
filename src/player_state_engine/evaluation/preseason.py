@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
-from math import ceil
 
 import numpy as np
 import pandas as pd
@@ -92,7 +91,13 @@ def _cohort_quantiles(
     for row_index, row in output.iterrows():
         cohort = by_cohort.get((str(row["position"]), int(row["rookie"])), np.array([]))
         position_values = by_position.get(str(row["position"]), np.array([]))
-        values = cohort if len(cohort) >= 25 else position_values if len(position_values) >= 25 else global_values
+        values = (
+            cohort
+            if len(cohort) >= 25
+            else position_values
+            if len(position_values) >= 25
+            else global_values
+        )
         predictions[row_index] = _clip_monotonic(np.quantile(values, quantiles))
     for index, quantile in enumerate(quantiles):
         output[f"{target}_q{int(round(quantile * 100)):02d}"] = predictions[:, index]
@@ -113,20 +118,24 @@ def _prior_season_baseline(
     rostered = pd.to_numeric(test.get("prior1_rostered", 0), errors="coerce").fillna(0).gt(0)
     prior_test = pd.to_numeric(test.get(prior_column), errors="coerce")
 
-    train_rostered = pd.to_numeric(train.get("prior1_rostered", 0), errors="coerce").fillna(0).gt(0)
+    train_rostered = (
+        pd.to_numeric(train.get("prior1_rostered", 0), errors="coerce").fillna(0).gt(0)
+    )
     train_prior = pd.to_numeric(train.get(prior_column), errors="coerce")
     train_actual = pd.to_numeric(train[target], errors="coerce")
-    residual_frame = train.loc[train_rostered & train_prior.notna() & train_actual.notna(), ["position"]].copy()
+    residual_frame = train.loc[
+        train_rostered & train_prior.notna() & train_actual.notna(), ["position"]
+    ].copy()
     residual_frame["residual"] = (
         train_actual.loc[residual_frame.index] - train_prior.loc[residual_frame.index]
     )
 
+    rostered = rostered.reset_index(drop=True)
+    prior_test = prior_test.reset_index(drop=True)
     for row_index, row in test.reset_index(drop=True).iterrows():
-        if not bool(rostered.reset_index(drop=True).iloc[row_index]) or pd.isna(
-            prior_test.reset_index(drop=True).iloc[row_index]
-        ):
+        if not bool(rostered.iloc[row_index]) or pd.isna(prior_test.iloc[row_index]):
             continue
-        base = float(prior_test.reset_index(drop=True).iloc[row_index])
+        base = float(prior_test.iloc[row_index])
         position_residuals = residual_frame.loc[
             residual_frame["position"].eq(row["position"]), "residual"
         ].to_numpy(dtype=float)
@@ -139,7 +148,9 @@ def _prior_season_baseline(
             continue
         values = _clip_monotonic(base + np.quantile(residuals, quantiles))
         for q_index, quantile in enumerate(quantiles):
-            output.loc[row_index, f"{target}_q{int(round(quantile * 100)):02d}"] = values[q_index]
+            output.loc[row_index, f"{target}_q{int(round(quantile * 100)):02d}"] = values[
+                q_index
+            ]
     return output
 
 
@@ -179,7 +190,9 @@ def _long_predictions(
     method: str,
     quantiles: tuple[float, ...],
 ) -> pd.DataFrame:
-    context = test[["season", "player_id", "player_name", "position", "recent_team", "rookie"]].copy().reset_index(drop=True)
+    context = test[
+        ["season", "player_id", "player_name", "position", "recent_team", "rookie"]
+    ].copy().reset_index(drop=True)
     context["target"] = target
     context["method"] = method
     context["actual"] = pd.to_numeric(test[target], errors="coerce").to_numpy(dtype=float)
@@ -195,7 +208,9 @@ def _mean_row_pinball(frame: pd.DataFrame, quantiles: tuple[float, ...]) -> floa
     losses = []
     actual = frame["actual"].to_numpy(dtype=float)
     for quantile in quantiles:
-        prediction = frame[f"prediction_q{int(round(quantile * 100)):02d}"].to_numpy(dtype=float)
+        prediction = frame[
+            f"prediction_q{int(round(quantile * 100)):02d}"
+        ].to_numpy(dtype=float)
         losses.append(mean_pinball_loss(actual, prediction, alpha=quantile))
     return float(np.mean(losses))
 
@@ -214,14 +229,19 @@ def _season_bootstrap(
         & predictions["method"].isin([_METHOD_ENGINE, baseline])
     ].copy()
     effects: list[float] = []
-    for season, group in subset.groupby("season", sort=True):
+    for _season, group in subset.groupby("season", sort=True):
         engine = group.loc[group["method"].eq(_METHOD_ENGINE)]
         base = group.loc[group["method"].eq(baseline)]
         if engine.empty or base.empty:
             continue
         effects.append(_mean_row_pinball(base, quantiles) - _mean_row_pinball(engine, quantiles))
     if not effects:
-        return {"effect": float("nan"), "ci_low": float("nan"), "ci_high": float("nan"), "p_value": float("nan")}
+        return {
+            "effect": float("nan"),
+            "ci_low": float("nan"),
+            "ci_high": float("nan"),
+            "p_value": float("nan"),
+        }
     values = np.asarray(effects, dtype=float)
     rng = np.random.default_rng(seed)
     draws = np.empty(max(1, int(samples)), dtype=float)
@@ -262,10 +282,18 @@ def _evaluate_gate(
 
     baseline = str(primary_row["best_baseline"])
     season = season_metrics.loc[season_metrics["target"].eq(primary)].copy()
-    engine_season = season.loc[season["method"].eq(_METHOD_ENGINE), ["season", "mean_pinball"]]
-    base_season = season.loc[season["method"].eq(baseline), ["season", "mean_pinball"]]
+    engine_season = season.loc[
+        season["method"].eq(_METHOD_ENGINE), ["season", "mean_pinball"]
+    ]
+    base_season = season.loc[
+        season["method"].eq(baseline), ["season", "mean_pinball"]
+    ]
     paired = engine_season.merge(base_season, on="season", suffixes=("_engine", "_baseline"))
-    win_rate = float((paired["mean_pinball_engine"] < paired["mean_pinball_baseline"]).mean()) if len(paired) else 0.0
+    win_rate = (
+        float((paired["mean_pinball_engine"] < paired["mean_pinball_baseline"]).mean())
+        if len(paired)
+        else 0.0
+    )
     metrics["primary_season_win_rate"] = win_rate
     if win_rate < policy.min_primary_season_win_rate:
         blockers.append("PRIMARY_SEASON_WIN_RATE_BELOW_THRESHOLD")
@@ -278,7 +306,9 @@ def _evaluate_gate(
         samples=policy.bootstrap_samples,
         seed=policy.random_state,
     )
-    metrics.update({f"primary_season_bootstrap_{key}": value for key, value in bootstrap.items()})
+    metrics.update(
+        {f"primary_season_bootstrap_{key}": value for key, value in bootstrap.items()}
+    )
     if policy.require_positive_season_bootstrap_ci and not bootstrap["ci_low"] > 0.0:
         blockers.append("PRIMARY_SEASON_BOOTSTRAP_CI_NOT_POSITIVE")
 
@@ -360,10 +390,12 @@ def run_preseason_season_benchmark(
             eligible_test = _eligible(test, target).reset_index(drop=True)
             if eligible_test.empty:
                 continue
-            eligible_index = test.reset_index(drop=True)["position"].isin(
-                TARGET_POSITIONS.get(target, set(test["position"].unique()))
-            )
-            engine_target = engine.loc[eligible_index].reset_index(drop=True)
+            eligible_positions = TARGET_POSITIONS.get(target)
+            if eligible_positions:
+                eligible_index = test.reset_index(drop=True)["position"].isin(eligible_positions)
+            else:
+                eligible_index = pd.Series(True, index=range(len(test)))
+            engine_target = engine.loc[eligible_index.to_numpy()].reset_index(drop=True)
             prior = _prior_season_baseline(train, eligible_test, target, quantiles)
             position = _cohort_quantiles(train, eligible_test, target, quantiles)
             parts.extend(
@@ -394,9 +426,15 @@ def run_preseason_season_benchmark(
 
     predictions = pd.concat(parts, ignore_index=True)
     summary = _metric_rows(predictions, group_columns=(), quantiles=quantiles)
-    season_metrics = _metric_rows(predictions, group_columns=("season",), quantiles=quantiles)
-    position_metrics = _metric_rows(predictions, group_columns=("position",), quantiles=quantiles)
-    rookie_metrics = _metric_rows(predictions, group_columns=("rookie",), quantiles=quantiles)
+    season_metrics = _metric_rows(
+        predictions, group_columns=("season",), quantiles=quantiles
+    )
+    position_metrics = _metric_rows(
+        predictions, group_columns=("position",), quantiles=quantiles
+    )
+    rookie_metrics = _metric_rows(
+        predictions, group_columns=("rookie",), quantiles=quantiles
+    )
 
     comparison_rows: list[dict[str, object]] = []
     for target, group in summary.groupby("target", sort=False):
@@ -418,8 +456,12 @@ def run_preseason_season_benchmark(
                 "pinball_improvement_pct": float(improvement),
                 "engine_mae": float(engine.get("mae", np.nan)),
                 "baseline_mae": float(baseline.get("mae", np.nan)),
-                "engine_interval_coverage": float(engine.get("interval_coverage", np.nan)),
-                "baseline_interval_coverage": float(baseline.get("interval_coverage", np.nan)),
+                "engine_interval_coverage": float(
+                    engine.get("interval_coverage", np.nan)
+                ),
+                "baseline_interval_coverage": float(
+                    baseline.get("interval_coverage", np.nan)
+                ),
             }
         )
     comparisons = pd.DataFrame(comparison_rows)
