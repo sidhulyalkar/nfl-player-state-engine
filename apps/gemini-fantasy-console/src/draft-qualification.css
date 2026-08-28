@@ -1,0 +1,21 @@
+.live-state.caution {
+  color: var(--dc-amber);
+  background: rgba(243, 200, 121, 0.1);
+}
+
+.readiness-card.ready strong {
+  color: var(--dc-mint);
+}
+
+.readiness-card.caution strong {
+  color: var(--dc-amber);
+}
+
+.readiness-card.blocked strong {
+  color: var(--dc-red);
+}
+
+.data-checks strong.bad,
+.data-flags.blocked {
+  color: var(--dc-red);
+}
