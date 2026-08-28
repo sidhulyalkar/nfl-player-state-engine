@@ -1,0 +1,72 @@
+name: Preseason season-distribution benchmark
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/preseason-season-benchmark.yml"
+      - "src/player_state_engine/fantasy/preseason.py"
+      - "src/player_state_engine/evaluation/preseason.py"
+      - "src/player_state_engine/models/quantile.py"
+      - "scripts/run_preseason_season_benchmark.py"
+      - "tests/test_preseason_season_model.py"
+      - "docs/modeling/preseason_season_model.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preseason-season-benchmark-${{ github.event.pull_request.number || format('manual-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install qualification environment
+        run: python -m pip install -e '.[dev]'
+      - name: Qualify preseason contracts
+        run: |
+          ruff check \
+            src/player_state_engine/fantasy/preseason.py \
+            src/player_state_engine/evaluation/preseason.py \
+            src/player_state_engine/models/quantile.py \
+            scripts/run_preseason_season_benchmark.py \
+            tests/test_preseason_season_model.py
+          python -m compileall -q \
+            src/player_state_engine/fantasy/preseason.py \
+            src/player_state_engine/evaluation/preseason.py \
+            scripts/run_preseason_season_benchmark.py \
+            tests/test_preseason_season_model.py
+          python scripts/run_preseason_season_benchmark.py --help >/dev/null
+          pytest -q tests/test_preseason_season_model.py
+
+  benchmark:
+    if: github.event_name == 'workflow_dispatch'
+    needs: qualify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install benchmark environment
+        run: python -m pip install -e .
+      - name: Run frozen 2015-2025 benchmark
+        run: |
+          python scripts/run_preseason_season_benchmark.py \
+            --acquire \
+            --seasons 2015 2016 2017 2018 2019 2020 2021 2022 2023 2024 2025 \
+            --output-dir artifacts/reports/preseason_season_benchmark
+      - name: Upload complete research evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: preseason-season-benchmark-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 90
+          path: artifacts/reports/preseason_season_benchmark
