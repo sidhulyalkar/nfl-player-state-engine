@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from player_state_engine.api.draft_routes import DraftBoardService
 from player_state_engine.fantasy.decision_board import DecisionType, build_decision_board
 from player_state_engine.fantasy.draft_advisor import augment_live_draft_board_with_reliability
+from player_state_engine.fantasy.draft_qualification import qualify_live_draft
 from player_state_engine.fantasy.draft_survival import (
     artifact_metadata as survival_artifact_metadata,
 )
@@ -84,6 +85,14 @@ def install_draft_reliability_routes(app: FastAPI, draft_service: DraftBoardServ
         now = datetime.now(UTC)
         stale_after = float(os.getenv("PSE_DRAFT_STALE_SECONDS", "60"))
         snapshot_age = max(0.0, (now - snapshot.identity.imported_at).total_seconds())
+        qualification = qualify_live_draft(
+            readiness,
+            projection_age_hours=projection_age_hours,
+            max_projection_age_hours=max_projection_age_hours,
+            snapshot_age_seconds=snapshot_age,
+            stale_after_seconds=stale_after,
+            refresh_warning=refresh_warning,
+        )
 
         return {
             "league": {
@@ -111,6 +120,7 @@ def install_draft_reliability_routes(app: FastAPI, draft_service: DraftBoardServ
             "recent_picks": picks[-16:],
             "board": frame_records(reliable.head(max(1, min(int(limit), 1000)))),
             "readiness": readiness.as_dict(),
+            "qualification": qualification.as_dict(),
             "trust": trust,
             "survival_model": survival_artifact_metadata(survival),
             "research": {
@@ -127,6 +137,6 @@ def install_draft_reliability_routes(app: FastAPI, draft_service: DraftBoardServ
             "snapshot_imported_at": snapshot.identity.imported_at.isoformat(),
             "snapshot_age_seconds": snapshot_age,
             "stale_after_seconds": stale_after,
-            "is_stale": snapshot_age > stale_after,
+            "is_stale": not qualification.live_snapshot_fresh,
             "generated_at": now.isoformat(),
         }
