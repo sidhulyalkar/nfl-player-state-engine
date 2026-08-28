@@ -44,6 +44,15 @@ export interface DraftQualificationResponse {
   stale_after_seconds: number;
 }
 
+export interface DraftAuditCaptureResponse {
+  requested: boolean;
+  status: 'RECORDED' | 'DEDUPLICATED' | 'FAILED' | 'DISABLED' | string;
+  decision_id: string | null;
+  written: boolean;
+  path: string | null;
+  error: string | null;
+}
+
 export interface ReliableDraftBoardResponse extends Omit<DraftBoardResponse, 'board'> {
   board: ReliableDraftPlayer[];
   readiness?: {
@@ -63,6 +72,7 @@ export interface ReliableDraftBoardResponse extends Omit<DraftBoardResponse, 'bo
     valuation_coverage: number;
   };
   qualification?: DraftQualificationResponse;
+  audit?: DraftAuditCaptureResponse;
   research?: {
     room_challenger_promoted: boolean;
     room_simulations: number;
@@ -144,6 +154,7 @@ export const draftApi = {
       limit?: number;
       roomSimulations?: number;
       maxProjectionAgeHours?: number;
+      captureAudit?: boolean;
       signal?: AbortSignal;
     } = {},
   ) => request<ReliableDraftBoardResponse>(
@@ -156,6 +167,7 @@ export const draftApi = {
       limit: options.limit ?? 250,
       room_simulations: options.roomSimulations ?? 600,
       max_projection_age_hours: options.maxProjectionAgeHours ?? 24,
+      capture_audit: options.captureAudit ?? true,
     })}`,
     { signal: options.signal },
   ),
