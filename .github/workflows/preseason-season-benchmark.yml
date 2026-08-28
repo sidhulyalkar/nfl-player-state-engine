@@ -9,6 +9,21 @@ on:
       - "src/player_state_engine/models/quantile.py"
       - "scripts/run_preseason_season_benchmark.py"
       - "tests/test_preseason_season_model.py"
+      - "tests/test_preseason_roster_status_semantics.py"
+      - "tests/test_preseason_status_family_guards.py"
+      - "docs/modeling/preseason_season_model.md"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/preseason-season-benchmark.yml"
+      - "src/player_state_engine/fantasy/preseason.py"
+      - "src/player_state_engine/evaluation/preseason.py"
+      - "src/player_state_engine/models/quantile.py"
+      - "scripts/run_preseason_season_benchmark.py"
+      - "tests/test_preseason_season_model.py"
+      - "tests/test_preseason_roster_status_semantics.py"
+      - "tests/test_preseason_status_family_guards.py"
       - "docs/modeling/preseason_season_model.md"
   workflow_dispatch:
 
@@ -16,7 +31,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: preseason-season-benchmark-${{ github.event.pull_request.number || format('manual-{0}', github.run_id) }}
+  group: preseason-season-benchmark-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -36,14 +51,21 @@ jobs:
             src/player_state_engine/evaluation/preseason.py \
             src/player_state_engine/models/quantile.py \
             scripts/run_preseason_season_benchmark.py \
-            tests/test_preseason_season_model.py
+            tests/test_preseason_season_model.py \
+            tests/test_preseason_roster_status_semantics.py \
+            tests/test_preseason_status_family_guards.py
           python -m compileall -q \
             src/player_state_engine/fantasy/preseason.py \
             src/player_state_engine/evaluation/preseason.py \
             scripts/run_preseason_season_benchmark.py \
-            tests/test_preseason_season_model.py
+            tests/test_preseason_season_model.py \
+            tests/test_preseason_roster_status_semantics.py \
+            tests/test_preseason_status_family_guards.py
           python scripts/run_preseason_season_benchmark.py --help >/dev/null
-          pytest -q tests/test_preseason_season_model.py
+          pytest -q \
+            tests/test_preseason_season_model.py \
+            tests/test_preseason_roster_status_semantics.py \
+            tests/test_preseason_status_family_guards.py
 
   public-data-smoke:
     if: github.event_name == 'pull_request'
@@ -87,7 +109,7 @@ jobs:
           PY
 
   benchmark:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     needs: qualify
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -105,6 +127,7 @@ jobs:
             --seasons 2015 2016 2017 2018 2019 2020 2021 2022 2023 2024 2025 \
             --output-dir artifacts/reports/preseason_season_benchmark
       - name: Upload complete research evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: preseason-season-benchmark-${{ github.sha }}
