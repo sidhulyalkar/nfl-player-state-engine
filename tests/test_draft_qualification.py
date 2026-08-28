@@ -7,7 +7,6 @@ import pytest
 from player_state_engine.fantasy.draft_qualification import qualify_live_draft
 from player_state_engine.fantasy.readiness import LeagueReadinessReport
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
