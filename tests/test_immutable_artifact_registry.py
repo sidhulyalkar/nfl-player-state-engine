@@ -96,6 +96,18 @@ def test_tampered_bytes_fail_closed(tmp_path: Path) -> None:
     assert "sha256_mismatch:model" in health["failures"]
 
 
+def test_activation_eligible_bundle_requires_exact_target(tmp_path: Path) -> None:
+    files = _bundle_files(tmp_path / "bundle")
+    with pytest.raises(ValueError, match="declare an exact target"):
+        build_artifact_bundle(
+            tmp_path / "bundle",
+            files,
+            artifact_type="weekly_projection",
+            authority="production_approved",
+            activation_eligible=True,
+        )
+
+
 def test_research_or_challenger_bundle_cannot_be_promoted(tmp_path: Path) -> None:
     bundle_root = tmp_path / "bundle"
     registry_root = tmp_path / "registry"
@@ -147,6 +159,14 @@ def test_manual_promotion_requires_activation_eligibility_and_verifies_bundle(
             target="fantasy_points_ppr",
             bundle_id=manifest.bundle_id,
             approved_by="",
+        )
+    with pytest.raises(ValueError, match="does not match champion target"):
+        promote_artifact_bundle(
+            registry_root,
+            bundle_root,
+            target="passing_yards",
+            bundle_id=manifest.bundle_id,
+            approved_by="manual-review",
         )
 
     pointer = promote_artifact_bundle(
