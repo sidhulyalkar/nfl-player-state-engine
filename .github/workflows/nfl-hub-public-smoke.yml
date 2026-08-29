@@ -1,0 +1,77 @@
+name: NFL Hub public-data smoke
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/nfl-hub-public-smoke.yml"
+      - "src/player_state_engine/product/nfl_hub.py"
+      - "src/player_state_engine/api/nfl_hub_routes.py"
+      - "scripts/refresh_nfl_hub.py"
+      - "tests/test_nfl_hub.py"
+      - "tests/test_nfl_hub_market_identity.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nfl-hub-public-smoke-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  public-data-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install runtime
+        run: python -m pip install -e .
+      - name: Refresh real 2026 NFL Hub sources
+        run: |
+          python scripts/refresh_nfl_hub.py \
+            --season 2026 \
+            --root artifacts/nfl_hub_public_smoke \
+            --projections artifacts/does-not-exist.csv
+      - name: Assert observational, roster, and market-identity contracts
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          snapshot = json.loads(
+              Path('artifacts/nfl_hub_public_smoke/current.json').read_text(encoding='utf-8')
+          )
+          assert snapshot['authority'] == 'observational_nfl_state_only'
+          assert snapshot['season'] == 2026
+          assert snapshot['player_count'] >= 500
+          assert snapshot['event_count'] == 0
+          health = {item['source']: item for item in snapshot['source_health']}
+          assert health['rosters']['required'] is True
+          assert health['rosters']['available'] is True
+          assert health['rosters']['rows'] >= 500
+          assert health['rankings']['available'] is True
+          assert health['playerids']['available'] is True
+
+          market = snapshot['market_identity']
+          assert market['authority'] == 'multi_id_exact_only_no_name_matching'
+          assert market['redraft_rows'] >= 100
+          assert market['resolved_redraft_rows'] >= 100
+          assert market['redraft_identity_coverage'] >= 0.10
+          assert market['usable_market_players'] >= 100
+          roster_market_rows = sum(
+              1 for player in snapshot['players'] if player.get('market_rank') is not None
+          )
+          assert roster_market_rows >= 100
+          assert 'rankings_identity' not in snapshot['optional_source_failures']
+          assert 'projection_q50' not in snapshot['players'][0] or snapshot['players'][0]['projection_q50'] is None
+          PY
+      - name: Upload source-health snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: nfl-hub-public-smoke-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: artifacts/nfl_hub_public_smoke/current.json

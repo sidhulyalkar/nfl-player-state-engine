@@ -13,6 +13,7 @@ from player_state_engine.api.draft_routes import install_draft_routes
 from player_state_engine.api.evidence_routes import install_evidence_routes
 from player_state_engine.api.game_intelligence_routes import install_game_intelligence_routes
 from player_state_engine.api.intelligence_routes import install_intelligence_routes
+from player_state_engine.api.nfl_hub_routes import install_nfl_hub_routes
 from player_state_engine.api.ranking_routes import install_ranking_routes
 from player_state_engine.api.shadow_season_routes import install_shadow_season_routes
 from player_state_engine.api.structured_intelligence_routes import (
@@ -54,6 +55,7 @@ def create_app(**kwargs: Any) -> FastAPI:
         "shadow_season_root",
         "structured_intelligence_root",
         "intelligence_activation_registry",
+        "nfl_hub_root",
     }
     base_kwargs = {key: value for key, value in kwargs.items() if key not in operational_only}
     app = create_base_app(**base_kwargs)
@@ -74,6 +76,11 @@ def create_app(**kwargs: Any) -> FastAPI:
         opportunity_root=kwargs.get("opportunity_root"),
         historical_source_root=kwargs.get("historical_source_root"),
         player_state_graph_root=kwargs.get("player_state_graph_root"),
+    )
+    install_nfl_hub_routes(
+        app,
+        root=kwargs.get("nfl_hub_root"),
+        projections_path=kwargs.get("projections_path"),
     )
     install_evidence_routes(
         app,
@@ -103,13 +110,13 @@ def create_app(**kwargs: Any) -> FastAPI:
     app.version = __version__
     _replace_health_version(app)
     app.description = (
-        f"{app.description} Live Draft War Room, player intelligence, cross-league portfolio "
-        "exposure, Player State Graph shadow comparison and sensitivity, frozen Evidence Factory, "
-        "immutable 2026 live shadow-season evidence, structured intelligence evidence ledger, "
-        "model observatory, ranking calibration, guarded draft reliability, guarded "
-        "game-intelligence simulation, expanding frozen replay, factorial attribution, "
-        "simulated-state opportunity, drive-volume, possession-transition, fourth-down decision, "
-        "and terminal-family research surfaces."
+        f"{app.description} Live Draft War Room, NFL Hub state-change intelligence, player "
+        "intelligence, cross-league portfolio exposure, Player State Graph shadow comparison "
+        "and sensitivity, frozen Evidence Factory, immutable 2026 live shadow-season evidence, "
+        "structured intelligence evidence ledger, model observatory, ranking calibration, guarded "
+        "draft reliability, guarded game-intelligence simulation, expanding frozen replay, "
+        "factorial attribution, simulated-state opportunity, drive-volume, possession-transition, "
+        "fourth-down decision, and terminal-family research surfaces."
     )
     return app
 
