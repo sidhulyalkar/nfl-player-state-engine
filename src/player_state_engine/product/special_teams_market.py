@@ -92,6 +92,11 @@ def _kicker_board(
     if kickers.empty:
         return kickers
 
+    # Keep market-listed team only as provenance. Cutdown-week roster truth is authoritative.
+    if "team" in kickers:
+        kickers = kickers.rename(columns={"team": "market_team"})
+        kickers["market_team"] = _team(kickers["market_team"])
+
     current = canonicalize_rosters(rosters, season=season)
     current = current.loc[
         current["position"].astype(str).str.upper().eq("K") & current["team"].notna()
@@ -109,26 +114,27 @@ def _kicker_board(
     kickers["position"] = "K"
     kickers["authority"] = SPECIAL_TEAMS_MARKET_AUTHORITY
     kickers["market_source"] = SPECIAL_TEAMS_MARKET_SOURCE
-    return kickers[
-        [
-            "entity_id",
-            "entity_type",
-            "position",
-            "player_id",
-            "player_name",
-            "team",
-            "roster_status",
-            "market_order",
-            "positional_ecr",
-            "rank_sd",
-            "best_rank",
-            "worst_rank",
-            "source_date",
-            "identity_source",
-            "market_source",
-            "authority",
-        ]
+    columns = [
+        "entity_id",
+        "entity_type",
+        "position",
+        "player_id",
+        "player_name",
+        "team",
+        "roster_status",
+        "market_order",
+        "positional_ecr",
+        "rank_sd",
+        "best_rank",
+        "worst_rank",
+        "source_date",
+        "identity_source",
+        "market_source",
+        "authority",
     ]
+    if "market_team" in kickers:
+        columns.insert(7, "market_team")
+    return kickers[columns]
 
 
 def _dst_board(rankings: pd.DataFrame) -> pd.DataFrame:
@@ -214,6 +220,7 @@ def build_special_teams_market(
         "note": (
             "Kicker and DST entries are redraft positional market consensus only. They are not "
             "production model projections, exact-scored fantasy distributions, VORP, or overall "
-            "draft ranks. DST identity is the NFL team; kicker identity is exact GSIS player ID."
+            "draft ranks. DST identity is the NFL team; kicker identity is exact GSIS player ID. "
+            "For kickers, current roster team is authoritative and market team is provenance only."
         ),
     }
