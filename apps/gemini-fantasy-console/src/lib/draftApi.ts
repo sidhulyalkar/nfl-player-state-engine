@@ -44,6 +44,28 @@ export interface DraftQualificationResponse {
   stale_after_seconds: number;
 }
 
+export interface DraftActionabilityResponse {
+  status: 'READY' | 'CAUTION' | 'BLOCKED' | string;
+  actionable: boolean;
+  blocking_reasons: string[];
+  caution_reasons: string[];
+  candidate_rows: number;
+  candidate_player_ids: string[];
+  candidate_positions: string[];
+  missing_candidate_player_ids: string[];
+  exact_scoring_coverage: number;
+  valuation_coverage: number;
+  market_coverage: number;
+  market_source: string | null;
+  global_league_ready: boolean | null;
+  global_readiness_score: number | null;
+  global_blocking_reasons: string[];
+  unsupported_required_positions: string[];
+  authority: 'candidate_scope_diagnostic_only' | string;
+  overrides_global_qualification: false;
+  candidate_limit: number;
+}
+
 export interface DraftAuditCaptureResponse {
   requested: boolean;
   status: 'RECORDED' | 'DEDUPLICATED' | 'FAILED' | 'DISABLED' | string;
@@ -72,6 +94,7 @@ export interface ReliableDraftBoardResponse extends Omit<DraftBoardResponse, 'bo
     valuation_coverage: number;
   };
   qualification?: DraftQualificationResponse;
+  actionability?: DraftActionabilityResponse;
   audit?: DraftAuditCaptureResponse;
   research?: {
     room_challenger_promoted: boolean;
