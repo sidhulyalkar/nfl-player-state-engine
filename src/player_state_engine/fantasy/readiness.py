@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -42,6 +42,8 @@ class LeagueReadinessReport:
     market_source: str | None
     exact_scoring_coverage: float
     valuation_coverage: float
+    required_position_exact_scoring: dict[str, float] = field(default_factory=dict)
+    inexact_required_positions: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -84,6 +86,7 @@ def assess_league_readiness(
     minimum_exact_scoring_coverage: float = 0.80,
     minimum_valuation_coverage: float = 0.98,
     minimum_ready_score: float = 65.0,
+    minimum_required_position_exact_scoring_coverage: float = 0.80,
 ) -> LeagueReadinessReport:
     """Audit whether a projection pool is trustworthy for this league's draft decisions.
 
@@ -91,6 +94,11 @@ def assess_league_readiness(
     conventional 1QB league and unusable for a 2QB + DST + kicker format. The
     audit never manufactures missing positions or calls generic fantasy points an
     exact custom-league rescore.
+
+    Overall exact-scoring coverage is not sufficient on its own. Every position that can
+    legally occupy a starting slot must independently clear the required-position scoring
+    gate, otherwise a large skill-player population could dilute an entirely approximate
+    K/DST lane into an apparently healthy aggregate percentage.
     """
 
     if not 0.0 <= minimum_market_coverage <= 1.0:
@@ -101,6 +109,10 @@ def assess_league_readiness(
         raise ValueError("minimum_valuation_coverage must be between zero and one")
     if not 0.0 <= minimum_ready_score <= 100.0:
         raise ValueError("minimum_ready_score must be between zero and 100")
+    if not 0.0 <= minimum_required_position_exact_scoring_coverage <= 1.0:
+        raise ValueError(
+            "minimum_required_position_exact_scoring_coverage must be between zero and one"
+        )
 
     flags: list[str] = []
     blockers: list[str] = []
@@ -150,6 +162,8 @@ def assess_league_readiness(
 
     exact_scoring_coverage = 0.0
     valuation_coverage = 0.0
+    required_position_exact_scoring: dict[str, float] = {}
+    inexact_required_positions: tuple[str, ...] = ()
     if rows:
         try:
             scored = prepare_league_scoring_quantiles(projections, config)
@@ -160,7 +174,25 @@ def assess_league_readiness(
             valuation = pd.to_numeric(scored["valuation_points_q50"], errors="coerce")
             valuation_coverage = float(valuation.notna().mean())
             source = scored["league_scoring_source"].astype(str)
-            exact_scoring_coverage = float(source.ne("generic_points_fallback").mean())
+            exact = source.ne("generic_points_fallback")
+            exact_scoring_coverage = float(exact.mean())
+
+            if "position" in scored:
+                normalized_position = scored["position"].map(_canonical_position)
+                inexact: list[str] = []
+                for position in required:
+                    position_mask = normalized_position.eq(position)
+                    if not bool(position_mask.any()):
+                        coverage = 0.0
+                    else:
+                        coverage = float(exact.loc[position_mask].mean())
+                    required_position_exact_scoring[position] = coverage
+                    if coverage < minimum_required_position_exact_scoring_coverage:
+                        inexact.append(position)
+                inexact_required_positions = tuple(inexact)
+                if inexact_required_positions:
+                    flags.append("INEXACT_REQUIRED_POSITION_SCORING")
+                    blockers.append("INEXACT_REQUIRED_POSITION_SCORING")
 
     if exact_scoring_coverage < minimum_exact_scoring_coverage:
         flags.append("GENERIC_SCORING_FALLBACK")
@@ -200,4 +232,6 @@ def assess_league_readiness(
         market_source=market_source,
         exact_scoring_coverage=exact_scoring_coverage,
         valuation_coverage=valuation_coverage,
+        required_position_exact_scoring=required_position_exact_scoring,
+        inexact_required_positions=inexact_required_positions,
     )
