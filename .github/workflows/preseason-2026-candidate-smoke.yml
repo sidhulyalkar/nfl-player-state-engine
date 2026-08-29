@@ -1,0 +1,66 @@
+name: Preseason 2026 candidate materialization
+
+on:
+  pull_request:
+    paths:
+      - "src/player_state_engine/product/preseason_candidate.py"
+      - "scripts/materialize_preseason_2026_candidate.py"
+      - "tests/test_preseason_candidate_materializer.py"
+      - ".github/workflows/preseason-2026-candidate-smoke.yml"
+      - "src/player_state_engine/fantasy/preseason.py"
+      - "src/player_state_engine/models/quantile.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install runtime
+        run: python -m pip install -e '.[dev]'
+      - name: Materialize immutable non-production candidate
+        run: |
+          python scripts/materialize_preseason_2026_candidate.py \
+            --history-seasons 2015 2016 2017 2018 2019 2020 2021 2022 2023 2024 2025 \
+            --season 2026 \
+            --bundle-root artifacts/preseason_2026_candidate/bundle \
+            --registry-root artifacts/preseason_2026_candidate/registry \
+            --benchmark-git-sha 9184b9d61f16f968535e2d39446aec5796c76c90 \
+            --benchmark-artifact-digest sha256:453c970408204912492820fdb5e8106a84f98240e8da7e5d15739f728b29bb5e \
+            --benchmark-approved
+      - name: Assert candidate cannot masquerade as production
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import pandas as pd
+
+          bundle_root = Path('artifacts/preseason_2026_candidate/bundle')
+          values = pd.read_csv(bundle_root / 'product_player_values.csv')
+          evidence = json.loads((bundle_root / 'qualification_evidence.json').read_text())
+          manifests = list(Path('artifacts/preseason_2026_candidate/registry/bundles').glob('*.json'))
+          assert len(manifests) == 1
+          manifest = json.loads(manifests[0].read_text())
+          assert manifest['authority'] == 'challenger'
+          assert manifest['activation_eligible'] is False
+          assert manifest['metadata']['automatic_promotion'] is False
+          assert evidence['decision_quantile_policy'] == 'pending_uncertainty_qualification'
+          assert evidence['minor_scoring_components'] == 'pending_separate_qualification'
+          assert len(values) >= 300
+          assert values['player_id'].notna().all()
+          assert values['player_id'].is_unique
+          assert set(values['position'].unique()).issubset({'QB', 'RB', 'WR', 'TE'})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preseason-2026-candidate-${{ github.sha }}
+          path: artifacts/preseason_2026_candidate
+          if-no-files-found: error
+          retention-days: 30
