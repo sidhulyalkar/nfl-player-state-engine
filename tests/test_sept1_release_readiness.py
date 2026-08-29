@@ -64,6 +64,41 @@ def _hub(*, status: str = "READY", generated_at: datetime | None = None) -> dict
     }
 
 
+def _special_teams(
+    *,
+    generated_at: datetime | None = None,
+    kicker_count: int = 16,
+    dst_count: int = 32,
+    authority: str = "external_market_only",
+    model_fields_present: bool = False,
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "authority": authority,
+        "generated_at_utc": (generated_at or (NOW - timedelta(hours=1))).isoformat(),
+        "kicker_count": kicker_count,
+        "dst_count": dst_count,
+        "model_fields_present": model_fields_present,
+    }
+
+
+def _expanded_config() -> LeagueConfig:
+    return LeagueConfig(
+        teams=8,
+        scoring="ppr",
+        roster_slots={
+            "QB": 2,
+            "RB": 3,
+            "WR": 3,
+            "TE": 1,
+            "FLEX": 3,
+            "DST": 1,
+            "K": 1,
+            "BENCH": 6,
+        },
+    )
+
+
 def _assess(
     projections: pd.DataFrame,
     leagues: dict[str, LeagueConfig],
@@ -91,30 +126,62 @@ def test_exact_skill_position_release_can_be_ready() -> None:
     assert report.leagues[0].status == "READY"
 
 
-def test_missing_kicker_and_defense_are_only_provisional_when_explicitly_isolated() -> None:
-    config = LeagueConfig(
-        teams=8,
-        scoring="ppr",
-        roster_slots={
-            "QB": 2,
-            "RB": 3,
-            "WR": 3,
-            "TE": 1,
-            "FLEX": 3,
-            "DST": 1,
-            "K": 1,
-            "BENCH": 6,
-        },
+def test_missing_kicker_and_defense_are_provisional_only_with_verified_market_support() -> None:
+    report = _assess(
+        _exact_players(),
+        {"expanded": _expanded_config()},
+        special_teams_market_snapshot=_special_teams(),
     )
-    report = _assess(_exact_players(), {"expanded": config})
 
     assert report.status == "PROVISIONAL"
     assert report.can_use_core_draft_board is True
+    assert report.special_teams_supported_positions == ("DST", "K")
     league = report.leagues[0]
     assert league.status == "PROVISIONAL"
     assert league.market_only_positions == ("DST", "K")
     assert "MISSING_REQUIRED_POSITIONS" in league.readiness.blocking_flags
     assert "INEXACT_REQUIRED_POSITION_SCORING" in league.readiness.blocking_flags
+
+
+def test_missing_market_only_artifact_keeps_required_kicker_and_defense_blocked() -> None:
+    report = _assess(_exact_players(), {"expanded": _expanded_config()})
+
+    assert report.status == "BLOCKED"
+    assert report.can_use_core_draft_board is False
+    assert report.special_teams_supported_positions == ()
+    assert any("MARKET_ONLY_SUPPORT_MISSING:DST,K" in reason for reason in report.blocking_reasons)
+
+
+def test_stale_or_invalid_special_teams_market_cannot_unlock_provisional_release() -> None:
+    stale = _special_teams(generated_at=NOW - timedelta(hours=60))
+    report = _assess(
+        _exact_players(),
+        {"expanded": _expanded_config()},
+        special_teams_market_snapshot=stale,
+    )
+    assert report.status == "BLOCKED"
+    assert report.special_teams_supported_positions == ()
+
+    invalid = _special_teams(authority="production_approved", model_fields_present=True)
+    report = _assess(
+        _exact_players(),
+        {"expanded": _expanded_config()},
+        special_teams_market_snapshot=invalid,
+    )
+    assert report.status == "BLOCKED"
+    assert report.special_teams_supported_positions == ()
+
+
+def test_partial_special_teams_coverage_does_not_hide_missing_required_position() -> None:
+    report = _assess(
+        _exact_players(),
+        {"expanded": _expanded_config()},
+        special_teams_market_snapshot=_special_teams(kicker_count=16, dst_count=0),
+    )
+
+    assert report.status == "BLOCKED"
+    assert report.special_teams_supported_positions == ("K",)
+    assert any("MARKET_ONLY_SUPPORT_MISSING:DST" in reason for reason in report.blocking_reasons)
 
 
 def test_market_only_exception_can_never_hide_inexact_skill_position_scoring() -> None:
@@ -128,12 +195,12 @@ def test_market_only_exception_can_never_hide_inexact_skill_position_scoring() -
     frame["season_points_q10"] = [220.0, 150.0, 145.0, 90.0]
     frame["season_points_q50"] = [280.0, 220.0, 215.0, 155.0]
     frame["season_points_q90"] = [340.0, 290.0, 300.0, 230.0]
-    config = LeagueConfig(
-        teams=8,
-        roster_slots={"QB": 2, "RB": 3, "WR": 3, "TE": 1, "FLEX": 3, "DST": 1, "K": 1},
-    )
 
-    report = _assess(frame, {"expanded": config})
+    report = _assess(
+        frame,
+        {"expanded": _expanded_config()},
+        special_teams_market_snapshot=_special_teams(),
+    )
 
     assert report.status == "BLOCKED"
     assert report.can_use_core_draft_board is False
