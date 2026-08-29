@@ -56,6 +56,7 @@ def _latest_per_player(frame: pd.DataFrame, *, source_name: str) -> pd.DataFrame
     temporal = _first_present(
         data,
         (
+            "dt",  # nflverse depth-chart point-in-time timestamp from 2025 onward
             "date_modified",
             "last_transaction_date",
             "status_date",
@@ -67,7 +68,11 @@ def _latest_per_player(frame: pd.DataFrame, *, source_name: str) -> pd.DataFrame
     )
     if temporal is not None:
         data["__hub_time"] = pd.to_datetime(data[temporal], errors="coerce", utc=True)
-        data = data.sort_values(["player_id", "__hub_time"], kind="mergesort", na_position="first")
+        data = data.sort_values(
+            ["player_id", "__hub_time"],
+            kind="mergesort",
+            na_position="first",
+        )
         return data.drop_duplicates("player_id", keep="last").drop(columns=["__hub_time"])
     duplicates = data["player_id"].astype(str).duplicated(keep=False)
     if duplicates.any():
@@ -79,7 +84,7 @@ def _latest_per_player(frame: pd.DataFrame, *, source_name: str) -> pd.DataFrame
 
 
 def canonicalize_rosters(rosters: pd.DataFrame, *, season: int) -> pd.DataFrame:
-    """Return one current roster row per GSIS identity without interpreting health as model truth."""
+    """Return one current roster row per GSIS identity without inferring model health state."""
 
     data = rosters.copy()
     if "season" in data:
@@ -95,15 +100,14 @@ def canonicalize_rosters(rosters: pd.DataFrame, *, season: int) -> pd.DataFrame:
     data["player_name"] = _text(data, ("full_name", "player_name", "display_name"))
     data["player_name"] = data["player_name"].fillna(data["player_id"])
 
-    status_columns = (
+    status = pd.Series(pd.NA, index=data.index, dtype="string")
+    provenance = pd.Series(pd.NA, index=data.index, dtype="string")
+    for column in (
         "status_short_description",
         "status_description_abbr",
         "roster_status",
         "status",
-    )
-    status = pd.Series(pd.NA, index=data.index, dtype="string")
-    provenance = pd.Series(pd.NA, index=data.index, dtype="string")
-    for column in status_columns:
+    ):
         if column not in data:
             continue
         values = _clean_text(data[column])
@@ -113,8 +117,7 @@ def canonicalize_rosters(rosters: pd.DataFrame, *, season: int) -> pd.DataFrame:
     data["roster_status"] = status
     data["roster_status_provenance"] = provenance
 
-    invalid = data["player_id"].isna()
-    data = data.loc[~invalid].copy()
+    data = data.loc[data["player_id"].notna()].copy()
     data = _latest_per_player(data, source_name="rosters")
     return data[
         [
@@ -147,7 +150,7 @@ def canonicalize_depth_charts(depth_charts: pd.DataFrame, *, season: int) -> pd.
         ("pos_abb", "position", "depth_position", "position_group"),
         upper=True,
     )
-    data["depth_team"] = _text(data, ("club_code", "team", "recent_team"), upper=True)
+    data["depth_team"] = _text(data, ("team", "club_code", "recent_team"), upper=True)
     data = data.loc[data["player_id"].notna()].copy()
     data = _latest_per_player(data, source_name="depth_charts")
     return data[["player_id", "depth_rank", "depth_position", "depth_team"]].reset_index(drop=True)
@@ -186,14 +189,121 @@ def canonicalize_injuries(injuries: pd.DataFrame, *, season: int) -> pd.DataFram
     ].reset_index(drop=True)
 
 
-def canonicalize_rankings(rankings: pd.DataFrame) -> pd.DataFrame:
+def _unique_id_map(
+    playerids: pd.DataFrame,
+    *,
+    source_column: str,
+) -> dict[str, str]:
+    if source_column not in playerids or "gsis_id" not in playerids:
+        return {}
+    source = _clean_text(playerids[source_column])
+    gsis = _clean_text(playerids["gsis_id"])
+    work = pd.DataFrame({"source": source, "gsis": gsis}).dropna()
+    if work.empty:
+        return {}
+    # An external identifier earns authority only when it maps to exactly one GSIS identity.
+    unique = work.groupby("source", dropna=False)["gsis"].agg(lambda values: tuple(sorted(set(values))))
+    return {
+        str(external_id): str(candidates[0])
+        for external_id, candidates in unique.items()
+        if len(candidates) == 1
+    }
+
+
+def _resolve_ranking_identities(
+    rankings: pd.DataFrame,
+    playerids: pd.DataFrame,
+) -> tuple[pd.Series, pd.Series, dict[str, Any]]:
+    resolved = pd.Series(pd.NA, index=rankings.index, dtype="string")
+    source_used = pd.Series(pd.NA, index=rankings.index, dtype="string")
+
+    direct_column = _first_present(rankings, ("gsis_id", "player_id", "player_gsis_id"))
+    if direct_column is not None:
+        direct = _clean_text(rankings[direct_column])
+        resolved.loc[direct.notna()] = direct.loc[direct.notna()]
+        source_used.loc[direct.notna()] = f"direct:{direct_column}"
+
+    routes = (
+        ("id", "fantasypros_id", "fantasypros_id"),
+        ("fantasypros_id", "fantasypros_id", "fantasypros_id"),
+        ("sportsdata_id", "sportradar_id", "sportradar_id"),
+        ("sportradar_id", "sportradar_id", "sportradar_id"),
+        ("yahoo_id", "yahoo_id", "yahoo_id"),
+    )
+    route_maps = {
+        route_name: _unique_id_map(playerids, source_column=playerids_column)
+        for _, playerids_column, route_name in routes
+    }
+    conflicts = 0
+    for index, row in rankings.iterrows():
+        candidates: dict[str, str] = {}
+        if pd.notna(resolved.at[index]):
+            candidates[str(source_used.at[index])] = str(resolved.at[index])
+        for ranking_column, _playerids_column, route_name in routes:
+            if ranking_column not in rankings:
+                continue
+            raw = row.get(ranking_column)
+            if raw is None or pd.isna(raw):
+                continue
+            key = str(raw).strip()
+            if not key or key.lower() in {"nan", "none", "<na>"}:
+                continue
+            mapped = route_maps[route_name].get(key)
+            if mapped:
+                candidates[route_name] = mapped
+        unique_candidates = sorted(set(candidates.values()))
+        if len(unique_candidates) == 1:
+            resolved.at[index] = unique_candidates[0]
+            routes_for_identity = sorted(
+                route for route, candidate in candidates.items() if candidate == unique_candidates[0]
+            )
+            source_used.at[index] = "+".join(routes_for_identity)
+        elif len(unique_candidates) > 1:
+            resolved.at[index] = pd.NA
+            source_used.at[index] = "CONFLICT"
+            conflicts += 1
+
+    total = int(len(rankings))
+    resolved_rows = int(resolved.notna().sum())
+    diagnostics = {
+        "ranking_rows": total,
+        "resolved_rows": resolved_rows,
+        "unresolved_rows": total - resolved_rows,
+        "identity_coverage": (resolved_rows / total if total else None),
+        "conflict_rows": conflicts,
+        "authority": "multi_id_exact_only_no_name_matching",
+    }
+    return resolved, source_used, diagnostics
+
+
+def canonicalize_rankings(
+    rankings: pd.DataFrame,
+    playerids: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    columns = [
+        "player_id",
+        "market_rank",
+        "market_adp",
+        "market_rank_scope",
+        "market_identity_source",
+    ]
     if rankings.empty:
-        return pd.DataFrame(columns=["player_id", "market_rank", "market_adp"])
+        out = pd.DataFrame(columns=columns)
+        out.attrs["identity_diagnostics"] = {
+            "ranking_rows": 0,
+            "resolved_rows": 0,
+            "unresolved_rows": 0,
+            "identity_coverage": None,
+            "conflict_rows": 0,
+            "authority": "multi_id_exact_only_no_name_matching",
+        }
+        return out
+
     data = rankings.copy()
-    id_column = _first_present(data, ("gsis_id", "player_id", "player_gsis_id"))
-    if id_column is None:
-        return pd.DataFrame(columns=["player_id", "market_rank", "market_adp"])
-    data["player_id"] = _clean_text(data[id_column])
+    ids = playerids if playerids is not None else pd.DataFrame()
+    resolved, identity_source, diagnostics = _resolve_ranking_identities(data, ids)
+    data["player_id"] = resolved
+    data["market_identity_source"] = identity_source
     data["market_rank"] = _numeric(
         data,
         ("rank", "overall_rank", "consensus_rank", "ecr", "draft_rank"),
@@ -202,13 +312,34 @@ def canonicalize_rankings(rankings: pd.DataFrame) -> pd.DataFrame:
         data,
         ("adp", "consensus_adp", "market_adp", "avg_pick"),
     )
-    data = data.loc[data["player_id"].notna()].copy()
-    if data["player_id"].duplicated().any():
-        # Rankings can contain multiple scoring formats/platforms. Preserve the first stable row
-        # rather than averaging unlike contracts and make that limitation observable in source health.
-        data = data.sort_values(["player_id", "market_rank", "market_adp"], kind="mergesort")
+
+    ecr_type = _text(data, ("ecr_type",))
+    data["market_rank_scope"] = pd.Series("unknown", index=data.index, dtype="string")
+    if "ecr_type" in data:
+        data.loc[ecr_type.eq("ro"), "market_rank_scope"] = "redraft_overall"
+        data.loc[ecr_type.eq("rp"), "market_rank_scope"] = "redraft_position"
+    if "page_type" in data:
+        page_type = _clean_text(data["page_type"])
+        redraft_page = page_type.str.startswith("redraft", na=False)
+    else:
+        redraft_page = pd.Series(False, index=data.index)
+
+    # Prefer redraft overall, then redraft positional. Best-ball/dynasty rows are not substitutes.
+    priority = pd.Series(99, index=data.index, dtype=int)
+    priority.loc[ecr_type.eq("ro")] = 0
+    priority.loc[ecr_type.eq("rp")] = 1
+    priority.loc[redraft_page & priority.eq(99)] = 2
+    data["__market_priority"] = priority
+    data = data.loc[data["player_id"].notna() & data["__market_priority"].lt(99)].copy()
+    if not data.empty:
+        stable_fields = ["player_id", "__market_priority", "market_rank"]
+        if "fp_page" in data:
+            stable_fields.append("fp_page")
+        data = data.sort_values(stable_fields, kind="mergesort", na_position="last")
         data = data.drop_duplicates("player_id", keep="first")
-    return data[["player_id", "market_rank", "market_adp"]].reset_index(drop=True)
+    out = data[columns].reset_index(drop=True)
+    out.attrs["identity_diagnostics"] = diagnostics
+    return out
 
 
 def canonicalize_projection_context(projections: pd.DataFrame) -> pd.DataFrame:
@@ -232,7 +363,12 @@ def canonicalize_projection_context(projections: pd.DataFrame) -> pd.DataFrame:
     ].reset_index(drop=True)
 
 
-def canonicalize_schedule(schedules: pd.DataFrame, *, season: int, as_of: datetime) -> list[dict[str, Any]]:
+def canonicalize_schedule(
+    schedules: pd.DataFrame,
+    *,
+    season: int,
+    as_of: datetime,
+) -> list[dict[str, Any]]:
     if schedules.empty:
         return []
     data = schedules.copy()
@@ -242,8 +378,6 @@ def canonicalize_schedule(schedules: pd.DataFrame, *, season: int, as_of: dateti
     if date_column is None or data.empty:
         return []
     dates = pd.to_datetime(data[date_column], errors="coerce", utc=True)
-    # Date-only nflverse gameday values are UTC midnight. Compare calendar dates so same-day games
-    # are not discarded after kickoff.
     today = as_of.astimezone(UTC).date()
     data = data.loc[dates.dt.date.ge(today)].copy()
     data["__game_date"] = dates.loc[data.index]
@@ -276,19 +410,34 @@ def _state_frame(
     depth_charts: pd.DataFrame | None = None,
     injuries: pd.DataFrame | None = None,
     rankings: pd.DataFrame | None = None,
+    playerids: pd.DataFrame | None = None,
     projections: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     state = canonicalize_rosters(rosters, season=season)
     joins = (
-        canonicalize_depth_charts(depth_charts if depth_charts is not None else pd.DataFrame(), season=season),
-        canonicalize_injuries(injuries if injuries is not None else pd.DataFrame(), season=season),
-        canonicalize_rankings(rankings if rankings is not None else pd.DataFrame()),
-        canonicalize_projection_context(projections if projections is not None else pd.DataFrame()),
+        canonicalize_depth_charts(
+            depth_charts if depth_charts is not None else pd.DataFrame(),
+            season=season,
+        ),
+        canonicalize_injuries(
+            injuries if injuries is not None else pd.DataFrame(),
+            season=season,
+        ),
+        canonicalize_rankings(
+            rankings if rankings is not None else pd.DataFrame(),
+            playerids if playerids is not None else pd.DataFrame(),
+        ),
+        canonicalize_projection_context(
+            projections if projections is not None else pd.DataFrame()
+        ),
     )
     for frame in joins:
         if not frame.empty:
             state = state.merge(frame, on="player_id", how="left", validate="one_to_one")
-    return state.sort_values(["team", "position", "player_name", "player_id"], kind="mergesort").reset_index(drop=True)
+    return state.sort_values(
+        ["team", "position", "player_name", "player_id"],
+        kind="mergesort",
+    ).reset_index(drop=True)
 
 
 def _changed(previous: object, current: object) -> bool:
@@ -330,7 +479,7 @@ def _event(
 
 
 def diff_player_states(previous: pd.DataFrame, current: pd.DataFrame) -> list[dict[str, Any]]:
-    """Describe deterministic observed state changes. This never mutates projection authority."""
+    """Describe deterministic observed state changes without mutating projection authority."""
 
     previous_by_id = {
         str(row["player_id"]): row for row in frame_records(previous) if row.get("player_id")
@@ -339,8 +488,7 @@ def diff_player_states(previous: pd.DataFrame, current: pd.DataFrame) -> list[di
         str(row["player_id"]): row for row in frame_records(current) if row.get("player_id")
     }
     events: list[dict[str, Any]] = []
-    all_ids = sorted(set(previous_by_id) | set(current_by_id))
-    for player_id in all_ids:
+    for player_id in sorted(set(previous_by_id) | set(current_by_id)):
         before = previous_by_id.get(player_id)
         after = current_by_id.get(player_id)
         if before is None and after is not None:
@@ -399,8 +547,9 @@ def diff_player_states(previous: pd.DataFrame, current: pd.DataFrame) -> list[di
                     before,
                     significance=0.92,
                     detail=(
-                        f"Injury/practice state changed: {before.get('injury_status') or before.get('practice_status')} "
-                        f"→ {after.get('injury_status') or after.get('practice_status')}."
+                        f"Injury/practice state changed: "
+                        f"{before.get('injury_status') or before.get('practice_status')} → "
+                        f"{after.get('injury_status') or after.get('practice_status')}."
                     ),
                 )
             )
@@ -411,10 +560,9 @@ def diff_player_states(previous: pd.DataFrame, current: pd.DataFrame) -> list[di
                 depth_delta = float(before_depth) - float(after_depth)
             except (TypeError, ValueError):
                 depth_delta = 0.0
-            event_type = "DEPTH_CHART_PROMOTION" if depth_delta > 0 else "DEPTH_CHART_DEMOTION"
             events.append(
                 _event(
-                    event_type,
+                    "DEPTH_CHART_PROMOTION" if depth_delta > 0 else "DEPTH_CHART_DEMOTION",
                     after,
                     before,
                     significance=min(0.9, 0.6 + 0.1 * abs(depth_delta)),
@@ -428,10 +576,9 @@ def diff_player_states(previous: pd.DataFrame, current: pd.DataFrame) -> list[di
         except (TypeError, ValueError):
             market_delta = 0.0
         if abs(market_delta) >= 3.0:
-            event_type = "MARKET_RANK_RISER" if market_delta > 0 else "MARKET_RANK_FALLER"
             events.append(
                 _event(
-                    event_type,
+                    "MARKET_RANK_RISER" if market_delta > 0 else "MARKET_RANK_FALLER",
                     after,
                     before,
                     significance=min(0.85, 0.45 + abs(market_delta) / 50.0),
@@ -470,6 +617,7 @@ def build_nfl_hub_snapshot(
     depth_charts: pd.DataFrame | None = None,
     injuries: pd.DataFrame | None = None,
     rankings: pd.DataFrame | None = None,
+    playerids: pd.DataFrame | None = None,
     schedules: pd.DataFrame | None = None,
     projections: pd.DataFrame | None = None,
     previous_snapshot: dict[str, Any] | None = None,
@@ -479,12 +627,17 @@ def build_nfl_hub_snapshot(
     generated = generated_at or datetime.now(UTC)
     if generated.tzinfo is None:
         generated = generated.replace(tzinfo=UTC)
+    raw_rankings = rankings if rankings is not None else pd.DataFrame()
+    raw_playerids = playerids if playerids is not None else pd.DataFrame()
+    ranking_view = canonicalize_rankings(raw_rankings, raw_playerids)
+    market_identity = dict(ranking_view.attrs.get("identity_diagnostics", {}))
     current = _state_frame(
         rosters,
         season=season,
         depth_charts=depth_charts,
         injuries=injuries,
-        rankings=rankings,
+        rankings=raw_rankings,
+        playerids=raw_playerids,
         projections=projections,
     )
     previous_rows = previous_snapshot.get("players", []) if previous_snapshot else []
@@ -502,10 +655,15 @@ def build_nfl_hub_snapshot(
         "authority": HUB_AUTHORITY,
         "season": int(season),
         "generated_at_utc": generated.astimezone(UTC).isoformat(),
-        "status": "UNAVAILABLE" if required_failures else ("DEGRADED" if optional_failures else "READY"),
+        "status": (
+            "UNAVAILABLE"
+            if required_failures
+            else ("DEGRADED" if optional_failures else "READY")
+        ),
         "required_source_failures": required_failures,
         "optional_source_failures": optional_failures,
         "source_health": health,
+        "market_identity": market_identity,
         "player_count": int(len(current)),
         "players": frame_records(current),
         "events": events,
@@ -531,8 +689,10 @@ def _load_optional_projection(path: str | Path | None) -> pd.DataFrame:
     return read_table(candidate)
 
 
-def acquire_live_nfl_hub_sources(season: int) -> tuple[dict[str, pd.DataFrame], list[dict[str, Any]]]:
-    """Acquire maintained public nflverse sources with rosters as the only hard dependency."""
+def acquire_live_nfl_hub_sources(
+    season: int,
+) -> tuple[dict[str, pd.DataFrame], list[dict[str, Any]]]:
+    """Acquire public nflverse sources with current rosters as the sole hard dependency."""
 
     try:
         import nflreadpy as nfl
@@ -545,6 +705,7 @@ def acquire_live_nfl_hub_sources(season: int) -> tuple[dict[str, pd.DataFrame], 
         "depth_charts": (lambda: nfl.load_depth_charts([int(season)]), False),
         "injuries": (lambda: nfl.load_injuries([int(season)]), False),
         "rankings": (lambda: nfl.load_ff_rankings(type="draft"), False),
+        "playerids": (nfl.load_ff_playerids, False),
         "schedules": (lambda: nfl.load_schedules([int(season)]), False),
     }
     frames: dict[str, pd.DataFrame] = {}
@@ -552,7 +713,7 @@ def acquire_live_nfl_hub_sources(season: int) -> tuple[dict[str, pd.DataFrame], 
     for name, (loader, required) in loaders.items():
         try:
             frame = _to_pandas(loader())
-        except Exception as exc:  # noqa: BLE001 - each public source is independently observable
+        except Exception as exc:  # noqa: BLE001 - optional public sources degrade independently
             health.append(
                 _source_health(
                     name=name,
@@ -621,6 +782,7 @@ def refresh_nfl_hub(
         depth_charts=frames.get("depth_charts"),
         injuries=frames.get("injuries"),
         rankings=frames.get("rankings"),
+        playerids=frames.get("playerids"),
         schedules=frames.get("schedules"),
         projections=_load_optional_projection(projections_path),
         previous_snapshot=previous,
