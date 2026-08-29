@@ -1,0 +1,71 @@
+name: Preseason conformal uncertainty qualification
+
+on:
+  pull_request:
+    paths:
+      - "scripts/run_preseason_conformal_qualification.py"
+      - ".github/workflows/preseason-conformal-qualification.yml"
+      - "src/player_state_engine/models/conformal.py"
+      - "src/player_state_engine/fantasy/preseason.py"
+      - "src/player_state_engine/evaluation/preseason.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qualification:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install benchmark environment
+        run: python -m pip install -e '.[dev]'
+      - name: Regenerate frozen 2015-2025 preseason evidence
+        run: |
+          python scripts/run_preseason_season_benchmark.py \
+            --acquire \
+            --seasons 2015 2016 2017 2018 2019 2020 2021 2022 2023 2024 2025 \
+            --snapshot-week 1 \
+            --output-dir /tmp/preseason_raw \
+            --bootstrap-samples 5000
+      - name: Assert original frozen model gate still passes
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          gate = json.loads(Path('/tmp/preseason_raw/promotion_gate.json').read_text())
+          assert gate['approved'] is True, gate
+          assert gate['blockers'] == [], gate
+          PY
+      - name: Run separately preregistered conformal qualification
+        run: |
+          python scripts/run_preseason_conformal_qualification.py \
+            --predictions /tmp/preseason_raw/predictions.parquet \
+            --output-dir artifacts/reports/preseason_conformal_qualification
+      - name: Preserve result without auto-promotion
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path('artifacts/reports/preseason_conformal_qualification/qualification.json')
+          decision = json.loads(path.read_text())
+          envelope = {
+              'authority': 'posthoc_production_qualification_research_only',
+              'automatic_promotion': False,
+              'decision': decision,
+              'note': 'This qualification cannot alter the original frozen benchmark gate or promote a production bundle automatically.',
+          }
+          Path('artifacts/reports/preseason_conformal_qualification/run_manifest.json').write_text(
+              json.dumps(envelope, indent=2, sort_keys=True) + '\n'
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preseason-conformal-qualification-${{ github.sha }}
+          path: artifacts/reports/preseason_conformal_qualification
+          if-no-files-found: error
+          retention-days: 90
