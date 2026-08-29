@@ -70,8 +70,20 @@ def _injuries() -> pd.DataFrame:
 def _rankings() -> pd.DataFrame:
     return pd.DataFrame(
         [
-            {"gsis_id": "00-001", "rank": 21, "adp": 24.0},
-            {"gsis_id": "00-002", "rank": 45, "adp": 48.0},
+            {
+                "gsis_id": "00-001",
+                "rank": 21,
+                "adp": 24.0,
+                "ecr_type": "ro",
+                "page_type": "redraft-overall",
+            },
+            {
+                "gsis_id": "00-002",
+                "rank": 45,
+                "adp": 48.0,
+                "ecr_type": "ro",
+                "page_type": "redraft-overall",
+            },
         ]
     )
 
