@@ -21,6 +21,7 @@ jobs:
       - name: Lint package, tests, and operational research scripts
         run: |
           ruff check src tests \
+            scripts/check_sept1_release_readiness.py \
             scripts/acquire_game_intelligence_sources.py \
             scripts/build_game_intelligence.py \
             scripts/build_draft_survival_observations.py \
