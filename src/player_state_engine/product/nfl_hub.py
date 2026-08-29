@@ -35,6 +35,25 @@ def _clean_text(series: pd.Series, *, upper: bool = False) -> pd.Series:
     return out.str.upper() if upper else out
 
 
+def _normalize_external_id(value: object) -> str | None:
+    """Normalize representation-only numeric ID drift without altering opaque identifiers."""
+
+    if value is None or pd.isna(value):
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "none", "<na>"}:
+        return None
+    if "." in text:
+        whole, _, fractional = text.partition(".")
+        if whole.lstrip("+-").isdigit() and fractional and set(fractional) == {"0"}:
+            return whole
+    return text
+
+
+def _normalize_external_ids(series: pd.Series) -> pd.Series:
+    return series.map(_normalize_external_id).astype("string")
+
+
 def _numeric(frame: pd.DataFrame, names: Iterable[str]) -> pd.Series:
     column = _first_present(frame, names)
     if column is None:
@@ -196,7 +215,7 @@ def _unique_id_map(
 ) -> dict[str, str]:
     if source_column not in playerids or "gsis_id" not in playerids:
         return {}
-    source = _clean_text(playerids[source_column])
+    source = _normalize_external_ids(playerids[source_column])
     gsis = _clean_text(playerids["gsis_id"])
     work = pd.DataFrame({"source": source, "gsis": gsis}).dropna()
     if work.empty:
@@ -242,11 +261,8 @@ def _resolve_ranking_identities(
         for ranking_column, _playerids_column, route_name in routes:
             if ranking_column not in rankings:
                 continue
-            raw = row.get(ranking_column)
-            if raw is None or pd.isna(raw):
-                continue
-            key = str(raw).strip()
-            if not key or key.lower() in {"nan", "none", "<na>"}:
+            key = _normalize_external_id(row.get(ranking_column))
+            if key is None:
                 continue
             mapped = route_maps[route_name].get(key)
             if mapped:
@@ -295,6 +311,10 @@ def canonicalize_rankings(
             "unresolved_rows": 0,
             "identity_coverage": None,
             "conflict_rows": 0,
+            "redraft_rows": 0,
+            "resolved_redraft_rows": 0,
+            "redraft_identity_coverage": None,
+            "usable_market_players": 0,
             "authority": "multi_id_exact_only_no_name_matching",
         }
         return out
@@ -330,6 +350,17 @@ def canonicalize_rankings(
     priority.loc[ecr_type.eq("rp")] = 1
     priority.loc[redraft_page & priority.eq(99)] = 2
     data["__market_priority"] = priority
+    redraft_rows = int(priority.lt(99).sum())
+    resolved_redraft_rows = int((priority.lt(99) & data["player_id"].notna()).sum())
+    diagnostics.update(
+        {
+            "redraft_rows": redraft_rows,
+            "resolved_redraft_rows": resolved_redraft_rows,
+            "redraft_identity_coverage": (
+                resolved_redraft_rows / redraft_rows if redraft_rows else None
+            ),
+        }
+    )
     data = data.loc[data["player_id"].notna() & data["__market_priority"].lt(99)].copy()
     if not data.empty:
         stable_fields = ["player_id", "__market_priority", "market_rank"]
@@ -338,6 +369,7 @@ def canonicalize_rankings(
         data = data.sort_values(stable_fields, kind="mergesort", na_position="last")
         data = data.drop_duplicates("player_id", keep="first")
     out = data[columns].reset_index(drop=True)
+    diagnostics["usable_market_players"] = int(len(out))
     out.attrs["identity_diagnostics"] = diagnostics
     return out
 
@@ -650,6 +682,8 @@ def build_nfl_hub_snapshot(
     optional_failures = [
         item["source"] for item in health if not item.get("required") and not item.get("available")
     ]
+    if not raw_rankings.empty and int(market_identity.get("usable_market_players", 0) or 0) == 0:
+        optional_failures.append("rankings_identity")
     return {
         "schema_version": HUB_SCHEMA_VERSION,
         "authority": HUB_AUTHORITY,
