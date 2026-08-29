@@ -1,0 +1,47 @@
+name: Preseason minor scoring benchmark
+
+on:
+  pull_request:
+    paths:
+      - "scripts/run_preseason_minor_scoring_benchmark.py"
+      - ".github/workflows/preseason-minor-scoring-benchmark.yml"
+      - "src/player_state_engine/fantasy/preseason.py"
+      - "src/player_state_engine/evaluation/preseason.py"
+      - "src/player_state_engine/models/quantile.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install benchmark environment
+        run: python -m pip install -e '.[dev]'
+      - name: Run frozen supplemental benchmark
+        run: |
+          python scripts/run_preseason_minor_scoring_benchmark.py \
+            --seasons 2015 2016 2017 2018 2019 2020 2021 2022 2023 2024 2025 \
+            --output-dir artifacts/reports/preseason_minor_scoring
+      - name: Assert result remains research-only
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('artifacts/reports/preseason_minor_scoring/qualification.json').read_text())
+          assert result['authority'] == 'supplemental_scoring_research_only'
+          assert result['automatic_promotion'] is False
+          assert set(result['decisions']) == {'fumbles_lost', 'two_point_conversions'}
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preseason-minor-scoring-${{ github.sha }}
+          path: artifacts/reports/preseason_minor_scoring
+          if-no-files-found: error
+          retention-days: 90
