@@ -99,6 +99,11 @@ def assess_league_readiness(
     legally occupy a starting slot must independently clear the required-position scoring
     gate, otherwise a large skill-player population could dilute an entirely approximate
     K/DST lane into an apparently healthy aggregate percentage.
+
+    A weekly median matchup is also not equivalent to component-level player scoring. It is a
+    team-week distribution problem. The current product's player-season floor bonus is a useful
+    heuristic, but it has not earned exact median-game policy authority, so median leagues remain
+    fail-closed until a separately replayed team-level policy qualifies.
     """
 
     if not 0.0 <= minimum_market_coverage <= 1.0:
@@ -118,6 +123,10 @@ def assess_league_readiness(
     blockers: list[str] = []
     rows = int(len(projections))
     required = required_projection_positions(config)
+
+    if config.median_scoring:
+        flags.append("MEDIAN_SCORING_POLICY_UNVALIDATED")
+        blockers.append("MEDIAN_SCORING_POLICY_UNVALIDATED")
 
     if "position" in projections:
         present = tuple(
