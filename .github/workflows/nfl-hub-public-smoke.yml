@@ -8,6 +8,7 @@ on:
       - "src/player_state_engine/api/nfl_hub_routes.py"
       - "scripts/refresh_nfl_hub.py"
       - "tests/test_nfl_hub.py"
+      - "tests/test_nfl_hub_market_identity.py"
   workflow_dispatch:
 
 permissions:
@@ -34,7 +35,7 @@ jobs:
             --season 2026 \
             --root artifacts/nfl_hub_public_smoke \
             --projections artifacts/does-not-exist.csv
-      - name: Assert observational and roster-source contracts
+      - name: Assert observational, roster, and market-identity contracts
         run: |
           python - <<'PY'
           import json
@@ -51,6 +52,20 @@ jobs:
           assert health['rosters']['required'] is True
           assert health['rosters']['available'] is True
           assert health['rosters']['rows'] >= 500
+          assert health['rankings']['available'] is True
+          assert health['playerids']['available'] is True
+
+          market = snapshot['market_identity']
+          assert market['authority'] == 'multi_id_exact_only_no_name_matching'
+          assert market['redraft_rows'] >= 100
+          assert market['resolved_redraft_rows'] >= 100
+          assert market['redraft_identity_coverage'] >= 0.10
+          assert market['usable_market_players'] >= 100
+          roster_market_rows = sum(
+              1 for player in snapshot['players'] if player.get('market_rank') is not None
+          )
+          assert roster_market_rows >= 100
+          assert 'rankings_identity' not in snapshot['optional_source_failures']
           assert 'projection_q50' not in snapshot['players'][0] or snapshot['players'][0]['projection_q50'] is None
           PY
       - name: Upload source-health snapshot
