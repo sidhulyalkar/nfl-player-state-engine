@@ -46,7 +46,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Produce one fail-closed Sept. 1 release verdict across immutable projection "
-            "authority, current NFL Hub state, and exact fantasy league contracts."
+            "authority, current NFL Hub state, exact fantasy league contracts, and verified "
+            "external-only K/DST support."
         )
     )
     parser.add_argument("--projections", type=Path, required=True)
@@ -58,6 +59,14 @@ def main() -> None:
         help="Repeat for every distinct fantasy league contract that must be supported.",
     )
     parser.add_argument("--nfl-hub", type=Path, required=True)
+    parser.add_argument(
+        "--special-teams-market",
+        type=Path,
+        help=(
+            "Optional external_market_only K/DST snapshot. Required for PROVISIONAL release "
+            "when a league's only unresolved required positions are K/DST."
+        ),
+    )
     parser.add_argument("--registry-root", type=Path)
     parser.add_argument("--bundle-root", type=Path)
     parser.add_argument("--champion-target")
@@ -74,14 +83,17 @@ def main() -> None:
     )
     parser.add_argument("--max-projection-age-hours", type=float, default=48.0)
     parser.add_argument("--max-hub-age-hours", type=float, default=12.0)
+    parser.add_argument("--max-special-teams-market-age-hours", type=float, default=48.0)
     args = parser.parse_args()
 
     projections = read_table(args.projections)
-    leagues = {
-        path.stem: LeagueConfig.from_yaml(path)
-        for path in args.league
-    }
+    leagues = {path.stem: LeagueConfig.from_yaml(path) for path in args.league}
     hub = json.loads(args.nfl_hub.read_text(encoding="utf-8"))
+    special_teams = (
+        json.loads(args.special_teams_market.read_text(encoding="utf-8"))
+        if args.special_teams_market is not None
+        else None
+    )
     authority, integrity, source_cutoff, resolution_error = _projection_authority(
         registry_root=args.registry_root,
         bundle_root=args.bundle_root,
@@ -95,13 +107,18 @@ def main() -> None:
         projection_integrity_verified=integrity,
         projection_source_cutoff_utc=source_cutoff,
         nfl_hub_snapshot=hub,
+        special_teams_market_snapshot=special_teams,
         max_projection_age_hours=args.max_projection_age_hours,
         max_hub_age_hours=args.max_hub_age_hours,
+        max_special_teams_market_age_hours=args.max_special_teams_market_age_hours,
     )
     payload = report.as_dict()
     payload["projection_resolution_error"] = resolution_error
     payload["projection_path"] = str(args.projections)
     payload["nfl_hub_path"] = str(args.nfl_hub)
+    payload["special_teams_market_path"] = (
+        str(args.special_teams_market) if args.special_teams_market is not None else None
+    )
     payload["league_paths"] = [str(path) for path in args.league]
     rendered = json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n"
     print(rendered, end="")
