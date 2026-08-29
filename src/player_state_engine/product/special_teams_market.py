@@ -62,8 +62,10 @@ def _dedupe_latest(data: pd.DataFrame, key: str) -> pd.DataFrame:
     work = data.copy()
     if "source_date" in work:
         work["__source_date"] = pd.to_datetime(work["source_date"], errors="coerce", utc=True)
+        # Latest date wins. Within one source date, lower consensus rank wins deterministically.
         work = work.sort_values(
             [key, "__source_date", "positional_ecr"],
+            ascending=[True, True, False],
             kind="mergesort",
             na_position="first",
         )
@@ -91,7 +93,9 @@ def _kicker_board(
         return kickers
 
     current = canonicalize_rosters(rosters, season=season)
-    current = current.loc[current["position"].astype(str).str.upper().eq("K")].copy()
+    current = current.loc[
+        current["position"].astype(str).str.upper().eq("K") & current["team"].notna()
+    ].copy()
     current = current[["player_id", "player_name", "team", "roster_status"]]
     kickers = kickers.merge(current, on="player_id", how="inner", validate="many_to_one")
     kickers = _dedupe_latest(kickers, "player_id")
