@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, Literal
 
 import pandas as pd
 
