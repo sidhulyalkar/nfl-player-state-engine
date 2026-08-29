@@ -105,6 +105,8 @@ def test_position_aliases_prevent_false_defense_and_kicker_gaps() -> None:
     assert report.missing_positions == ()
     assert {"DST", "K"}.issubset(report.present_positions)
     assert "MISSING_REQUIRED_POSITIONS" not in report.flags
+    assert {"DST", "K"}.issubset(report.inexact_required_positions)
+    assert "INEXACT_REQUIRED_POSITION_SCORING" in report.blocking_flags
 
 
 def test_market_pick_quantile_counts_as_explicit_market_coverage() -> None:
@@ -117,7 +119,7 @@ def test_market_pick_quantile_counts_as_explicit_market_coverage() -> None:
     assert "MISSING_MARKET_DATA" not in report.flags
 
 
-def test_generic_scoring_is_visible_without_blocking_complete_core_pool() -> None:
+def test_generic_scoring_is_visible_but_blocks_required_position_exactness() -> None:
     report = assess_league_readiness(
         _core_rows(),
         LeagueConfig(
@@ -127,11 +129,14 @@ def test_generic_scoring_is_visible_without_blocking_complete_core_pool() -> Non
         ),
     )
 
-    assert report.ready is True
+    assert report.ready is False
     assert report.valuation_coverage == 1.0
     assert report.exact_scoring_coverage == 0.0
+    assert set(report.inexact_required_positions) == {"QB", "RB", "WR", "TE"}
+    assert all(value == 0.0 for value in report.required_position_exact_scoring.values())
     assert "GENERIC_SCORING_FALLBACK" in report.flags
     assert "GENERIC_SCORING_FALLBACK" not in report.blocking_flags
+    assert "INEXACT_REQUIRED_POSITION_SCORING" in report.blocking_flags
 
 
 def test_duplicate_and_blank_player_ids_are_hard_failures() -> None:
@@ -153,6 +158,7 @@ def test_threshold_arguments_fail_closed_when_out_of_range() -> None:
         ("minimum_exact_scoring_coverage", -0.1),
         ("minimum_valuation_coverage", 1.2),
         ("minimum_ready_score", 101.0),
+        ("minimum_required_position_exact_scoring_coverage", 1.1),
     ):
         try:
             assess_league_readiness(frame, config, **{keyword: value})
