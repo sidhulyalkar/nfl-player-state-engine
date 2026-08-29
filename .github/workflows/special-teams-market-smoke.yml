@@ -1,0 +1,56 @@
+name: Special-teams market public-data smoke
+
+on:
+  pull_request:
+    paths:
+      - "src/player_state_engine/product/special_teams_market.py"
+      - "scripts/refresh_special_teams_market.py"
+      - "tests/test_special_teams_market.py"
+      - ".github/workflows/special-teams-market-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-data-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install runtime
+        run: python -m pip install -e .
+      - name: Refresh real 2026 K/DST market
+        run: |
+          python scripts/refresh_special_teams_market.py \
+            --season 2026 \
+            --output artifacts/special_teams_market_smoke/current.json
+      - name: Assert external-only market contract
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          snapshot = json.loads(Path("artifacts/special_teams_market_smoke/current.json").read_text())
+          assert snapshot["authority"] == "external_market_only"
+          assert snapshot["model_fields_present"] is False
+          assert snapshot["kicker_count"] >= 8
+          assert snapshot["dst_count"] >= 8
+          assert snapshot["source_date"]
+          forbidden = {
+              "projection_q10", "projection_q50", "projection_q90", "vorp",
+              "season_points_q10", "season_points_q50", "season_points_q90",
+          }
+          for row in [*snapshot["kickers"], *snapshot["defenses"]]:
+              assert not forbidden.intersection(row)
+              assert row["authority"] == "external_market_only"
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: special-teams-market-public-smoke-${{ github.sha }}
+          path: artifacts/special_teams_market_smoke/current.json
+          if-no-files-found: error
+          retention-days: 14
