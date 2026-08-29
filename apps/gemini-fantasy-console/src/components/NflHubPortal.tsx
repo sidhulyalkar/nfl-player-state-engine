@@ -10,12 +10,19 @@ import '../nfl-hub.css';
 
 const FILTERS = ['ALL', 'ROSTER', 'ROLE', 'INJURY', 'MARKET'] as const;
 type Filter = typeof FILTERS[number];
+const REDRAFT_MARKET_POSITIONS = new Set(['QB', 'RB', 'WR', 'TE', 'K']);
 
 function eventGroup(event: NflHubEvent): Exclude<Filter, 'ALL'> {
   if (event.event_type.includes('INJURY')) return 'INJURY';
   if (event.event_type.includes('DEPTH')) return 'ROLE';
   if (event.event_type.includes('MARKET')) return 'MARKET';
   return 'ROSTER';
+}
+
+function eventIsFantasyRelevant(event: NflHubEvent) {
+  if (eventGroup(event) !== 'MARKET') return true;
+  const position = (event.after?.position ?? event.before?.position ?? '').toUpperCase();
+  return REDRAFT_MARKET_POSITIONS.has(position);
 }
 
 function eventLabel(value: string) {
@@ -105,26 +112,31 @@ export function NflHubPortal() {
     return () => request.current?.abort();
   }, [load]);
 
+  const fantasyEvents = useMemo(
+    () => (hub?.events ?? []).filter(eventIsFantasyRelevant),
+    [hub],
+  );
+
   const visibleEvents = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return (hub?.events ?? []).filter((event) => {
+    return fantasyEvents.filter((event) => {
       if (filter !== 'ALL' && eventGroup(event) !== filter) return false;
       if (!term) return true;
       const state = currentState(event);
       return `${event.player_name ?? ''} ${state?.team ?? ''} ${state?.position ?? ''} ${event.detail}`
         .toLowerCase().includes(term);
     });
-  }, [filter, hub, search]);
+  }, [fantasyEvents, filter, search]);
 
   const counts = useMemo(() => {
-    const output: Record<Filter, number> = { ALL: hub?.event_count ?? 0, ROSTER: 0, ROLE: 0, INJURY: 0, MARKET: 0 };
-    (hub?.events ?? []).forEach((event) => { output[eventGroup(event)] += 1; });
+    const output: Record<Filter, number> = { ALL: fantasyEvents.length, ROSTER: 0, ROLE: 0, INJURY: 0, MARKET: 0 };
+    fantasyEvents.forEach((event) => { output[eventGroup(event)] += 1; });
     return output;
-  }, [hub]);
+  }, [fantasyEvents]);
 
   const sourceHealthy = hub?.source_health.filter((source) => source.available).length ?? 0;
   const sourceTotal = hub?.source_health.length ?? 0;
-  const topEvents = (hub?.events ?? []).slice(0, 4);
+  const topEvents = fantasyEvents.slice(0, 4);
 
   return <div className="nfl-hub-root">
     <header className="nfl-hub-header">
@@ -149,14 +161,14 @@ export function NflHubPortal() {
 
     <section className="nfl-hub-summary-grid">
       <div className="nfl-hub-summary primary">
-        <span>Changes since prior snapshot</span>
-        <strong>{hub?.event_count ?? '—'}</strong>
-        <small>{hub?.event_count ? `${topEvents.length} highest-impact changes surfaced first` : 'Refreshes are compared against the last good snapshot.'}</small>
+        <span>Fantasy-relevant changes</span>
+        <strong>{hub ? fantasyEvents.length : '—'}</strong>
+        <small>{fantasyEvents.length ? `${topEvents.length} highest-impact changes surfaced first` : 'Refreshes are compared against the last good snapshot.'}</small>
       </div>
       <div className="nfl-hub-summary">
         <span>Rostered players tracked</span>
         <strong>{hub?.player_count ?? '—'}</strong>
-        <small>GSIS-linked current roster state</small>
+        <small>Full-NFL GSIS-linked roster state</small>
       </div>
       <div className="nfl-hub-summary">
         <span>Source health</span>
@@ -173,7 +185,7 @@ export function NflHubPortal() {
     <section className="nfl-hub-impact-strip">
       <div className="nfl-hub-section-heading">
         <div><span>RIGHT NOW</span><h2>Highest-impact movement</h2></div>
-        <small>Observed state changes, not automatic model adjustments.</small>
+        <small>Observed state changes, not automatic model adjustments. IDP market ranks stay out of non-IDP draft context.</small>
       </div>
       <div className="nfl-hub-impact-grid">
         {topEvents.length ? topEvents.map((event) => {
@@ -188,7 +200,7 @@ export function NflHubPortal() {
             </div>
             {event.player_id && <a href={workspaceHref('intelligence', event.player_id)}>Inspect <ArrowUpRight size={13}/></a>}
           </article>;
-        }) : <div className="nfl-hub-empty"><CheckCircle2 size={20}/><strong>No state changes recorded yet</strong><span>The first successful refresh establishes a baseline. The next refresh will expose deltas.</span></div>}
+        }) : <div className="nfl-hub-empty"><CheckCircle2 size={20}/><strong>No fantasy-relevant state changes recorded yet</strong><span>The first successful refresh establishes a baseline. The next refresh will expose deltas.</span></div>}
       </div>
     </section>
 
