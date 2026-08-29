@@ -135,6 +135,7 @@ def test_kicker_board_uses_exact_identity_and_current_roster_truth() -> None:
             "player_name": "Brandon Aubrey",
             "team": "DAL",
             "roster_status": "ACT",
+            "market_team": "DAL",
             "market_order": 1,
             "positional_ecr": 1.19,
             "rank_sd": 0.53,
@@ -146,6 +147,17 @@ def test_kicker_board_uses_exact_identity_and_current_roster_truth() -> None:
             "authority": "external_market_only",
         }
     ]
+
+
+def test_current_roster_team_wins_when_market_team_is_stale() -> None:
+    rankings = _rankings().copy()
+    rankings.loc[rankings["id"].eq(26068), "team"] = "HOU"
+
+    snapshot = build_special_teams_market(rankings, _playerids(), _rosters(), season=2026)
+
+    kicker = snapshot["kickers"][0]
+    assert kicker["team"] == "DAL"
+    assert kicker["market_team"] == "HOU"
 
 
 def test_dst_board_uses_team_entity_and_canonical_nflverse_code() -> None:
