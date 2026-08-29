@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import FastAPI
 
+from player_state_engine import __version__
 from player_state_engine.api.app import create_app as create_base_app
 from player_state_engine.api.draft_planner_routes import install_draft_planner_routes
 from player_state_engine.api.draft_reliability_routes import install_draft_reliability_routes
@@ -16,6 +18,27 @@ from player_state_engine.api.shadow_season_routes import install_shadow_season_r
 from player_state_engine.api.structured_intelligence_routes import (
     install_structured_intelligence_routes,
 )
+
+
+def _replace_health_version(app: FastAPI) -> None:
+    """Keep inherited health diagnostics while making package metadata the release identity."""
+
+    inherited: Callable[[], dict[str, object]] | None = None
+    for route in list(app.router.routes):
+        if getattr(route, "path", None) != "/health":
+            continue
+        methods = getattr(route, "methods", set()) or set()
+        if "GET" not in methods:
+            continue
+        inherited = getattr(route, "endpoint", None)
+        app.router.routes.remove(route)
+        break
+
+    @app.get("/health")
+    def operational_health() -> dict[str, object]:
+        payload = dict(inherited()) if inherited is not None else {"status": "ok"}
+        payload["version"] = __version__
+        return payload
 
 
 def create_app(**kwargs: Any) -> FastAPI:
@@ -77,7 +100,8 @@ def create_app(**kwargs: Any) -> FastAPI:
         registry_path=kwargs.get("game_intelligence_registry"),
         benchmark_root=kwargs.get("game_intelligence_benchmark_root"),
     )
-    app.version = "0.16.0"
+    app.version = __version__
+    _replace_health_version(app)
     app.description = (
         f"{app.description} Live Draft War Room, player intelligence, cross-league portfolio "
         "exposure, Player State Graph shadow comparison and sensitivity, frozen Evidence Factory, "
