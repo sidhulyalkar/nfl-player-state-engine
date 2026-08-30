@@ -43,11 +43,12 @@ def score_quantile_components(
     config: LeagueConfig,
     quantiles: tuple[int, ...] = (10, 50, 90),
 ) -> pd.DataFrame:
-    """Approximate fantasy quantiles from stat quantiles.
+    """Approximate fantasy quantiles from independent stat quantiles.
 
-    Quantiles are not additive, so these columns are a deterministic approximation. When
-    correlated stat draws are available, score those draws first with ``score_simulation_draws``
-    and aggregate the scored distribution instead.
+    Quantiles are not additive. This helper is useful for an interpretable approximation, but
+    its output is never exact league-score distribution evidence. When correlated stat draws are
+    available, score those draws first with :func:`score_simulation_draws` and aggregate the
+    scored distribution instead.
     """
     out = frame.copy()
     for quantile in quantiles:
@@ -82,7 +83,12 @@ def aggregate_scored_draws(
     quantiles: Iterable[float] = (0.10, 0.50, 0.90),
     prefix: str = "valuation_points",
 ) -> pd.DataFrame:
-    """Aggregate scored Monte Carlo draws into player-level fantasy quantiles."""
+    """Aggregate scored Monte Carlo draws into player-level fantasy quantiles.
+
+    The resulting quantiles inherit exact-scoring authority only because scoring happened on
+    each already-correlated football draw before the distribution was aggregated. The flag does
+    not claim the underlying football model is perfect; it only certifies the scoring operation.
+    """
     groups = [column for column in group_columns if column in draws]
     if not groups:
         raise ValueError("At least one group column must be present in scored draws.")
@@ -106,6 +112,8 @@ def aggregate_scored_draws(
         result = result.merge(piece, on=groups, how="outer", validate="one_to_one")
     result["league_scoring_source"] = "correlated_draw_rescore"
     result["league_scoring_coverage"] = 1.0
+    result["league_scoring_exact"] = True
+    result["league_scoring_approximate"] = False
     return result
 
 
@@ -133,6 +141,18 @@ def _component_coverage(frame: pd.DataFrame, quantiles: tuple[int, ...]) -> pd.S
     return coverage.clip(0.0, 1.0)
 
 
+def _declared_exact_scoring(frame: pd.DataFrame) -> pd.Series:
+    """Return a fail-closed exact-scoring declaration for already-scored league quantiles."""
+
+    if "league_scoring_exact" not in frame:
+        return pd.Series(False, index=frame.index, dtype=bool)
+    values = frame["league_scoring_exact"]
+    if pd.api.types.is_bool_dtype(values):
+        return values.fillna(False).astype(bool)
+    normalized = values.astype("string").str.strip().str.lower()
+    return normalized.isin({"true", "1", "yes"})
+
+
 def prepare_league_scoring_quantiles(
     frame: pd.DataFrame,
     config: LeagueConfig,
@@ -144,13 +164,15 @@ def prepare_league_scoring_quantiles(
 
     Priority order is deliberately explicit:
 
-    1. Already-scored ``league_season_points_q*`` columns from a correlated simulator.
-    2. Complete position-relevant component quantiles rescored with league weights.
+    1. Already-scored ``league_season_points_q*`` columns. These count as *exact scoring* only
+       when the producer also supplies ``league_scoring_exact=true``. The intended producer is
+       correlated-draw scoring followed by distribution aggregation.
+    2. Complete position-relevant component quantiles rescored with league weights. This is an
+       interpretable approximation because marginal quantiles are not additive.
     3. Generic ``season_points_q*`` fallback, clearly marked as such.
 
-    The third path preserves backwards compatibility but never masquerades as scoring-exact.
-    ``league_scoring_coverage`` makes missing component support observable in the API and
-    validation reports.
+    Numerical coverage and scoring authority are separate. Complete components can support a
+    useful valuation while still being ineligible for an exact-scoring readiness badge.
     """
     out = frame.copy()
     if out.empty:
@@ -158,6 +180,8 @@ def prepare_league_scoring_quantiles(
             out[f"valuation_points_q{quantile}"] = pd.Series(dtype=float)
         out["league_scoring_source"] = pd.Series(dtype=str)
         out["league_scoring_coverage"] = pd.Series(dtype=float)
+        out["league_scoring_exact"] = pd.Series(dtype=bool)
+        out["league_scoring_approximate"] = pd.Series(dtype=bool)
         return out
 
     coverage = _component_coverage(out, quantiles)
@@ -169,6 +193,7 @@ def prepare_league_scoring_quantiles(
             provided_complete[:] = False
             break
         provided_complete &= pd.to_numeric(out[column], errors="coerce").notna()
+    provided_exact = provided_complete & _declared_exact_scoring(out)
 
     component_complete = coverage.ge(1.0 - 1e-12)
     fallback_complete = pd.Series(True, index=out.index, dtype=bool)
@@ -183,7 +208,7 @@ def prepare_league_scoring_quantiles(
         missing_rows = int((~(provided_complete | component_complete | fallback_complete)).sum())
         raise ValueError(
             f"Unable to construct league valuation quantiles for {missing_rows} rows; "
-            "provide correlated league points, complete stat quantiles, or generic season points."
+            "provide scored league points, complete stat quantiles, or generic season points."
         )
 
     for quantile in quantiles:
@@ -205,10 +230,16 @@ def prepare_league_scoring_quantiles(
         out[f"valuation_points_q{quantile}"] = target.astype(float)
 
     out["league_scoring_source"] = np.select(
-        [provided_complete, component_complete],
-        ["correlated_or_provided_league_quantiles", "component_quantile_rescore"],
+        [provided_exact, provided_complete, component_complete],
+        [
+            "verified_league_quantiles",
+            "provided_league_quantiles_unverified",
+            "component_quantile_rescore",
+        ],
         default="generic_points_fallback",
     )
     out["league_scoring_coverage"] = np.where(provided_complete, 1.0, coverage).astype(float)
+    out["league_scoring_exact"] = provided_exact.astype(bool)
+    out["league_scoring_approximate"] = ~provided_exact
     out["league_scoring_fallback"] = out["league_scoring_source"].eq("generic_points_fallback")
     return out

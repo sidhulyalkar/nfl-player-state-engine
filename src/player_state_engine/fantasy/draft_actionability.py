@@ -68,6 +68,16 @@ def _market_coverage(frame: pd.DataFrame) -> tuple[float, str | None]:
     return 0.0, None
 
 
+def _bool_series(frame: pd.DataFrame, column: str) -> pd.Series:
+    if column not in frame:
+        return pd.Series(False, index=frame.index, dtype=bool)
+    values = frame[column]
+    if pd.api.types.is_bool_dtype(values):
+        return values.fillna(False).astype(bool)
+    normalized = values.astype("string").str.strip().str.lower()
+    return normalized.isin({"true", "1", "yes"})
+
+
 def assess_candidate_scope_actionability(
     projections: pd.DataFrame,
     candidates: pd.DataFrame,
@@ -80,11 +90,11 @@ def assess_candidate_scope_actionability(
 
     This deliberately does not replace ``LeagueReadinessReport`` or live-draft qualification.
     The full league can remain blocked because K/DST or another required position is unsupported
-    while a specific QB/RB/WR/TE candidate set is internally complete and exactly scored.
+    while a specific QB/RB/WR/TE candidate set is internally complete.
 
-    ``actionable=True`` therefore means only that the supplied candidate set has enough verified
-    numerical support to compare those candidates. It does not mean the overall draft strategy is
-    complete, and callers must continue to surface the global league verdict alongside this report.
+    ``actionable=True`` requires verified exact league-score distributions for every supplied
+    candidate. Complete marginal stat quantiles may still support useful approximate comparisons,
+    but they do not earn exact actionability because quantiles are not additive.
     """
 
     if not 0.0 <= minimum_market_coverage <= 1.0:
@@ -163,12 +173,25 @@ def assess_candidate_scope_actionability(
             except ValueError:
                 blockers.append("UNSCORABLE_CANDIDATE_PROJECTIONS")
             else:
-                source = scored["league_scoring_source"].astype(str)
-                exact_scoring_coverage = float(source.ne("generic_points_fallback").mean())
+                exact = _bool_series(scored, "league_scoring_exact")
+                exact_scoring_coverage = float(exact.mean())
                 valuation = pd.to_numeric(scored["valuation_points_q50"], errors="coerce")
                 valuation_coverage = float(valuation.notna().mean())
-                if exact_scoring_coverage < 1.0 - 1e-12:
+                source = scored["league_scoring_source"].astype(str)
+                if source.eq("generic_points_fallback").any():
                     blockers.append("CANDIDATE_GENERIC_SCORING_FALLBACK")
+                if source.isin(
+                    ["component_quantile_rescore", "provided_league_quantiles_unverified"]
+                ).any():
+                    blockers.append("CANDIDATE_INEXACT_SCORING_APPROXIMATION")
+                if exact_scoring_coverage < 1.0 - 1e-12 and not any(
+                    reason in blockers
+                    for reason in (
+                        "CANDIDATE_GENERIC_SCORING_FALLBACK",
+                        "CANDIDATE_INEXACT_SCORING_APPROXIMATION",
+                    )
+                ):
+                    blockers.append("CANDIDATE_EXACT_SCORING_UNVERIFIED")
                 if valuation_coverage < 1.0 - 1e-12:
                     blockers.append("INCOMPLETE_CANDIDATE_VALUATION")
 

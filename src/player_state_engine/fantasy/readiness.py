@@ -44,6 +44,7 @@ class LeagueReadinessReport:
     valuation_coverage: float
     required_position_exact_scoring: dict[str, float] = field(default_factory=dict)
     inexact_required_positions: tuple[str, ...] = ()
+    approximate_scoring_coverage: float = 0.0
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -78,6 +79,16 @@ def _market_coverage(frame: pd.DataFrame) -> tuple[float, str | None]:
     return 0.0, None
 
 
+def _bool_series(frame: pd.DataFrame, column: str) -> pd.Series:
+    if column not in frame:
+        return pd.Series(False, index=frame.index, dtype=bool)
+    values = frame[column]
+    if pd.api.types.is_bool_dtype(values):
+        return values.fillna(False).astype(bool)
+    normalized = values.astype("string").str.strip().str.lower()
+    return normalized.isin({"true", "1", "yes"})
+
+
 def assess_league_readiness(
     projections: pd.DataFrame,
     config: LeagueConfig,
@@ -90,15 +101,14 @@ def assess_league_readiness(
 ) -> LeagueReadinessReport:
     """Audit whether a projection pool is trustworthy for this league's draft decisions.
 
-    Readiness is deliberately league-specific. A player pool can be adequate for a
-    conventional 1QB league and unusable for a 2QB + DST + kicker format. The
-    audit never manufactures missing positions or calls generic fantasy points an
-    exact custom-league rescore.
+    Readiness is deliberately league-specific. Numerical valuation coverage and exact-scoring
+    authority are separate concepts. Complete component quantiles can support an approximate
+    custom-league valuation, but they are not an exact fantasy-score distribution because
+    marginal quantiles are not additive.
 
-    Overall exact-scoring coverage is not sufficient on its own. Every position that can
-    legally occupy a starting slot must independently clear the required-position scoring
-    gate, otherwise a large skill-player population could dilute an entirely approximate
-    K/DST lane into an apparently healthy aggregate percentage.
+    Every position that can legally occupy a starting slot must independently clear the
+    exact-scoring gate. This prevents both population dilution and approximate component rescoring
+    from masquerading as production-ready league-score distributions.
     """
 
     if not 0.0 <= minimum_market_coverage <= 1.0:
@@ -161,6 +171,7 @@ def assess_league_readiness(
         flags.append("LOW_MARKET_COVERAGE")
 
     exact_scoring_coverage = 0.0
+    approximate_scoring_coverage = 0.0
     valuation_coverage = 0.0
     required_position_exact_scoring: dict[str, float] = {}
     inexact_required_positions: tuple[str, ...] = ()
@@ -174,8 +185,17 @@ def assess_league_readiness(
             valuation = pd.to_numeric(scored["valuation_points_q50"], errors="coerce")
             valuation_coverage = float(valuation.notna().mean())
             source = scored["league_scoring_source"].astype(str)
-            exact = source.ne("generic_points_fallback")
+            exact = _bool_series(scored, "league_scoring_exact")
+            approximate = _bool_series(scored, "league_scoring_approximate") & valuation.notna()
             exact_scoring_coverage = float(exact.mean())
+            approximate_scoring_coverage = float(approximate.mean())
+
+            if source.eq("component_quantile_rescore").any() or source.eq(
+                "provided_league_quantiles_unverified"
+            ).any():
+                flags.append("INEXACT_SCORING_APPROXIMATION")
+            if source.eq("generic_points_fallback").any():
+                flags.append("GENERIC_SCORING_FALLBACK")
 
             if "position" in scored:
                 normalized_position = scored["position"].map(_canonical_position)
@@ -194,8 +214,10 @@ def assess_league_readiness(
                     flags.append("INEXACT_REQUIRED_POSITION_SCORING")
                     blockers.append("INEXACT_REQUIRED_POSITION_SCORING")
 
-    if exact_scoring_coverage < minimum_exact_scoring_coverage:
-        flags.append("GENERIC_SCORING_FALLBACK")
+    if exact_scoring_coverage < minimum_exact_scoring_coverage and not any(
+        flag in flags for flag in ("INEXACT_SCORING_APPROXIMATION", "GENERIC_SCORING_FALLBACK")
+    ):
+        flags.append("LOW_EXACT_SCORING_COVERAGE")
     if valuation_coverage < minimum_valuation_coverage:
         flags.append("INCOMPLETE_VALUATION_COVERAGE")
         blockers.append("INCOMPLETE_VALUATION_COVERAGE")
@@ -234,4 +256,5 @@ def assess_league_readiness(
         valuation_coverage=valuation_coverage,
         required_position_exact_scoring=required_position_exact_scoring,
         inexact_required_positions=inexact_required_positions,
+        approximate_scoring_coverage=approximate_scoring_coverage,
     )
