@@ -4,6 +4,7 @@ import json
 
 from fastapi.testclient import TestClient
 
+from player_state_engine import __version__
 from player_state_engine.api.operational import create_app
 
 
@@ -29,7 +30,7 @@ def test_benchmark_api_is_guarded_and_read_only(tmp_path) -> None:
         game_intelligence_registry=tmp_path / "registry.json",
         game_intelligence_benchmark_root=benchmark_root,
     )
-    assert app.version == "0.16.0"
+    assert app.version == __version__
     client = TestClient(app)
 
     status = client.get("/v1/research/game-intelligence/status")
