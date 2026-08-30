@@ -75,7 +75,7 @@ def main() -> None:
 
     for slug, league_meta in sorted((benchmark_manifest.get("leagues") or {}).items()):
         gate = league_meta.get("gate") or {}
-        if gate.get("approved") is not True or gate.get("blockers") not in ([], ()): 
+        if gate.get("approved") is not True or gate.get("blockers") not in ([], ()):
             raise RuntimeError(f"Direct benchmark gate is not approved for {slug}")
 
         predictions_path = args.benchmark_root / slug / "predictions.parquet"
