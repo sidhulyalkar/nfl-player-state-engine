@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from player_state_engine.fantasy.preseason_league_score import (
     LEAGUE_SCORE_TARGET,
     build_preseason_league_scored_dataset,
 )
+from player_state_engine.learning.artifact_registry import sha256_file
 
 DEFAULT_LEAGUES = (
     "configs/fantasy/8_team_ppr_2qb_expanded.yaml",
@@ -27,6 +29,15 @@ DEFAULT_LEAGUES = (
 
 def _slug(path: Path) -> str:
     return path.stem.replace(" ", "_")
+
+
+def _file_record(path: str | Path) -> dict[str, object]:
+    candidate = Path(path)
+    return {
+        "filename": candidate.name,
+        "bytes": int(candidate.stat().st_size),
+        "sha256": sha256_file(candidate),
+    }
 
 
 def main() -> None:
@@ -48,6 +59,10 @@ def main() -> None:
         raise ValueError("At least one league contract is required")
 
     paths = download_nflverse(args.seasons, args.raw_dir)
+    source_artifacts = {
+        role: _file_record(paths[role])
+        for role in ("player_stats", "rosters_weekly", "players")
+    }
     stats = read_table(paths["player_stats"])
     rosters = read_table(paths["rosters_weekly"])
     players = read_table(paths["players"])
@@ -87,9 +102,15 @@ def main() -> None:
             league,
             target=LEAGUE_SCORE_TARGET,
         )
+        (league_output / "target_diagnostics.json").write_text(
+            json.dumps(target_diagnostics.as_dict(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
 
         # Source-audit canonical PPR against the maintained nflverse PPR field before treating the
-        # direct PPR target as a scoring-equivalent outcome. This is not a promotion threshold.
+        # direct PPR target as a source-qualified outcome. The audit uses nflverse's documented
+        # reference formula, including its individual special-teams touchdown convention, while
+        # the modeled target continues to obey only the actual league contract.
         if league.scoring.lower() == "ppr":
             if target_diagnostics.ppr_reference_rows <= 0:
                 raise RuntimeError("Canonical PPR source consistency check has no comparable rows")
@@ -98,7 +119,7 @@ def main() -> None:
                 or target_diagnostics.ppr_reference_max_abs_error > 1e-9
             ):
                 raise RuntimeError(
-                    "Reconstructed canonical PPR does not match nflverse fantasy_points_ppr; "
+                    "Reconstructed nflverse PPR reference does not match fantasy_points_ppr; "
                     f"max_abs_error={target_diagnostics.ppr_reference_max_abs_error}"
                 )
 
@@ -119,6 +140,7 @@ def main() -> None:
         write_table(result.comparisons, league_output / "comparisons.csv")
         league_results[slug] = {
             "league_path": str(league_path),
+            "league_config": _file_record(league_path),
             "teams": int(league.teams),
             "scoring": league.scoring,
             "median_scoring": bool(league.median_scoring),
@@ -128,9 +150,12 @@ def main() -> None:
         }
 
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "authority": "direct_league_score_research_only",
         "automatic_promotion": False,
+        "evaluated_code_sha": os.getenv("GITHUB_SHA"),
+        "base_config": _file_record(args.config),
+        "source_artifacts": source_artifacts,
         "seasons": [int(value) for value in args.seasons],
         "target": LEAGUE_SCORE_TARGET,
         "population_contract": "opening_roster_universe_with_zero_output_seasons",
