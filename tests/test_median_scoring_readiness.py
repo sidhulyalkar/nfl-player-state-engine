@@ -43,8 +43,8 @@ def test_median_game_format_is_not_labelled_ready_even_with_exact_player_scores(
     report = assess_league_readiness(_exact_core(), config)
 
     assert report.ready is False
-    assert "MEDIAN_SCORING_POLICY_UNVALIDATED" in report.flags
-    assert "MEDIAN_SCORING_POLICY_UNVALIDATED" in report.blocking_flags
+    assert report.flags.count("MEDIAN_SCORING_POLICY_UNVALIDATED") == 1
+    assert report.blocking_flags.count("MEDIAN_SCORING_POLICY_UNVALIDATED") == 1
     assert report.exact_scoring_coverage == 1.0
     assert report.inexact_required_positions == ()
 
