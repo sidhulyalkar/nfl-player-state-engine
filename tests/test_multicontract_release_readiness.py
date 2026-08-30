@@ -58,8 +58,12 @@ def _special() -> dict[str, object]:
     return {
         "authority": "external_market_only",
         "generated_at_utc": (NOW - timedelta(hours=1)).isoformat(),
-        "kicker_count": 32,
-        "dst_count": 32,
+        "kicker_count": 4,
+        "kicker_identity_scheme": "gsis_id",
+        "kicker_ids": ["00-K1", "00-K2", "00-K3", "00-K4"],
+        "dst_count": 4,
+        "dst_identity_scheme": "team_abbr",
+        "dst_ids": ["AAA", "BBB", "CCC", "DDD"],
         "model_fields_present": False,
     }
 
@@ -174,10 +178,11 @@ def test_median_policy_is_provisional_overlay_not_a_false_ready_badge() -> None:
     assert result.status == "PROVISIONAL"
     assert result.core_readiness is not None and result.core_readiness.ready is True
     assert "MEDIAN_SCORING_POLICY_UNVALIDATED" in result.provisional_reasons
+    assert result.readiness is not None
     assert "MEDIAN_SCORING_POLICY_UNVALIDATED" in result.readiness.blocking_flags
 
 
-def test_market_only_special_teams_are_provisional_only_when_fresh_and_explicit() -> None:
+def test_market_only_special_teams_require_fresh_exact_identities() -> None:
     ppr = _config(scoring="ppr", special=True)
     frame = _players(ppr, "qualified_distribution")
     metadata = {
@@ -196,10 +201,23 @@ def test_market_only_special_teams_are_provisional_only_when_fresh_and_explicit(
     assert report.status == "PROVISIONAL"
     assert report.can_use_core_draft_board is True
     assert report.leagues[0].market_only_positions == ("DST", "K")
+    assert report.special_teams_supported_positions == ("DST", "K")
 
     report = _assess({ppr.scoring_contract_id: frame}, metadata, {"expanded": ppr})
     assert report.status == "BLOCKED"
     assert any("MARKET_ONLY_SUPPORT_MISSING:DST,K" in item for item in report.blocking_reasons)
+
+    mismatched = _special()
+    mismatched["kicker_count"] = 5
+    report = _assess(
+        {ppr.scoring_contract_id: frame},
+        metadata,
+        {"expanded": ppr},
+        special_teams_market_snapshot=mismatched,
+    )
+    assert report.status == "BLOCKED"
+    assert report.special_teams_supported_positions == ("DST",)
+    assert any("MARKET_ONLY_SUPPORT_MISSING:K" in item for item in report.blocking_reasons)
 
 
 def test_bundle_integrity_freshness_and_hub_identity_are_hard_blockers() -> None:
