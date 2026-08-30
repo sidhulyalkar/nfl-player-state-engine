@@ -7,15 +7,20 @@ import pandas as pd
 
 from player_state_engine.fantasy.league import LeagueConfig
 
-# These are the minimum components required before a generic season-points projection is
-# replaced by a component-level league rescore. Optional statistics (two-point conversions,
-# bonuses, etc.) are still scored when present, but their absence must not silently turn a
-# partial projection into an "exact" custom-league projection.
-_PRIMARY_STATS_BY_POSITION: dict[str, tuple[str, ...]] = {
-    "QB": ("passing_yards", "passing_tds", "interceptions", "rushing_yards", "rushing_tds"),
-    "RB": ("rushing_yards", "rushing_tds", "receptions", "receiving_yards", "receiving_tds"),
-    "WR": ("receptions", "receiving_yards", "receiving_tds"),
-    "TE": ("receptions", "receiving_yards", "receiving_tds"),
+# Applicability for the component-quantile approximation. This is intentionally distinct from
+# exact-scoring authority. Complete marginals can support a useful approximate rescore, but only
+# already-scored league distributions with explicit producer authority may be called exact.
+_STAT_POSITIONS: dict[str, frozenset[str]] = {
+    "passing_yards": frozenset({"QB"}),
+    "passing_tds": frozenset({"QB"}),
+    "interceptions": frozenset({"QB"}),
+    "rushing_yards": frozenset({"QB", "RB", "WR"}),
+    "rushing_tds": frozenset({"QB", "RB", "WR"}),
+    "receptions": frozenset({"RB", "WR", "TE"}),
+    "receiving_yards": frozenset({"RB", "WR", "TE"}),
+    "receiving_tds": frozenset({"RB", "WR", "TE"}),
+    "fumbles_lost": frozenset({"QB", "RB", "WR", "TE"}),
+    "two_point_conversions": frozenset({"QB", "RB", "WR", "TE"}),
 }
 
 
@@ -117,12 +122,39 @@ def aggregate_scored_draws(
     return result
 
 
-def _required_component_columns(position: str, quantiles: tuple[int, ...]) -> tuple[str, ...]:
-    statistics = _PRIMARY_STATS_BY_POSITION.get(position.upper(), ())
+def required_scoring_statistics(position: str, config: LeagueConfig) -> tuple[str, ...]:
+    """Return nonzero supported terms required for a complete component approximation.
+
+    This function certifies numerical component completeness only. It does not grant exact
+    distribution authority. A complete same-quantile rescore remains approximate because the
+    component marginals are not jointly distributed.
+    """
+
+    normalized = str(position).upper()
+    required = [
+        statistic
+        for statistic, weight in config.scoring_weights.items()
+        if abs(float(weight)) > 1e-12 and normalized in _STAT_POSITIONS.get(statistic, frozenset())
+    ]
+    if normalized == "TE" and config.tight_end_premium and "receptions" not in required:
+        required.append("receptions")
+    return tuple(sorted(set(required)))
+
+
+def _required_component_columns(
+    position: str,
+    config: LeagueConfig,
+    quantiles: tuple[int, ...],
+) -> tuple[str, ...]:
+    statistics = required_scoring_statistics(position, config)
     return tuple(f"{statistic}_q{quantile}" for statistic in statistics for quantile in quantiles)
 
 
-def _component_coverage(frame: pd.DataFrame, quantiles: tuple[int, ...]) -> pd.Series:
+def _component_coverage(
+    frame: pd.DataFrame,
+    config: LeagueConfig,
+    quantiles: tuple[int, ...],
+) -> pd.Series:
     positions = (
         frame["position"].astype(str).str.upper()
         if "position" in frame
@@ -130,7 +162,7 @@ def _component_coverage(frame: pd.DataFrame, quantiles: tuple[int, ...]) -> pd.S
     )
     coverage = pd.Series(0.0, index=frame.index, dtype=float)
     for position, indexes in positions.groupby(positions).groups.items():
-        required = _required_component_columns(str(position), quantiles)
+        required = _required_component_columns(str(position), config, quantiles)
         if not required:
             continue
         available = [column for column in required if column in frame]
@@ -166,13 +198,14 @@ def prepare_league_scoring_quantiles(
 
     1. Already-scored ``league_season_points_q*`` columns. These count as *exact scoring* only
        when the producer also supplies ``league_scoring_exact=true``. The intended producer is
-       correlated-draw scoring followed by distribution aggregation.
-    2. Complete position-relevant component quantiles rescored with league weights. This is an
-       interpretable approximation because marginal quantiles are not additive.
+       correlated-draw scoring, or a direct model of the final league-score target.
+    2. Complete supported component quantiles rescored with league weights. Completeness follows
+       every nonzero configured scoring statistic applicable to the position, including fumbles
+       and two-point conversions. This remains an approximation because marginals are not additive.
     3. Generic ``season_points_q*`` fallback, clearly marked as such.
 
     Numerical coverage and scoring authority are separate. Complete components can support a
-    useful valuation while still being ineligible for an exact-scoring readiness badge.
+    useful valuation while remaining ineligible for an exact-scoring readiness badge.
     """
     out = frame.copy()
     if out.empty:
@@ -184,7 +217,7 @@ def prepare_league_scoring_quantiles(
         out["league_scoring_approximate"] = pd.Series(dtype=bool)
         return out
 
-    coverage = _component_coverage(out, quantiles)
+    coverage = _component_coverage(out, config, quantiles)
     component_scored = score_quantile_components(out, config, quantiles=quantiles)
     provided_columns = [f"league_season_points_q{quantile}" for quantile in quantiles]
     provided_complete = pd.Series(True, index=out.index, dtype=bool)
