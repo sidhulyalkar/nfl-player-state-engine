@@ -177,9 +177,10 @@ def value_players(
     without an explicit policy preserve historical behavior for compatibility, but production
     release gates should require an explicit qualified policy.
 
-    Median-game bonuses are also fail-closed. A median league receives no heuristic floor bonus
-    unless the caller supplies the exact ``qualified_team_week_replay`` authority token from a
-    separately qualified median-policy artifact.
+    Median-game adjustments are fail-closed too. An unvalidated median league receives no hidden
+    heuristic bonus. If a separate team-week replay later earns authority, the projection artifact
+    must supply its replay-derived ``median_policy_adjustment`` explicitly; the authority token alone
+    can never resurrect the old hard-coded floor-VORP coefficient.
     """
     data = projections.copy()
     required = {
@@ -262,9 +263,19 @@ def value_players(
     data["median_policy_authority"] = (
         QUALIFIED_MEDIAN_POLICY_AUTHORITY if median_policy_applied else "none"
     )
-    median_bonus: pd.Series | float = 0.0
+    median_adjustment = pd.Series(0.0, index=data.index, dtype=float)
     if median_policy_applied:
-        median_bonus = config.median_game_weight * 0.15 * data["decision_floor_vorp"]
+        if "median_policy_adjustment" not in data:
+            raise ValueError(
+                "Qualified median policy requires replay-derived median_policy_adjustment values"
+            )
+        replay_adjustment = pd.to_numeric(data["median_policy_adjustment"], errors="coerce")
+        if replay_adjustment.isna().any():
+            raise ValueError(
+                "Qualified median policy contains missing or non-numeric median_policy_adjustment values"
+            )
+        median_adjustment = replay_adjustment.astype(float)
+    data["decision_median_adjustment"] = median_adjustment
 
     data["decision_value"] = (
         data["availability_probability"]
@@ -276,7 +287,7 @@ def value_players(
         + 5.0 * data["opportunity_confidence"]
         + 3.0 * data["role_growth_score"]
         + 2.0 * data["schedule_score"]
-        + median_bonus
+        + data["decision_median_adjustment"]
     )
 
     positive_vorp = data["vorp"].clip(lower=0.0)
