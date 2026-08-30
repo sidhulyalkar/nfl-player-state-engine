@@ -21,6 +21,7 @@ _STAT_POSITIONS: dict[str, frozenset[str]] = {
     "receiving_tds": frozenset({"RB", "WR", "TE"}),
     "fumbles_lost": frozenset({"QB", "RB", "WR", "TE"}),
     "two_point_conversions": frozenset({"QB", "RB", "WR", "TE"}),
+    "special_teams_tds": frozenset({"QB", "RB", "WR", "TE"}),
 }
 
 
@@ -123,19 +124,23 @@ def aggregate_scored_draws(
 
 
 def required_scoring_statistics(position: str, config: LeagueConfig) -> tuple[str, ...]:
-    """Return nonzero supported terms required for a complete component approximation.
+    """Return nonzero terms required for a complete component approximation.
 
-    This function certifies numerical component completeness only. It does not grant exact
-    distribution authority. A complete same-quantile rescore remains approximate because the
-    component marginals are not jointly distributed.
+    Known statistics use an explicit position-applicability contract. Any custom nonzero statistic
+    that is not in that contract is conservatively treated as applicable to every position. This
+    prevents an unfamiliar scoring rule from disappearing behind a false 100% completeness badge.
+    Complete component marginals still remain approximate because their joint distribution is not
+    known.
     """
 
     normalized = str(position).upper()
-    required = [
-        statistic
-        for statistic, weight in config.scoring_weights.items()
-        if abs(float(weight)) > 1e-12 and normalized in _STAT_POSITIONS.get(statistic, frozenset())
-    ]
+    required: list[str] = []
+    for statistic, weight in config.scoring_weights.items():
+        if abs(float(weight)) <= 1e-12:
+            continue
+        positions = _STAT_POSITIONS.get(statistic)
+        if positions is None or normalized in positions:
+            required.append(statistic)
     if normalized == "TE" and config.tight_end_premium and "receptions" not in required:
         required.append("receptions")
     return tuple(sorted(set(required)))
@@ -200,8 +205,9 @@ def prepare_league_scoring_quantiles(
        when the producer also supplies ``league_scoring_exact=true``. The intended producer is
        correlated-draw scoring, or a direct model of the final league-score target.
     2. Complete supported component quantiles rescored with league weights. Completeness follows
-       every nonzero configured scoring statistic applicable to the position, including fumbles
-       and two-point conversions. This remains an approximation because marginals are not additive.
+       every nonzero configured scoring statistic applicable to the position. Unknown custom
+       scoring statistics are conservatively required for every position. This remains an
+       approximation because marginals are not additive.
     3. Generic ``season_points_q*`` fallback, clearly marked as such.
 
     Numerical coverage and scoring authority are separate. Complete components can support a
