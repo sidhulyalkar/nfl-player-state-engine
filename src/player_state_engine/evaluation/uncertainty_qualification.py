@@ -108,7 +108,7 @@ def qualify_conformal_predictions(
         *(_qcol(target, q) for q in QUANTILES),
     }
     missing_raw = required - set(raw)
-    missing_calibrated = required | {"conformal_applied"} - set(calibrated)
+    missing_calibrated = (required | {"conformal_applied"}) - set(calibrated)
     if missing_raw:
         raise ValueError(f"Raw uncertainty frame missing columns: {sorted(missing_raw)}")
     if missing_calibrated:
@@ -120,6 +120,9 @@ def qualify_conformal_predictions(
     calibrated_eval = calibrated.loc[applied].copy()
     if calibrated_eval.empty:
         raise ValueError("No conformal-evaluable seasons remain")
+    if calibrated_eval.duplicated(["season", "player_id"]).any():
+        raise ValueError("Calibrated uncertainty rows contain duplicate season/player identities")
+
     keys = calibrated_eval[["season", "player_id"]].drop_duplicates()
     raw_eval = raw.merge(keys, on=["season", "player_id"], how="inner", validate="one_to_one")
     if len(raw_eval) != len(calibrated_eval):
@@ -139,6 +142,10 @@ def qualify_conformal_predictions(
         ],
         ignore_index=True,
     )
+    if overall.empty or set(overall["method"]) != {"raw", "conformal"}:
+        raise ValueError("Conformal qualification produced incomplete overall metrics")
+    if positions.empty:
+        raise ValueError("Conformal qualification produced no position metrics")
 
     raw_overall = overall.loc[overall["method"].eq("raw")].iloc[0]
     calibrated_overall = overall.loc[overall["method"].eq("conformal")].iloc[0]
@@ -176,7 +183,10 @@ def qualify_conformal_predictions(
         position = str(row["group"])
         position_coverage = float(row["interval_coverage"])
         metrics[f"position_{position}_coverage"] = position_coverage
-        if position_coverage < gate.min_position_coverage or position_coverage > gate.max_position_coverage:
+        if (
+            position_coverage < gate.min_position_coverage
+            or position_coverage > gate.max_position_coverage
+        ):
             blockers.append(f"POSITION_INTERVAL_COVERAGE:{position}")
         raw_row = raw_positions.loc[raw_positions["group"].eq(position)]
         if raw_row.empty:
