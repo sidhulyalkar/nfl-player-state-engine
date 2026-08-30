@@ -10,6 +10,10 @@ from player_state_engine.fantasy.league import LeagueConfig
 from player_state_engine.fantasy.scoring import prepare_league_scoring_quantiles
 
 CORE_POSITIONS = ("QB", "RB", "WR", "TE", "K", "DEF", "DST")
+QUALIFIED_DISTRIBUTION_POLICY = "qualified_distribution"
+Q50_ONLY_POLICY = "q50_only"
+LEGACY_DISTRIBUTION_POLICY = "legacy_distribution"
+QUALIFIED_MEDIAN_POLICY_AUTHORITY = "qualified_team_week_replay"
 
 
 def starter_allocation(
@@ -71,7 +75,6 @@ def replacement_ranks(
     for position in positions:
         starters = starter_counts.get(position, 0)
         if starters <= 0:
-            # Positions with no legal starting slot should not get an artificial deep replacement line.
             ranks[position] = 1
             continue
         buffer = ceil(
@@ -144,13 +147,39 @@ def _add_position_curve_features(data: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def value_players(projections: pd.DataFrame, config: LeagueConfig) -> pd.DataFrame:
-    """Produce league-specific value, floor, upside, scarcity and risk scores.
+def _decision_quantile_policy(data: pd.DataFrame) -> pd.Series:
+    if "decision_quantile_policy" not in data:
+        return pd.Series(LEGACY_DISTRIBUTION_POLICY, index=data.index, dtype="string")
+    policy = data["decision_quantile_policy"].astype("string").str.strip().str.lower()
+    policy = policy.fillna(LEGACY_DISTRIBUTION_POLICY)
+    supported = {
+        QUALIFIED_DISTRIBUTION_POLICY,
+        Q50_ONLY_POLICY,
+        LEGACY_DISTRIBUTION_POLICY,
+    }
+    unknown = sorted(set(policy.dropna().astype(str)) - supported)
+    if unknown:
+        raise ValueError(f"Unsupported decision_quantile_policy values: {unknown}")
+    return policy
 
-    League scoring is applied *before* replacement levels are calculated whenever component
-    projections are available. Generic season-points inputs remain supported, but the output
-    marks those rows as ``generic_points_fallback`` so downstream product surfaces and model
-    gates can distinguish structural league awareness from scoring-exact valuation.
+
+def value_players(
+    projections: pd.DataFrame,
+    config: LeagueConfig,
+    *,
+    median_policy_authority: str | None = None,
+) -> pd.DataFrame:
+    """Produce league-specific value, scarcity and authority-aware draft scores.
+
+    The numerical scoring source and the decision-uncertainty policy are intentionally separate.
+    An artifact may contain q10/q50/q90 for auditing while authorizing only q50 for decisions. In
+    that case the tails remain visible but cannot influence ``decision_value``. Legacy artifacts
+    without an explicit policy preserve historical behavior for compatibility, but production
+    release gates should require an explicit qualified policy.
+
+    Median-game bonuses are also fail-closed. A median league receives no heuristic floor bonus
+    unless the caller supplies the exact ``qualified_team_week_replay`` authority token from a
+    separately qualified median-policy artifact.
     """
     data = projections.copy()
     required = {
@@ -164,9 +193,12 @@ def value_players(projections: pd.DataFrame, config: LeagueConfig) -> pd.DataFra
     missing = required - set(data)
     if missing:
         raise ValueError(f"Valuation projections missing: {sorted(missing)}")
+    if median_policy_authority not in {None, QUALIFIED_MEDIAN_POLICY_AUTHORITY}:
+        raise ValueError(f"Unsupported median_policy_authority: {median_policy_authority!r}")
 
     data["position"] = data["position"].astype(str).str.upper()
     data = prepare_league_scoring_quantiles(data, config)
+    data["decision_quantile_policy"] = _decision_quantile_policy(data)
     q10_col = "valuation_points_q10"
     q50_col = "valuation_points_q50"
     q90_col = "valuation_points_q90"
@@ -181,6 +213,13 @@ def value_players(projections: pd.DataFrame, config: LeagueConfig) -> pd.DataFra
     data["floor_vorp"] = data[q10_col] - data["replacement_points"]
     data["upside_vorp"] = data[q90_col] - data["replacement_points"]
     data["uncertainty"] = data[q90_col] - data[q10_col]
+
+    q50_only = data["decision_quantile_policy"].eq(Q50_ONLY_POLICY)
+    data["decision_tail_authorized"] = ~q50_only
+    data["decision_floor_vorp"] = data["floor_vorp"].where(~q50_only, data["vorp"])
+    data["decision_upside_vorp"] = data["upside_vorp"].where(~q50_only, data["vorp"])
+    data["decision_uncertainty"] = data["uncertainty"].where(~q50_only, np.nan)
+
     data["availability_probability"] = (
         pd.to_numeric(
             data["availability_probability"]
@@ -215,23 +254,31 @@ def value_players(projections: pd.DataFrame, config: LeagueConfig) -> pd.DataFra
     ).fillna(0.0)
 
     risk = float(np.clip(config.risk_preference, 0, 1))
-    median_bonus = 0.0
-    if config.median_scoring:
-        # A second game against the weekly median rewards reliable weekly scoring.
-        # Team-level simulation is the gold standard, but floor VORP is a useful draft-time proxy.
-        median_bonus = config.median_game_weight * 0.15 * data["floor_vorp"]
+    data["decision_risk_preference_applied"] = ~q50_only
+    median_policy_applied = bool(
+        config.median_scoring and median_policy_authority == QUALIFIED_MEDIAN_POLICY_AUTHORITY
+    )
+    data["median_policy_applied"] = median_policy_applied
+    data["median_policy_authority"] = (
+        QUALIFIED_MEDIAN_POLICY_AUTHORITY if median_policy_applied else "none"
+    )
+    median_bonus: pd.Series | float = 0.0
+    if median_policy_applied:
+        median_bonus = config.median_game_weight * 0.15 * data["decision_floor_vorp"]
 
     data["decision_value"] = (
         data["availability_probability"]
-        * ((1 - risk) * data["floor_vorp"] + 0.5 * data["vorp"] + risk * data["upside_vorp"])
+        * (
+            (1 - risk) * data["decision_floor_vorp"]
+            + 0.5 * data["vorp"]
+            + risk * data["decision_upside_vorp"]
+        )
         + 5.0 * data["opportunity_confidence"]
         + 3.0 * data["role_growth_score"]
         + 2.0 * data["schedule_score"]
         + median_bonus
     )
 
-    # Backwards-compatible relative VORP remains available for existing product surfaces.
-    # ``dynamic_scarcity_score`` below is the better representation of the positional curve.
     positive_vorp = data["vorp"].clip(lower=0.0)
     scale = positive_vorp.groupby(data["position"]).transform("max").replace(0.0, np.nan)
     data["relative_vorp_score"] = (positive_vorp / scale).fillna(0.0).clip(0, 1)
