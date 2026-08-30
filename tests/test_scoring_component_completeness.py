@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from player_state_engine.fantasy.league import LeagueConfig
 from player_state_engine.fantasy.scoring import (
@@ -18,10 +19,16 @@ def _wr(include_minor: bool) -> pd.DataFrame:
         "season_points_q50": 150.0,
         "season_points_q90": 210.0,
     }
-    for statistic in ("receptions", "receiving_yards", "receiving_tds"):
-        row[f"{statistic}_q10"] = 1.0
-        row[f"{statistic}_q50"] = 2.0
-        row[f"{statistic}_q90"] = 3.0
+    for statistic in (
+        "rushing_yards",
+        "rushing_tds",
+        "receptions",
+        "receiving_yards",
+        "receiving_tds",
+    ):
+        row[f"{statistic}_q10"] = 0.0 if statistic.startswith("rushing") else 1.0
+        row[f"{statistic}_q50"] = 0.0 if statistic.startswith("rushing") else 2.0
+        row[f"{statistic}_q90"] = 0.0 if statistic.startswith("rushing") else 3.0
     if include_minor:
         for statistic in ("fumbles_lost", "two_point_conversions"):
             row[f"{statistic}_q10"] = 0.0
@@ -34,7 +41,7 @@ def test_missing_nonzero_minor_terms_prevents_complete_component_rescore() -> No
     scored = prepare_league_scoring_quantiles(_wr(include_minor=False), LeagueConfig(scoring="ppr"))
     row = scored.iloc[0]
     assert row["league_scoring_source"] == "generic_points_fallback"
-    assert float(row["league_scoring_coverage"]) == 0.6
+    assert float(row["league_scoring_coverage"]) == pytest.approx(5.0 / 7.0)
     assert bool(row["league_scoring_exact"]) is False
 
 
@@ -57,6 +64,19 @@ def test_explicit_zero_weights_remove_minor_terms_from_completeness_contract() -
     assert row["league_scoring_source"] == "component_quantile_rescore"
     assert float(row["league_scoring_coverage"]) == 1.0
     assert bool(row["league_scoring_exact"]) is False
+
+
+def test_wr_completeness_includes_rushing_and_minor_terms() -> None:
+    required = required_scoring_statistics("WR", LeagueConfig(scoring="ppr"))
+    assert required == (
+        "fumbles_lost",
+        "receiving_tds",
+        "receiving_yards",
+        "receptions",
+        "rushing_tds",
+        "rushing_yards",
+        "two_point_conversions",
+    )
 
 
 def test_tight_end_premium_requires_receptions_even_when_base_reception_weight_is_zero() -> None:
