@@ -141,7 +141,7 @@ export async function runCopilot(message: string, leagueId?: string, rosterId?: 
   };
   for (let iteration = 0; iteration < 5; iteration += 1) {
     const response = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL ?? 'gemini-3.6-flash', contents, config,
+      model: process.env.GEMINI_MODEL ?? 'gemini-3.7-flash', contents, config,
     });
     if (!response.functionCalls?.length) return response.text || 'No answer generated.';
     contents.push(response.candidates?.[0]?.content);

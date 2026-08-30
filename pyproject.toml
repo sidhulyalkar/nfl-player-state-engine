@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nfl-player-state-engine"
-version = "0.16.0"
-description = "Leakage-safe probabilistic NFL projections, terminal-family replay, possession decisions, and game simulation."
+version = "0.17.0"
+description = "Leakage-safe probabilistic NFL projections, fantasy draft decisions, NFL state, and game simulation."
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}

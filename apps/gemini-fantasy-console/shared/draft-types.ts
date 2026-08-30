@@ -36,6 +36,15 @@ export interface DraftBoardPlayer {
   league_scoring_source?: string;
   league_scoring_coverage?: number;
   league_scoring_fallback?: boolean;
+  league_scoring_exact?: boolean;
+  league_scoring_approximate?: boolean;
+  scoring_contract_id?: string;
+  decision_quantile_policy?: 'qualified_distribution' | 'q50_only' | 'legacy_distribution' | string;
+  decision_tail_authorized?: boolean;
+  decision_risk_preference_applied?: boolean;
+  decision_uncertainty?: number | null;
+  median_policy_applied?: boolean;
+  median_policy_authority?: string;
   vorp?: number;
   floor_vorp?: number;
   upside_vorp?: number;
@@ -109,6 +118,7 @@ export interface DraftBoardResponse {
     roster_slots: Record<string, number>;
     scoring: string;
     median_scoring: boolean;
+    scoring_contract_id?: string;
   };
   draft_state: {
     status: string;
@@ -128,6 +138,11 @@ export interface DraftBoardResponse {
     model_version?: string | null;
     projection_artifact_file_modified_at?: string | null;
     missing_inputs?: string[];
+    artifact_authority?: string;
+    activation_eligible?: boolean;
+    scoring_contract_id?: string;
+    decision_quantile_policy?: string;
+    release_status?: 'READY' | 'PROVISIONAL' | 'BLOCKED' | string;
   };
   survival_model: SurvivalModelMetadata;
   refresh_warning?: string | null;
@@ -208,6 +223,11 @@ export interface RankingAuditRow {
   league_scoring_source?: string;
   league_scoring_coverage?: number;
   league_scoring_fallback?: boolean;
+  league_scoring_exact?: boolean;
+  league_scoring_approximate?: boolean;
+  scoring_contract_id?: string;
+  decision_quantile_policy?: string;
+  decision_tail_authorized?: boolean;
   external_consensus_rank?: number | null;
   external_rank_sd?: number | null;
   external_rank_min?: number | null;
@@ -229,6 +249,7 @@ export interface RankingAuditResponse {
     roster_slots: Record<string, number>;
     tight_end_premium: number;
     median_scoring: boolean;
+    scoring_contract_id?: string;
   };
   scoring_status: {
     exact_share?: number | null;
@@ -236,6 +257,7 @@ export interface RankingAuditResponse {
     sources: string[];
     unsupported_live_scoring_keys: string[];
     scoring_exact?: boolean;
+    decision_quantile_policy?: string;
   };
   ranking_context: {
     available: boolean;

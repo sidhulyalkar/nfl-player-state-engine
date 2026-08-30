@@ -1,10 +1,32 @@
-.PHONY: install dev test lint smoke benchmark-smoke clean
+.PHONY: install dev draft-install draft-preflight draft-preflight-strict api frontend-install frontend frontend-build test lint smoke benchmark-smoke clean
 
 install:
 	python -m pip install -e .
 
 dev:
 	python -m pip install -e '.[dev,dashboard,intelligence]'
+
+draft-install:
+	python -m pip install -e '.[dev,api,intelligence,espn]'
+	cd apps/gemini-fantasy-console && npm ci
+
+draft-preflight:
+	python scripts/check_draft_checkout.py
+
+draft-preflight-strict:
+	python scripts/check_draft_checkout.py --strict-data
+
+api:
+	python -m player_state_engine.api
+
+frontend-install:
+	cd apps/gemini-fantasy-console && npm ci
+
+frontend:
+	cd apps/gemini-fantasy-console && npm run dev
+
+frontend-build:
+	cd apps/gemini-fantasy-console && npm run build
 
 test:
 	pytest
