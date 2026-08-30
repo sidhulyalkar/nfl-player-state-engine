@@ -23,6 +23,7 @@ def _exact_core() -> pd.DataFrame:
                 "league_season_points_q10": 100.0,
                 "league_season_points_q50": 150.0,
                 "league_season_points_q90": 220.0,
+                "league_scoring_exact": True,
                 "season_points_q10": 100.0,
                 "season_points_q50": 150.0,
                 "season_points_q90": 220.0,
@@ -31,7 +32,7 @@ def _exact_core() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def test_median_game_format_is_not_labelled_exactly_ready_from_player_season_values() -> None:
+def test_median_game_format_is_not_labelled_ready_even_with_exact_player_scores() -> None:
     config = LeagueConfig(
         teams=12,
         scoring="half_ppr",
@@ -45,9 +46,10 @@ def test_median_game_format_is_not_labelled_exactly_ready_from_player_season_val
     assert "MEDIAN_SCORING_POLICY_UNVALIDATED" in report.flags
     assert "MEDIAN_SCORING_POLICY_UNVALIDATED" in report.blocking_flags
     assert report.exact_scoring_coverage == 1.0
+    assert report.inexact_required_positions == ()
 
 
-def test_identical_nonmedian_contract_does_not_receive_median_policy_blocker() -> None:
+def test_identical_nonmedian_contract_is_ready_when_every_other_contract_is_exact() -> None:
     config = LeagueConfig(
         teams=12,
         scoring="half_ppr",
@@ -59,3 +61,6 @@ def test_identical_nonmedian_contract_does_not_receive_median_policy_blocker() -
 
     assert "MEDIAN_SCORING_POLICY_UNVALIDATED" not in report.flags
     assert "MEDIAN_SCORING_POLICY_UNVALIDATED" not in report.blocking_flags
+    assert report.exact_scoring_coverage == 1.0
+    assert report.inexact_required_positions == ()
+    assert report.ready is True
