@@ -1,0 +1,60 @@
+name: Direct league-score preseason benchmark
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/direct-league-score-preseason.yml'
+      - 'scripts/run_direct_league_score_preseason_benchmark.py'
+      - 'src/player_state_engine/fantasy/preseason_league_score.py'
+      - 'src/player_state_engine/fantasy/preseason.py'
+      - 'src/player_state_engine/evaluation/preseason.py'
+      - 'src/player_state_engine/fantasy/scoring.py'
+      - 'src/player_state_engine/fantasy/league.py'
+      - 'configs/fantasy/**'
+      - 'tests/test_preseason_league_score.py'
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install benchmark environment
+        run: python -m pip install -e '.[dev]'
+      - name: Qualify direct-target source contract
+        run: pytest -q tests/test_preseason_league_score.py tests/test_preseason_season_model.py
+      - name: Run preregistered 2015-2025 league-score benchmark
+        run: >-
+          python scripts/run_direct_league_score_preseason_benchmark.py
+          --output-dir artifacts/reports/direct_league_score_preseason
+      - name: Assert evidence remains non-promoting
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path('artifacts/reports/direct_league_score_preseason')
+          payload = json.loads((root / 'qualification.json').read_text())
+          assert payload['authority'] == 'direct_league_score_research_only'
+          assert payload['automatic_promotion'] is False
+          assert payload['scoring_contract'] == 'historical_outcomes_scored_before_quantile_model_fit'
+          assert set(payload['leagues']) == {
+              '8_team_ppr_2qb_expanded',
+              '12_team_half_ppr_median',
+          }
+          PY
+      - name: Upload complete research evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: direct-league-score-preseason-${{ github.sha }}
+          path: artifacts/reports/direct_league_score_preseason
+          if-no-files-found: error
+          retention-days: 90
