@@ -16,6 +16,12 @@ def _receiver_frame() -> pd.DataFrame:
             "season_points_q10": [100.0, 90.0],
             "season_points_q50": [180.0, 170.0],
             "season_points_q90": [260.0, 250.0],
+            "rushing_yards_q10": [0.0, 0.0],
+            "rushing_yards_q50": [0.0, 0.0],
+            "rushing_yards_q90": [0.0, 0.0],
+            "rushing_tds_q10": [0.0, 0.0],
+            "rushing_tds_q50": [0.0, 0.0],
+            "rushing_tds_q90": [0.0, 0.0],
             "receptions_q10": [60.0, 30.0],
             "receptions_q50": [90.0, 45.0],
             "receptions_q90": [115.0, 65.0],
@@ -25,6 +31,12 @@ def _receiver_frame() -> pd.DataFrame:
             "receiving_tds_q10": [3.0, 4.0],
             "receiving_tds_q50": [7.0, 7.0],
             "receiving_tds_q90": [12.0, 11.0],
+            "fumbles_lost_q10": [0.0, 0.0],
+            "fumbles_lost_q50": [0.0, 0.0],
+            "fumbles_lost_q90": [0.0, 0.0],
+            "two_point_conversions_q10": [0.0, 0.0],
+            "two_point_conversions_q50": [0.0, 0.0],
+            "two_point_conversions_q90": [0.0, 0.0],
         }
     )
 

@@ -30,6 +30,8 @@ def _component_rows() -> pd.DataFrame:
                     f"receptions_q{quantile}": 75.0 * scale,
                     f"receiving_yards_q{quantile}": 950.0 * scale,
                     f"receiving_tds_q{quantile}": 7.0 * scale,
+                    f"fumbles_lost_q{quantile}": 1.0 * scale,
+                    f"two_point_conversions_q{quantile}": 0.5 * scale,
                 }
             )
         rows.append(row)
@@ -89,7 +91,9 @@ def test_provided_league_quantiles_require_explicit_exact_declaration() -> None:
 
 def test_candidate_scope_blocks_component_quantile_approximation() -> None:
     projections = _component_rows()
-    candidates = projections.loc[projections["position"].isin(["RB", "WR"]), ["player_id", "position"]]
+    candidates = projections.loc[
+        projections["position"].isin(["RB", "WR"]), ["player_id", "position"]
+    ]
 
     report = assess_candidate_scope_actionability(projections, candidates, LeagueConfig())
 
@@ -100,7 +104,9 @@ def test_candidate_scope_blocks_component_quantile_approximation() -> None:
 
 def test_candidate_scope_accepts_explicit_verified_league_distribution() -> None:
     projections = _provided_rows(exact=True)
-    candidates = projections.loc[projections["position"].isin(["RB", "WR"]), ["player_id", "position"]]
+    candidates = projections.loc[
+        projections["position"].isin(["RB", "WR"]), ["player_id", "position"]
+    ]
 
     report = assess_candidate_scope_actionability(projections, candidates, LeagueConfig())
 
