@@ -5,9 +5,9 @@ import pytest
 
 from player_state_engine.fantasy.league import LeagueConfig
 from player_state_engine.fantasy.valuation import (
+    Q50_ONLY_POLICY,
     QUALIFIED_DISTRIBUTION_POLICY,
     QUALIFIED_MEDIAN_POLICY_AUTHORITY,
-    Q50_ONLY_POLICY,
     value_players,
 )
 
