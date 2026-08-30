@@ -75,3 +75,17 @@ def test_uncertainty_qualification_requires_applied_rows() -> None:
     calibrated["conformal_applied"] = np.nan
     with pytest.raises(ValueError, match="No conformal-evaluable seasons remain"):
         qualify_conformal_predictions(raw, calibrated, target=TARGET)
+
+
+def test_calibrated_schema_validation_checks_the_union_of_required_columns() -> None:
+    raw, calibrated = _frames()
+    calibrated = calibrated.drop(columns=[f"{TARGET}_q90"])
+    with pytest.raises(ValueError, match="league_fantasy_points_q90"):
+        qualify_conformal_predictions(raw, calibrated, target=TARGET)
+
+
+def test_duplicate_calibrated_identity_fails_closed() -> None:
+    raw, calibrated = _frames()
+    calibrated = pd.concat([calibrated, calibrated.iloc[[0]]], ignore_index=True)
+    with pytest.raises(ValueError, match="duplicate season/player identities"):
+        qualify_conformal_predictions(raw, calibrated, target=TARGET)
