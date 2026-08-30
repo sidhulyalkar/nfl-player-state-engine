@@ -18,6 +18,36 @@ from player_state_engine.fantasy.preseason import build_preseason_season_dataset
 from player_state_engine.features.weekly import canonicalize_player_stats
 
 TARGETS = ("fumbles_lost", "two_point_conversions")
+SCORING_SOURCE_COLUMNS: dict[str, tuple[str, ...]] = {
+    # Match nflverse/nflfastR fantasy scoring semantics rather than inventing a synthetic alias.
+    "fumbles_lost": (
+        "sack_fumbles_lost",
+        "rushing_fumbles_lost",
+        "receiving_fumbles_lost",
+    ),
+    "two_point_conversions": (
+        "passing_2pt_conversions",
+        "rushing_2pt_conversions",
+        "receiving_2pt_conversions",
+    ),
+}
+
+
+def _aggregate_scoring_target(canonical: pd.DataFrame, target: str) -> pd.Series:
+    source_columns = SCORING_SOURCE_COLUMNS[target]
+    missing = [column for column in source_columns if column not in canonical.columns]
+    if missing:
+        raise ValueError(
+            f"nflverse player stats are missing required {target!r} source columns: {missing}"
+        )
+    values = [
+        pd.to_numeric(canonical[column], errors="coerce").fillna(0.0)
+        for column in source_columns
+    ]
+    total = values[0].copy()
+    for value in values[1:]:
+        total = total + value
+    return total.astype(float)
 
 
 def _attach_targets(dataset: pd.DataFrame, stats: pd.DataFrame) -> pd.DataFrame:
@@ -26,9 +56,7 @@ def _attach_targets(dataset: pd.DataFrame, stats: pd.DataFrame) -> pd.DataFrame:
         raw = raw.loc[raw["season_type"].astype(str).str.upper().eq("REG")].copy()
     canonical = canonicalize_player_stats(raw)
     for target in TARGETS:
-        if target not in canonical:
-            raise ValueError(f"nflverse player stats do not contain {target!r}")
-        canonical[target] = pd.to_numeric(canonical[target], errors="coerce").fillna(0.0)
+        canonical[target] = _aggregate_scoring_target(canonical, target)
     totals = canonical.groupby(["season", "player_id"], as_index=False)[list(TARGETS)].sum()
     out = dataset.merge(totals, on=["season", "player_id"], how="left", validate="one_to_one")
     for target in TARGETS:
@@ -107,6 +135,9 @@ def main() -> None:
         "authority": "supplemental_scoring_research_only",
         "automatic_promotion": False,
         "targets": list(TARGETS),
+        "target_source_columns": {
+            target: list(columns) for target, columns in SCORING_SOURCE_COLUMNS.items()
+        },
         "dataset_diagnostics": diagnostics.as_dict(),
         "decisions": decisions,
         "policy_note": (
