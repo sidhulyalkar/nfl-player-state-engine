@@ -109,6 +109,10 @@ def assess_league_readiness(
     Every position that can legally occupy a starting slot must independently clear the
     exact-scoring gate. This prevents both population dilution and approximate component rescoring
     from masquerading as production-ready league-score distributions.
+
+    A weekly game against the league median is a separate team-week distribution problem. Exact
+    player-season league scores do not qualify that policy, so median-scoring formats remain
+    fail-closed until a separately replayed team-level policy earns authority.
     """
 
     if not 0.0 <= minimum_market_coverage <= 1.0:
@@ -128,6 +132,10 @@ def assess_league_readiness(
     blockers: list[str] = []
     rows = int(len(projections))
     required = required_projection_positions(config)
+
+    if config.median_scoring:
+        flags.append("MEDIAN_SCORING_POLICY_UNVALIDATED")
+        blockers.append("MEDIAN_SCORING_POLICY_UNVALIDATED")
 
     if "position" in projections:
         present = tuple(
