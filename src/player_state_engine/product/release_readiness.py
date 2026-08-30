@@ -14,6 +14,7 @@ ReleaseStatus = Literal["READY", "PROVISIONAL", "BLOCKED"]
 _SUPPORTED_DECISION_POLICIES = {"qualified_distribution", "q50_only"}
 _SPECIAL_POSITIONS = {"K", "DST"}
 _POSITION_ALIASES = {"DEF": "DST", "D/ST": "DST", "DEFENSE": "DST", "PK": "K"}
+_AUTHORITY_BLOCKER = "PROJECTION_BUNDLE_NOT_PRODUCTION_APPROVED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +37,8 @@ class LeagueReleaseAssessment:
 class DraftReleaseReport:
     status: ReleaseStatus
     can_use_core_draft_board: bool
+    promotion_rehearsal_eligible: bool
+    rehearsal_status: ReleaseStatus | None
     blocking_reasons: tuple[str, ...]
     provisional_reasons: tuple[str, ...]
     special_teams_supported_positions: tuple[str, ...]
@@ -179,6 +182,10 @@ def assess_draft_release_readiness(
     matched by ``LeagueConfig.scoring_contract_id`` so PPR and half-PPR can never share a slate by
     filename accident. Median-game policy and market-only K/DST support are isolated provisional
     overlays; neither can upgrade model authority or hide a broken skill-position scoring lane.
+
+    A challenger is never READY for live use. When every other hard condition passes, the report
+    may mark it promotion-rehearsal eligible and expose the READY/PROVISIONAL verdict it would have
+    after explicit production approval. This avoids circular promotion without weakening authority.
     """
 
     checked = (now or datetime.now(UTC)).astimezone(UTC)
@@ -186,7 +193,7 @@ def assess_draft_release_readiness(
     global_provisional: list[str] = []
 
     if bundle_authority != "production_approved":
-        global_blockers.append("PROJECTION_BUNDLE_NOT_PRODUCTION_APPROVED")
+        global_blockers.append(_AUTHORITY_BLOCKER)
     if not bundle_integrity_verified:
         global_blockers.append("PROJECTION_BUNDLE_INTEGRITY_UNVERIFIED")
     if expected_release_version is not None and package_version != expected_release_version:
@@ -330,6 +337,16 @@ def assess_draft_release_readiness(
 
     global_blockers = list(dict.fromkeys(global_blockers))
     global_provisional = list(dict.fromkeys(global_provisional))
+    rehearsal_blockers = [reason for reason in global_blockers if reason != _AUTHORITY_BLOCKER]
+    rehearsal_eligible = (
+        bundle_authority == "challenger"
+        and bundle_integrity_verified
+        and not rehearsal_blockers
+    )
+    rehearsal_status: ReleaseStatus | None = None
+    if rehearsal_eligible:
+        rehearsal_status = "PROVISIONAL" if global_provisional else "READY"
+
     if global_blockers:
         status: ReleaseStatus = "BLOCKED"
     elif global_provisional:
@@ -340,6 +357,8 @@ def assess_draft_release_readiness(
     return DraftReleaseReport(
         status=status,
         can_use_core_draft_board=not global_blockers,
+        promotion_rehearsal_eligible=rehearsal_eligible,
+        rehearsal_status=rehearsal_status,
         blocking_reasons=tuple(global_blockers),
         provisional_reasons=tuple(global_provisional),
         special_teams_supported_positions=tuple(sorted(special_supported)),
