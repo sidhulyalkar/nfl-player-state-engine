@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from typing import Literal
@@ -72,6 +72,18 @@ def _is_fresh(value: object, now: datetime, max_age_hours: float) -> bool:
     return -0.25 <= age_hours <= float(max_age_hours)
 
 
+def _exact_identity_count(value: object, expected_count: int) -> bool:
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        return False
+    identities = [str(item).strip() for item in value]
+    return (
+        expected_count > 0
+        and len(identities) == expected_count
+        and all(identities)
+        and len(set(identities)) == expected_count
+    )
+
+
 def _special_teams_support(
     snapshot: Mapping[str, object] | None,
     *,
@@ -86,10 +98,20 @@ def _special_teams_support(
         return ()
     if not _is_fresh(snapshot.get("generated_at_utc"), now, max_age_hours):
         return ()
+
     supported: list[str] = []
-    if int(snapshot.get("kicker_count", 0) or 0) > 0:
+    kicker_count = int(snapshot.get("kicker_count", 0) or 0)
+    if (
+        snapshot.get("kicker_identity_scheme") == "gsis_id"
+        and _exact_identity_count(snapshot.get("kicker_ids"), kicker_count)
+    ):
         supported.append("K")
-    if int(snapshot.get("dst_count", 0) or 0) > 0:
+
+    dst_count = int(snapshot.get("dst_count", 0) or 0)
+    if (
+        snapshot.get("dst_identity_scheme") == "team_abbr"
+        and _exact_identity_count(snapshot.get("dst_ids"), dst_count)
+    ):
         supported.append("DST")
     return tuple(supported)
 
