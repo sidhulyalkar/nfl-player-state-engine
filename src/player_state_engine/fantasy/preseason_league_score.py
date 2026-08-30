@@ -34,7 +34,14 @@ _STANDARD_SOURCE_ALIASES: dict[str, tuple[str, ...]] = {
     "receptions": ("receptions",),
     "receiving_yards": ("receiving_yards",),
     "receiving_tds": ("receiving_tds",),
+    "special_teams_tds": ("special_teams_tds",),
 }
+
+# nflfastR::calculate_stats() currently defines fantasy_points_ppr as the ordinary PPR offense
+# formula plus six points per individual special-teams touchdown. LeagueConfig intentionally does
+# not assume that every fantasy platform awards those points to the offensive player. We therefore
+# keep the league target and the upstream reference as separate scoring contracts.
+_NFLVERSE_PPR_REFERENCE_EXTRA_WEIGHTS = {"special_teams_tds": 6.0}
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +53,7 @@ class LeagueScoreTargetDiagnostics:
     tight_end_premium: float
     nonzero_scoring_weights: dict[str, float]
     source_columns: dict[str, tuple[str, ...]]
+    ppr_reference_contract: str | None
     ppr_reference_rows: int
     ppr_reference_mae: float | None
     ppr_reference_max_abs_error: float | None
@@ -84,7 +92,10 @@ def _required_source_columns(raw: pd.DataFrame, config: LeagueConfig) -> dict[st
     return resolved
 
 
-def _attach_scoring_fields(raw: pd.DataFrame, source_columns: dict[str, tuple[str, ...]]) -> pd.DataFrame:
+def _attach_scoring_fields(
+    raw: pd.DataFrame,
+    source_columns: dict[str, tuple[str, ...]],
+) -> pd.DataFrame:
     data = canonicalize_player_stats(raw)
     for statistic, columns in source_columns.items():
         if statistic not in _SPLIT_SCORING_COLUMNS:
@@ -95,6 +106,31 @@ def _attach_scoring_fields(raw: pd.DataFrame, source_columns: dict[str, tuple[st
             total = total + value
         data[statistic] = total.astype(float).to_numpy()
     return data
+
+
+def _canonical_ppr_reference(
+    canonical: pd.DataFrame,
+    config: LeagueConfig,
+) -> tuple[pd.Series | None, str | None]:
+    canonical_ppr = (
+        config.scoring.lower() == "ppr"
+        and float(config.tight_end_premium) == 0.0
+        and config.scoring_weights == LeagueConfig(scoring="ppr").scoring_weights
+    )
+    if not canonical_ppr:
+        return None, None
+    if "special_teams_tds" not in canonical.columns:
+        raise ValueError(
+            "Canonical nflverse PPR reconciliation requires the special_teams_tds source field"
+        )
+    reference_config = LeagueConfig(
+        scoring="ppr",
+        scoring_weights=dict(_NFLVERSE_PPR_REFERENCE_EXTRA_WEIGHTS),
+    )
+    return (
+        score_fantasy_stats(canonical, reference_config),
+        "nflverse_calculate_stats_ppr_including_special_teams_tds",
+    )
 
 
 def build_preseason_league_scored_dataset(
@@ -150,21 +186,13 @@ def build_preseason_league_scored_dataset(
     reference_rows = 0
     reference_mae: float | None = None
     reference_max: float | None = None
-    # Canonical PPR is a useful source sanity check. It is diagnostic only and does not alter the
-    # target or gate. nflverse's published PPR field should agree when the league weights match.
-    canonical_ppr = (
-        config.scoring.lower() == "ppr"
-        and float(config.tight_end_premium) == 0.0
-        and config.scoring_weights
-        == LeagueConfig(scoring="ppr").scoring_weights
-    )
-    if canonical_ppr and "fantasy_points_ppr" in canonical.columns:
-        scored = pd.to_numeric(canonical[target], errors="coerce")
+    reference_score, reference_contract = _canonical_ppr_reference(canonical, config)
+    if reference_score is not None and "fantasy_points_ppr" in canonical.columns:
         published = pd.to_numeric(canonical["fantasy_points_ppr"], errors="coerce")
-        valid = scored.notna() & published.notna()
+        valid = reference_score.notna() & published.notna()
         reference_rows = int(valid.sum())
         if reference_rows:
-            error = (scored.loc[valid] - published.loc[valid]).abs()
+            error = (reference_score.loc[valid] - published.loc[valid]).abs()
             reference_mae = float(error.mean())
             reference_max = float(error.max())
 
@@ -180,6 +208,7 @@ def build_preseason_league_scored_dataset(
             if abs(float(weight)) > 1e-12
         },
         source_columns={key: tuple(value) for key, value in source_columns.items()},
+        ppr_reference_contract=reference_contract,
         ppr_reference_rows=reference_rows,
         ppr_reference_mae=reference_mae,
         ppr_reference_max_abs_error=reference_max,
