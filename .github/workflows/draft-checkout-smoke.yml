@@ -31,6 +31,10 @@ jobs:
           cache-dependency-path: apps/gemini-fantasy-console/package-lock.json
       - name: Install Python draft runtime
         run: python -m pip install -e '.[dev,api,intelligence,espn]'
+      - name: Lint and compile checkout contract
+        run: |
+          ruff check scripts/check_draft_checkout.py
+          python -m compileall -q scripts/check_draft_checkout.py
       - name: Install frontend exactly from lockfile
         working-directory: apps/gemini-fantasy-console
         run: npm ci
@@ -39,12 +43,14 @@ jobs:
       - name: Verify package and API release identity
         run: |
           python - <<'PY'
+          import tempfile
           from importlib.metadata import version
+          from pathlib import Path
+
           from fastapi.testclient import TestClient
+
           from player_state_engine import __version__
           from player_state_engine.api.operational import create_app
-          from pathlib import Path
-          import tempfile
 
           assert version('nfl-player-state-engine') == '0.17.0'
           assert __version__ == '0.17.0'
