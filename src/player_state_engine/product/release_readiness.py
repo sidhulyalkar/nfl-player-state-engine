@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
-from typing import Literal, Mapping
+from typing import Literal
 
 import pandas as pd
 
