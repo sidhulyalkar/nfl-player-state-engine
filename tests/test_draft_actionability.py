@@ -13,6 +13,12 @@ def _projection(player_id: str, position: str, adp: float) -> dict[str, object]:
         "player_name": player_id,
         "position": position,
         "market_adp": adp,
+        # These fixtures model an upstream producer that has already scored correlated draws.
+        # Explicit authority is required before candidate actionability can call them exact.
+        "league_season_points_q10": 100.0,
+        "league_season_points_q50": 150.0,
+        "league_season_points_q90": 200.0,
+        "league_scoring_exact": True,
     }
     stats = (
         "passing_yards",
