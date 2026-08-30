@@ -41,6 +41,8 @@ def test_component_quantiles_are_rescored_before_league_value() -> None:
     ).set_index("player_id")
 
     assert standard.loc["wr1", "league_scoring_source"] == "component_quantile_rescore"
+    assert bool(standard.loc["wr1", "league_scoring_exact"]) is False
+    assert bool(standard.loc["wr1", "league_scoring_approximate"]) is True
     assert ppr.loc["wr1", "valuation_points_q50"] > standard.loc["wr1", "valuation_points_q50"]
     assert (
         ppr.loc["wr1", "valuation_points_q50"] - standard.loc["wr1", "valuation_points_q50"]
@@ -65,11 +67,24 @@ def test_generic_points_fallback_is_explicit() -> None:
     assert scored["valuation_points_q50"].tolist() == frame["season_points_q50"].tolist()
 
 
-def test_provided_league_quantiles_take_priority() -> None:
+def test_provided_league_quantiles_take_priority_but_are_unverified_by_default() -> None:
     frame = _receiver_frame()
     frame["league_season_points_q10"] = [101.0, 91.0]
     frame["league_season_points_q50"] = [201.0, 181.0]
     frame["league_season_points_q90"] = [301.0, 281.0]
     scored = prepare_league_scoring_quantiles(frame, LeagueConfig(scoring="ppr"))
-    assert set(scored["league_scoring_source"]) == {"correlated_or_provided_league_quantiles"}
+    assert set(scored["league_scoring_source"]) == {"provided_league_quantiles_unverified"}
+    assert not scored["league_scoring_exact"].any()
+    assert scored["valuation_points_q50"].tolist() == [201.0, 181.0]
+
+
+def test_provided_league_quantiles_are_exact_only_with_explicit_producer_authority() -> None:
+    frame = _receiver_frame()
+    frame["league_season_points_q10"] = [101.0, 91.0]
+    frame["league_season_points_q50"] = [201.0, 181.0]
+    frame["league_season_points_q90"] = [301.0, 281.0]
+    frame["league_scoring_exact"] = True
+    scored = prepare_league_scoring_quantiles(frame, LeagueConfig(scoring="ppr"))
+    assert set(scored["league_scoring_source"]) == {"verified_league_quantiles"}
+    assert scored["league_scoring_exact"].all()
     assert scored["valuation_points_q50"].tolist() == [201.0, 181.0]
