@@ -51,7 +51,6 @@ def _league_snapshot_count(root: Path) -> int:
 
 
 def run_preflight(root: Path) -> list[Check]:
-    frontend = root / "apps/gemini-fantasy-console"
     checks: list[Check] = []
 
     python_ok = sys.version_info >= MIN_PYTHON
@@ -115,7 +114,12 @@ def run_preflight(root: Path) -> list[Check]:
     league_count = _league_snapshot_count(root)
     checks.extend(
         [
-            Check("production_projection_artifact", projection_path.is_file(), str(projection_path), "data"),
+            Check(
+                "production_projection_artifact",
+                projection_path.is_file(),
+                str(projection_path),
+                "data",
+            ),
             Check("nfl_hub_snapshot", hub_path.is_file(), str(hub_path), "data"),
             Check(
                 "special_teams_market_snapshot",
@@ -146,8 +150,16 @@ def main() -> None:
             "draft data plane has been materialized."
         )
     )
-    parser.add_argument("--strict-data", action="store_true", help="Exit nonzero if live draft artifacts are missing.")
-    parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON for coding agents.")
+    parser.add_argument(
+        "--strict-data",
+        action="store_true",
+        help="Exit nonzero if live draft artifacts are missing.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON for coding agents.",
+    )
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
