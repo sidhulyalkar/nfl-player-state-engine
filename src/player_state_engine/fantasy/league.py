@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -100,6 +102,38 @@ class LeagueConfig:
             count > 0 and "QB" in self.flex_eligibility.get(slot, ())
             for slot, count in self.flex_slots.items()
         )
+
+    def scoring_contract_payload(self) -> dict[str, object]:
+        """Return the immutable player-scoring contract, excluding league strategy structure.
+
+        Team count, roster slots, replacement policy, risk preference, draft type and median-game
+        policy intentionally do not belong here. They affect valuation or team-level strategy, not
+        how one player's football outcome is converted into fantasy points. Two leagues with the
+        same payload may therefore share one direct league-score projection model safely.
+        """
+
+        return {
+            "schema_version": 1,
+            "scoring_name": str(self.scoring).strip().lower(),
+            "tight_end_premium": float(self.tight_end_premium),
+            "scoring_weights": {
+                str(statistic): float(weight)
+                for statistic, weight in sorted(self.scoring_weights.items())
+            },
+        }
+
+    @property
+    def scoring_contract_id(self) -> str:
+        """Return a stable SHA-256 identity for the exact player-scoring contract."""
+
+        encoded = json.dumps(
+            self.scoring_contract_payload(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("utf-8")
+        return "scoring-v1-" + hashlib.sha256(encoded).hexdigest()
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> LeagueConfig:
