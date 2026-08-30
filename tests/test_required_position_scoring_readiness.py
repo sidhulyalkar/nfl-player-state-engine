@@ -16,6 +16,11 @@ def _skill_row(player_id: str, position: str, adp: float) -> dict[str, object]:
         "season_points_q10": 100.0,
         "season_points_q50": 150.0,
         "season_points_q90": 200.0,
+        # This fixture represents league points scored on correlated football draws upstream.
+        "league_season_points_q10": 100.0,
+        "league_season_points_q50": 150.0,
+        "league_season_points_q90": 200.0,
+        "league_scoring_exact": True,
     }
     required = {
         "QB": ("passing_yards", "passing_tds", "interceptions", "rushing_yards", "rushing_tds"),
@@ -54,8 +59,8 @@ def test_large_skill_population_cannot_hide_generic_kicker_and_dst_scoring() -> 
             rows.append(_skill_row(f"{position}-{index}", position, adp))
             adp += 1.0
     # Generic season-points rows make these positions present and fully valued, but they are not
-    # exact league rescoring. The old aggregate-only gate could let 120 exact skill rows dilute
-    # these two entirely approximate required positions into a superficially healthy percentage.
+    # exact league rescoring. A large population of explicitly exact skill rows must never dilute
+    # these two entirely approximate required positions into a READY league contract.
     rows.extend(
         [
             {
