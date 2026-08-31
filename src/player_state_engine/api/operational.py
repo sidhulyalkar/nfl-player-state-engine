@@ -3,7 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from player_state_engine import __version__
 from player_state_engine.api.app import create_app as create_base_app
@@ -19,10 +20,25 @@ from player_state_engine.api.shadow_season_routes import install_shadow_season_r
 from player_state_engine.api.structured_intelligence_routes import (
     install_structured_intelligence_routes,
 )
+from player_state_engine.product.projection_artifact_source import ProjectionArtifactSource
+
+
+def _projection_failure(exc: Exception, *, source_mode: str) -> dict[str, object]:
+    detail = (
+        "Verified production projection champion is unavailable."
+        if source_mode == "champion"
+        else "Configured development projection artifact is unavailable."
+    )
+    return {
+        "detail": detail,
+        "projection_source_mode": source_mode,
+        "projection_integrity_verified": False,
+        "projection_error": str(exc),
+    }
 
 
 def _replace_health_version(app: FastAPI) -> None:
-    """Keep inherited health diagnostics while making package metadata the release identity."""
+    """Keep inherited health diagnostics while making package and artifact identity authoritative."""
 
     inherited: Callable[[], dict[str, object]] | None = None
     for route in list(app.router.routes):
@@ -39,7 +55,53 @@ def _replace_health_version(app: FastAPI) -> None:
     def operational_health() -> dict[str, object]:
         payload = dict(inherited()) if inherited is not None else {"status": "ok"}
         payload["version"] = __version__
+        source = getattr(app.state, "projection_artifact_source", None)
+        if source is None:
+            return payload
+        try:
+            snapshot = source.load()
+        except (OSError, KeyError, ValueError, PermissionError, RuntimeError) as exc:
+            payload.update(_projection_failure(exc, source_mode=source.mode))
+            payload["status"] = "degraded"
+            return payload
+        payload.update(snapshot.trust_metadata())
         return payload
+
+
+def _install_projection_integrity_guard(
+    app: FastAPI,
+    source: ProjectionArtifactSource,
+    *,
+    initial_bundle_id: str | None,
+    initial_path: str,
+) -> None:
+    """Re-verify champion bytes before serving production decision surfaces.
+
+    Services are installed against one exact resolved path. If a champion pointer changes while
+    the process is running, fail closed and require a restart so every route is rebuilt around one
+    coherent artifact identity rather than mixing old service state with a new champion.
+    """
+
+    if source.mode != "champion":
+        return
+
+    @app.middleware("http")
+    async def verified_projection_guard(request: Request, call_next: Callable[..., Any]):
+        path = request.url.path
+        if path == "/health" or path.startswith("/docs") or path.startswith("/openapi"):
+            return await call_next(request)
+        try:
+            snapshot = source.load()
+            if snapshot.bundle_id != initial_bundle_id or str(snapshot.path) != initial_path:
+                raise RuntimeError(
+                    "Projection champion changed after process start; restart is required before serving it."
+                )
+        except (OSError, KeyError, ValueError, PermissionError, RuntimeError) as exc:
+            return JSONResponse(
+                status_code=503,
+                content=_projection_failure(exc, source_mode=source.mode),
+            )
+        return await call_next(request)
 
 
 def create_app(**kwargs: Any) -> FastAPI:
@@ -59,11 +121,30 @@ def create_app(**kwargs: Any) -> FastAPI:
         "nfl_hub_projections_path",
     }
     base_kwargs = {key: value for key, value in kwargs.items() if key not in operational_only}
+
+    projection_source = ProjectionArtifactSource.from_environment(
+        explicit_path=kwargs.get("projections_path")
+    )
+    initial_projection = None
+    if projection_source.mode == "champion":
+        # Champion mode is an explicit production contract. Refuse to construct a product API
+        # around an unresolved or unverified champion rather than falling back to a path.
+        initial_projection = projection_source.load()
+        resolved_projections_path = str(initial_projection.path)
+    else:
+        resolved_projections_path = str(projection_source.path)
+    base_kwargs["projections_path"] = resolved_projections_path
+
     app = create_base_app(**base_kwargs)
+    app.state.projection_artifact_source = projection_source
+    app.state.initial_projection_bundle_id = (
+        initial_projection.bundle_id if initial_projection is not None else None
+    )
+
     draft_service = install_draft_routes(
         app,
         store_root=kwargs.get("store_root"),
-        projections_path=kwargs.get("projections_path"),
+        projections_path=resolved_projections_path,
     )
     install_draft_planner_routes(app, draft_service)
     install_draft_reliability_routes(app, draft_service)
@@ -71,7 +152,7 @@ def create_app(**kwargs: Any) -> FastAPI:
         app,
         store_root=kwargs.get("store_root"),
         live_store_root=kwargs.get("live_store_root"),
-        projections_path=kwargs.get("projections_path"),
+        projections_path=resolved_projections_path,
         benchmark_root=kwargs.get("benchmark_root"),
         conformal_root=kwargs.get("conformal_root"),
         opportunity_root=kwargs.get("opportunity_root"),
@@ -99,7 +180,7 @@ def create_app(**kwargs: Any) -> FastAPI:
     install_ranking_routes(
         app,
         store_root=kwargs.get("store_root"),
-        projections_path=kwargs.get("projections_path"),
+        projections_path=resolved_projections_path,
         ranking_root=kwargs.get("ranking_root"),
     )
     install_game_intelligence_routes(
@@ -107,6 +188,12 @@ def create_app(**kwargs: Any) -> FastAPI:
         artifact_root=kwargs.get("game_intelligence_root"),
         registry_path=kwargs.get("game_intelligence_registry"),
         benchmark_root=kwargs.get("game_intelligence_benchmark_root"),
+    )
+    _install_projection_integrity_guard(
+        app,
+        projection_source,
+        initial_bundle_id=(initial_projection.bundle_id if initial_projection is not None else None),
+        initial_path=resolved_projections_path,
     )
     app.version = __version__
     _replace_health_version(app)
