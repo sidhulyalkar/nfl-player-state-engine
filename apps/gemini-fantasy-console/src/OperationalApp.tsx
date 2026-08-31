@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import App from './App';
 import { DraftDayDoctorBanner } from './components/DraftDayDoctorBanner';
 import { DraftDecisionConsole } from './components/DraftDecisionConsole';
+import { DraftLaunchPanel } from './components/DraftLaunchPanel';
 import { IntelligencePortal } from './components/IntelligencePortal';
 import { LeagueOnboardingPanel } from './components/LeagueOnboardingPanel';
 import { ModelObservatoryPortal } from './components/ModelObservatoryPortal';
@@ -69,7 +70,7 @@ export default function OperationalApp() {
       <div className="workspace-status"><i/><span>Server-side model truth</span></div>
     </nav>
     <div className="workspace-surface">
-      {route.surface === 'draft' && <><LeagueOnboardingPanel/><DraftDayDoctorBanner/><DraftDecisionConsole onOpenConsole={() => navigate('league')} /></>}
+      {route.surface === 'draft' && <><LeagueOnboardingPanel/><DraftLaunchPanel/><DraftDayDoctorBanner/><DraftDecisionConsole onOpenConsole={() => navigate('league')} /></>}
       {route.surface === 'nfl' && <NflHubPortal/>}
       {route.surface === 'intelligence' && <IntelligencePortal initialLeagueId={route.leagueId} initialPlayerId={route.playerId}/>} 
       {route.surface === 'portfolio' && <PortfolioPortal/>}
