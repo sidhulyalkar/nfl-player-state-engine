@@ -52,7 +52,7 @@ def install_league_connection_routes(
 
     def portfolio_payload() -> dict[str, object]:
         try:
-            all_connections = [dict(item) for item in getattr(draft_service, "list_leagues")()]
+            all_connections = [dict(item) for item in draft_service.list_leagues()]
         except Exception as exc:  # noqa: BLE001 - operator endpoint should surface store failure.
             raise HTTPException(
                 status_code=503,
