@@ -95,7 +95,9 @@ HALF / OP
 
 For `type=ADP`, the integration requires an explicit average-position field such as `rank_ave`. It refuses to substitute the ordinal `rank_ecr` field as ADP. Likewise, FantasyPros `rank_std` is not represented as empirical pick-position standard deviation. The live board derives a conservative timing uncertainty and labels that provenance explicitly.
 
-If the API key is absent, the refresh fails, the previous valid snapshot is preserved, and the Draft Room remains usable. Without true ADP the board falls back to neutral market timing rather than manufacturing a pick position. Market snapshots older than six hours are reported as stale in `/health` and the market-status endpoint.
+Each stored market table is bound to metadata by SHA-256 and byte size. If a refresh is interrupted between data and metadata replacement, or the market bytes are later modified, readers reject the mixed/tampered pair and fall back to neutral timing. This is deliberately lighter-weight than champion authority but uses the same fail-closed instinct.
+
+If the API key is absent, the refresh fails, the previous valid snapshot is preserved, and the Draft Room remains usable. Without true ADP the board falls back to neutral market timing rather than manufacturing a pick position. Market snapshots are full-confidence for six hours, then progressively lose timing confidence; after 24 hours they expire and no longer influence pick timing until refreshed. Freshness, staleness, and expiry are exposed in `/health` and the market-status endpoint.
 
 ## 5. Verify actual-draft readiness
 
@@ -140,7 +142,7 @@ Docker Compose waits for the verified API health check before starting the front
 
 Promotion changes artifact authority, not scientific evidence. Continue to surface known limitations honestly, including any current release flags for:
 
-- live ADP unavailable, stale, or format-proxy-only;
+- live ADP unavailable, stale, expired, or format-proxy-only;
 - K/DST `external_market_only` authority;
 - unvalidated median-game policy;
 - optional/degraded NFL Hub source families.
