@@ -66,12 +66,15 @@ export function DraftDayDoctorBanner() {
       }
     }
 
+    const handleStateRefresh = () => void refresh();
     void refresh();
     const interval = window.setInterval(() => void refresh(), 60_000);
+    window.addEventListener('pse:draft-state-refreshed', handleStateRefresh);
     return () => {
       active = false;
       controller?.abort();
       window.clearInterval(interval);
+      window.removeEventListener('pse:draft-state-refreshed', handleStateRefresh);
     };
   }, []);
 
