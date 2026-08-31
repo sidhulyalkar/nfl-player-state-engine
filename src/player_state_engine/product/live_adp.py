@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -107,7 +106,7 @@ def refresh_fantasypros_adp_snapshot(
         )
 
     combined = pd.concat(frames, ignore_index=True)
-    if not set(combined["ranking_type"].astype(str).str.lower()) == {"adp"}:
+    if set(combined["ranking_type"].astype(str).str.lower()) != {"adp"}:
         raise RuntimeError("FantasyPros market snapshot contains a non-ADP ranking type")
     if not set(combined["source_kind"].astype(str).str.lower()) <= {"market", "sharp_market"}:
         raise RuntimeError("FantasyPros ADP snapshot was not normalized as market evidence")
@@ -190,6 +189,17 @@ def live_adp_status(root: str | Path = DEFAULT_LIVE_ADP_ROOT) -> dict[str, objec
     return status
 
 
+def _identity_pool(projections: pd.DataFrame) -> pd.DataFrame:
+    columns = ["player_id", "player_name", "position"]
+    for optional in ("nfl_team", "recent_team"):
+        if optional in projections.columns:
+            columns.append(optional)
+    pool = projections.loc[:, columns].copy()
+    # A multicontract champion legitimately repeats one player across PPR and half-PPR. Identity
+    # matching must happen once per player before the market signal is broadcast back to contracts.
+    return pool.drop_duplicates("player_id", keep="first").reset_index(drop=True)
+
+
 def attach_live_adp(
     projections: pd.DataFrame,
     config: LeagueConfig,
@@ -242,7 +252,8 @@ def attach_live_adp(
     if selected.empty:
         return out, {**base_status, "reason": "compatible_market_snapshot_unavailable"}
 
-    resolved = match_rankings_to_players(selected, out)
+    identity_pool = _identity_pool(out)
+    resolved = match_rankings_to_players(selected, identity_pool)
     matched = resolved.loc[
         resolved["matched_player_id"].notna()
         & pd.to_numeric(resolved["identity_match_confidence"], errors="coerce").ge(0.82)
@@ -282,9 +293,11 @@ def attach_live_adp(
     ]
     out["market_adp_sd_authority"] = "conservative_format_proxy_not_observed_pick_sd"
 
-    matched_count = int(out["market_adp_available"].sum())
     skill_positions = out["position"].astype(str).str.upper().isin(["QB", "RB", "WR", "TE"])
-    denominator = int(skill_positions.sum())
+    eligible_player_ids = set(out.loc[skill_positions, "player_id"].astype(str))
+    matched_player_ids = set(out.loc[out["market_adp_available"], "player_id"].astype(str))
+    matched_count = len(matched_player_ids & eligible_player_ids)
+    denominator = len(eligible_player_ids)
     coverage = float(matched_count / denominator) if denominator else 0.0
     return out, {
         **base_status,
