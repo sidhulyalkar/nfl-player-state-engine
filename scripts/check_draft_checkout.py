@@ -1,17 +1,27 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import re
 import subprocess
 import sys
+from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 EXPECTED_RELEASE_PREFIX = "0.17."
 MIN_PYTHON = (3, 11)
 MIN_NODE_MAJOR = 22
+_REQUIRED_PROJECTION_COLUMNS = {
+    "scoring_contract_id",
+    "player_id",
+    "league_season_points_q50",
+    "league_scoring_exact",
+    "decision_quantile_policy",
+}
+_REQUIRED_DECISION_POLICIES = {"qualified_distribution", "q50_only"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +58,76 @@ def _league_snapshot_count(root: Path) -> int:
         if directory.exists():
             count += sum(1 for path in directory.glob("*.json") if path.is_file())
     return count
+
+
+def _truthy(value: object) -> bool:
+    return str(value or "").strip().lower() in {"true", "1", "yes"}
+
+
+def _projection_contract_check(path: Path) -> tuple[bool, str]:
+    """Validate the current draft-release shape without importing the application package."""
+
+    if not path.is_file():
+        return False, f"unavailable: {path}"
+    try:
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            columns = set(reader.fieldnames or ())
+            missing = sorted(_REQUIRED_PROJECTION_COLUMNS - columns)
+            if missing:
+                return False, f"legacy/incomplete projection schema; missing={missing}"
+
+            rows = 0
+            contracts: dict[str, set[str]] = defaultdict(set)
+            contract_policies: dict[str, set[str]] = defaultdict(set)
+            duplicate_pairs: list[str] = []
+            invalid_rows = 0
+            for row in reader:
+                rows += 1
+                contract_id = str(row.get("scoring_contract_id") or "").strip()
+                player_id = str(row.get("player_id") or "").strip()
+                policy = str(row.get("decision_quantile_policy") or "").strip().lower()
+                q50 = str(row.get("league_season_points_q50") or "").strip()
+                if not contract_id or not player_id or not policy or not q50:
+                    invalid_rows += 1
+                    continue
+                if not _truthy(row.get("league_scoring_exact")):
+                    invalid_rows += 1
+                    continue
+                if player_id in contracts[contract_id]:
+                    duplicate_pairs.append(f"{contract_id}:{player_id}")
+                contracts[contract_id].add(player_id)
+                contract_policies[contract_id].add(policy)
+    except (OSError, UnicodeError, csv.Error) as exc:
+        return False, f"unreadable projection artifact: {exc}"
+
+    if rows == 0:
+        return False, "projection artifact is empty"
+    if invalid_rows:
+        return False, f"{invalid_rows} projection row(s) violate required contract fields"
+    if duplicate_pairs:
+        return False, f"duplicate contract/player rows: {duplicate_pairs[:5]}"
+    if len(contracts) < 2:
+        return False, f"expected multicontract release artifact; found {len(contracts)} contract(s)"
+    nonuniform = {
+        contract_id: sorted(policies)
+        for contract_id, policies in contract_policies.items()
+        if len(policies) != 1
+    }
+    if nonuniform:
+        return False, f"decision policy is not uniform within contracts: {nonuniform}"
+    policies = {next(iter(values)) for values in contract_policies.values() if values}
+    missing_policies = sorted(_REQUIRED_DECISION_POLICIES - policies)
+    if missing_policies:
+        return False, f"current release policies missing from artifact: {missing_policies}"
+    smallest_contract = min(len(players) for players in contracts.values())
+    if smallest_contract < 250:
+        return False, f"contract player coverage too small: min_rows={smallest_contract}"
+    return (
+        True,
+        f"{rows} rows; {len(contracts)} contracts; min_contract_rows={smallest_contract}; "
+        f"policies={sorted(policies)}",
+    )
 
 
 def run_preflight(root: Path) -> list[Check]:
@@ -109,6 +189,7 @@ def run_preflight(root: Path) -> list[Check]:
     projection_path = root / os.getenv(
         "PSE_PROJECTIONS_PATH", "artifacts/predictions/product_player_values.csv"
     )
+    projection_ok, projection_detail = _projection_contract_check(projection_path)
     hub_path = root / "data/product/nfl_hub/current.json"
     special_teams_path = root / "data/product/special_teams_market/current.json"
     league_count = _league_snapshot_count(root)
@@ -116,8 +197,8 @@ def run_preflight(root: Path) -> list[Check]:
         [
             Check(
                 "production_projection_artifact",
-                projection_path.is_file(),
-                str(projection_path),
+                projection_ok,
+                f"{projection_path}: {projection_detail}",
                 "data",
             ),
             Check("nfl_hub_snapshot", hub_path.is_file(), str(hub_path), "data"),
@@ -153,7 +234,7 @@ def main() -> None:
     parser.add_argument(
         "--strict-data",
         action="store_true",
-        help="Exit nonzero if live draft artifacts are missing.",
+        help="Exit nonzero if live draft artifacts are missing or violate release contracts.",
     )
     parser.add_argument(
         "--json",
@@ -173,6 +254,7 @@ def main() -> None:
         "checks": [asdict(check) for check in checks],
         "notes": [
             "The React/Express workspace can build without GEMINI_API_KEY; copilot falls back to deterministic Product API tools.",
+            "A projection filename alone is insufficient: the strict data gate requires the current multicontract schema and decision-authority policies.",
             "Missing draft-data artifacts must remain unavailable. Do not fabricate frontend placeholder projections to satisfy strict preflight.",
         ],
     }
@@ -188,7 +270,8 @@ def main() -> None:
         if data_status != "READY":
             print(
                 "The UI may still build, but draft recommendations are not release-ready until "
-                "the real projection, NFL Hub, K/DST, and league artifacts exist."
+                "the real multicontract projection, NFL Hub, K/DST, and league artifacts satisfy "
+                "their release contracts."
             )
 
     if build_status != "READY":

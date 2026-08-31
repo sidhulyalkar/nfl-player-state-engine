@@ -16,8 +16,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--projections",
         type=Path,
-        default=Path("artifacts/predictions/product_player_values.csv"),
-        help="Optional read-only production projection context.",
+        default=None,
+        help=(
+            "Optional read-only, single-contract projection context. Omit for the default "
+            "observational Hub; do not pass the multicontract production draft artifact."
+        ),
     )
     return parser.parse_args()
 
@@ -38,6 +41,7 @@ def main() -> None:
                 "event_count": snapshot["event_count"],
                 "optional_source_failures": snapshot["optional_source_failures"],
                 "generated_at_utc": snapshot["generated_at_utc"],
+                "projection_context_configured": args.projections is not None,
                 "snapshot": str(args.root / "current.json"),
             },
             indent=2,

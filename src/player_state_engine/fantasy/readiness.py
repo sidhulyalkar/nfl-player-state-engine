@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from player_state_engine.fantasy.league import LeagueConfig
+from player_state_engine.fantasy.projection_contracts import select_projection_scoring_contract
 from player_state_engine.fantasy.scoring import prepare_league_scoring_quantiles
 
 _POSITION_ALIASES = {
@@ -101,10 +102,13 @@ def assess_league_readiness(
 ) -> LeagueReadinessReport:
     """Audit whether a projection pool is trustworthy for this league's draft decisions.
 
-    Readiness is deliberately league-specific. Numerical valuation coverage and exact-scoring
-    authority are separate concepts. Complete component quantiles can support an approximate
-    custom-league valuation, but they are not an exact fantasy-score distribution because
-    marginal quantiles are not additive.
+    Readiness is deliberately league-specific. A shared multicontract artifact is sliced to the
+    exact ``LeagueConfig.scoring_contract_id`` before row counts, identity uniqueness, position
+    coverage, market coverage, or scoring authority are measured.
+
+    Numerical valuation coverage and exact-scoring authority are separate concepts. Complete
+    component quantiles can support an approximate custom-league valuation, but they are not an
+    exact fantasy-score distribution because marginal quantiles are not additive.
 
     Every position that can legally occupy a starting slot must independently clear the
     exact-scoring gate. This prevents both population dilution and approximate component rescoring
@@ -128,6 +132,7 @@ def assess_league_readiness(
             "minimum_required_position_exact_scoring_coverage must be between zero and one"
         )
 
+    projections = select_projection_scoring_contract(projections, config)
     flags: list[str] = []
     blockers: list[str] = []
     rows = int(len(projections))

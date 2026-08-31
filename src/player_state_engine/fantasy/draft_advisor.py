@@ -8,6 +8,7 @@ import pandas as pd
 from player_state_engine.fantasy.draft import DraftState, build_live_draft_board
 from player_state_engine.fantasy.draft_room import DraftRoomSimulationConfig, simulate_draft_room
 from player_state_engine.fantasy.league import LeagueConfig
+from player_state_engine.fantasy.projection_contracts import select_projection_scoring_contract
 
 
 def _percentile(series: pd.Series, *, ascending: bool = True) -> pd.Series:
@@ -54,7 +55,7 @@ def _confidence_reasons(row: pd.Series) -> str:
     if float(row.get("room_vs_baseline_survival_gap", 0.0)) > 0.25:
         reasons.append("room model disagrees with baseline survival")
     if float(row.get("uncertainty_percentile", 0.0)) > 0.80:
-        reasons.append("projection uncertainty is high")
+        reasons.append("qualified projection uncertainty is high")
     if float(row.get("room_survival_standard_error", 0.0)) > 0.03:
         reasons.append("draft-room Monte Carlo is noisy")
     freshness_status = str(row.get("projection_freshness_status", "UNKNOWN"))
@@ -77,7 +78,12 @@ def augment_live_draft_board_with_reliability(
     projection_age_hours: float | None = None,
     max_projection_age_hours: float = 24.0,
 ) -> pd.DataFrame:
-    """Add correlated room diagnostics and fail-closed action guardrails."""
+    """Add correlated room diagnostics and fail-closed action guardrails.
+
+    Shared projection artifacts are reduced to the active scoring contract before opponent-position
+    counts are derived. Reliability also consumes ``decision_uncertainty`` rather than raw interval
+    width, so a q50-only scoring contract cannot be indirectly penalized by unqualified q10/q90.
+    """
 
     if baseline.empty:
         return baseline.copy()
@@ -86,6 +92,7 @@ def augment_live_draft_board_with_reliability(
     if missing:
         raise ValueError(f"reliable draft board missing baseline columns: {sorted(missing)}")
 
+    projections = select_projection_scoring_contract(projections, config)
     room = simulate_draft_room(
         baseline,
         config,
@@ -139,7 +146,7 @@ def augment_live_draft_board_with_reliability(
 
     scoring_coverage = _numeric_column(out, "league_scoring_coverage", 1.0).clip(0, 1)
     market_quality = (~out["room_market_imputed"].fillna(True).astype(bool)).astype(float)
-    uncertainty = _numeric_column(out, "uncertainty", 0.0)
+    uncertainty = _numeric_column(out, "decision_uncertainty", 0.0)
     out["uncertainty_percentile"] = _percentile(uncertainty)
     uncertainty_quality = 1.0 - out["uncertainty_percentile"]
     monte_carlo_quality = (

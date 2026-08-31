@@ -56,6 +56,7 @@ def create_app(**kwargs: Any) -> FastAPI:
         "structured_intelligence_root",
         "intelligence_activation_registry",
         "nfl_hub_root",
+        "nfl_hub_projections_path",
     }
     base_kwargs = {key: value for key, value in kwargs.items() if key not in operational_only}
     app = create_base_app(**base_kwargs)
@@ -80,7 +81,7 @@ def create_app(**kwargs: Any) -> FastAPI:
     install_nfl_hub_routes(
         app,
         root=kwargs.get("nfl_hub_root"),
-        projections_path=kwargs.get("projections_path"),
+        projections_path=kwargs.get("nfl_hub_projections_path"),
     )
     install_evidence_routes(
         app,
