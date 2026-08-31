@@ -11,9 +11,9 @@ from player_state_engine.fantasy.league import LeagueConfig
 from player_state_engine.fantasy.preseason_league_score import LEAGUE_SCORE_TARGET
 from player_state_engine.models.conformal import TargetPositionConformalCalibrator
 from player_state_engine.product.preseason_multicontract_candidate import (
-    ContractEvidence,
     PPR_POLICY,
     Q50_POLICY,
+    ContractEvidence,
     build_contract_product_frame,
     combine_contract_product_frames,
     market_context_from_nfl_hub,
