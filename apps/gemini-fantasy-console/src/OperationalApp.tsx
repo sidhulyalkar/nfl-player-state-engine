@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import App from './App';
+import { DraftDayDoctorBanner } from './components/DraftDayDoctorBanner';
 import { DraftDecisionConsole } from './components/DraftDecisionConsole';
 import { IntelligencePortal } from './components/IntelligencePortal';
 import { ModelObservatoryPortal } from './components/ModelObservatoryPortal';
@@ -67,7 +68,7 @@ export default function OperationalApp() {
       <div className="workspace-status"><i/><span>Server-side model truth</span></div>
     </nav>
     <div className="workspace-surface">
-      {route.surface === 'draft' && <DraftDecisionConsole onOpenConsole={() => navigate('league')} />}
+      {route.surface === 'draft' && <><DraftDayDoctorBanner/><DraftDecisionConsole onOpenConsole={() => navigate('league')} /></>}
       {route.surface === 'nfl' && <NflHubPortal/>}
       {route.surface === 'intelligence' && <IntelligencePortal initialLeagueId={route.leagueId} initialPlayerId={route.playerId}/>} 
       {route.surface === 'portfolio' && <PortfolioPortal/>}
