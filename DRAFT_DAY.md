@@ -94,6 +94,37 @@ http://localhost:3000/?workspace=league
 http://localhost:3000/?workspace=model
 ```
 
+## Production projection shape
+
+`artifacts/predictions/product_player_values.csv` is one configured product artifact, but it may contain several exact fantasy scoring contracts. Its production shape is long-form:
+
+```text
+(scoring_contract_id, player_id) -> one row
+```
+
+The same player can therefore appear once for PPR and once for half-PPR. That is intentional. Python selects the current league's exact `LeagueConfig.scoring_contract_id` **before** identity checks, scoring, replacement levels, VORP, scarcity, candidate actionability, room simulation, or decision scoring.
+
+Within one scoring contract, duplicate `player_id` rows are an error. If a live league requests a scoring-contract fingerprint that the artifact does not contain, serving fails closed rather than borrowing another league's values.
+
+The current decision-tail authority is also contract-specific:
+
+- PPR: `qualified_distribution`; qualified q10/q50/q90 may affect season decisions.
+- half-PPR: `q50_only`; q10/q90 may remain visible for audit, but they cannot affect draft, trade, stash, dynasty, reliability, or season-uncertainty reasoning.
+
+Weekly start/sit uncertainty is a separate weekly forecasting authority lane and must not be inferred from the preseason season-distribution policy.
+
+## NFL Hub separation
+
+NFL Hub is observational and league-independent. It must not arbitrarily choose one fantasy scoring contract from the multicontract draft artifact.
+
+By default:
+
+```text
+PSE_NFL_HUB_PROJECTIONS_PATH=
+```
+
+so the Hub refreshes from roster, depth-chart, injury, ranking, identity, and schedule sources without a fantasy projection overlay. If a deliberately single-contract, read-only projection context is useful for an experiment, it may be configured separately. Never point NFL Hub at the multicontract production draft artifact merely to populate UI fields.
+
 ## Real draft-data preflight
 
 Before using the board for an actual draft, all of these must exist and be current:
@@ -127,15 +158,16 @@ The projection artifact must come from the immutable preseason release pipeline 
 When asking Gemini or another coding agent to redesign/finish the frontend, give it this repository root and these constraints:
 
 1. Treat the Python Product API as the only numerical authority.
-2. Do not reimplement scoring, VORP, replacement levels, scarcity, calibration, survival probability, simulation, or release gates in TypeScript.
+2. Do not reimplement scoring, scoring-contract selection, VORP, replacement levels, scarcity, calibration, survival probability, simulation, or release gates in TypeScript.
 3. Do not invent placeholder projections, ADP, injuries, league state, model metrics, or player identities when an endpoint returns unavailable.
-4. Preserve `decision_quantile_policy`: `q50_only` means q10/q90 cannot influence draft recommendations.
-5. Preserve `league_scoring_exact`, scoring-contract IDs, artifact authority, freshness, and release status visibly in the UI.
-6. Median scoring is a separate team-week policy. Do not revive the retired floor-VORP heuristic.
-7. K/DST remain visually and semantically separate `external_market_only` late-round guidance.
-8. Keep the NFL Hub observational. News/depth/roster movement can explain a recommendation but cannot silently overwrite the production model.
-9. Keep the app useful with Gemini disabled. Copilot is an enhancement, not the control plane.
-10. Run `npm run build` before proposing completion.
+4. Preserve `decision_quantile_policy`: `q50_only` means q10/q90 cannot influence season decisions, including indirect reliability or uncertainty signals.
+5. Preserve `league_scoring_exact`, `scoring_contract_id`, artifact authority, freshness, and release status visibly in the UI.
+6. Never merge or deduplicate product rows in the browser by `player_id` before the backend has selected the league scoring contract. The API should return the already-selected league view.
+7. Median scoring is a separate team-week policy. Do not revive the retired floor-VORP heuristic.
+8. K/DST remain visually and semantically separate `external_market_only` late-round guidance.
+9. Keep the NFL Hub observational. News/depth/roster movement can explain a recommendation but cannot silently overwrite the production model or select a fantasy scoring contract.
+10. Keep the app useful with Gemini disabled. Copilot is an enhancement, not the control plane.
+11. Run `npm run build` before proposing completion.
 
 The design target is a calm NFL command center: Draft Room first, Player Intelligence second, NFL Hub/context always reachable, and research/provenance available without drowning the pick clock in diagnostics.
 

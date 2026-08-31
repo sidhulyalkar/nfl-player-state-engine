@@ -36,7 +36,7 @@ def _percentile(series: pd.Series) -> pd.Series:
 
 def _reason_codes(data: pd.DataFrame, decision: DecisionType) -> pd.Series:
     output: list[str] = []
-    uncertainty_median = float(_num(data, "uncertainty", 0.0).median())
+    uncertainty_median = float(_num(data, "decision_uncertainty", 0.0).median())
     for _, row in data.iterrows():
         reasons: list[str] = []
         if float(row.get("availability_probability", 1.0)) < 0.75:
@@ -49,7 +49,12 @@ def _reason_codes(data: pd.DataFrame, decision: DecisionType) -> pd.Series:
             reasons.append("favorable team fit")
         if float(row.get("schedule_score", 0.0)) > 0.5:
             reasons.append("favorable schedule")
-        if float(row.get("uncertainty", 0.0)) > uncertainty_median:
+        decision_uncertainty = row.get("decision_uncertainty")
+        try:
+            uncertainty_value = float(decision_uncertainty)
+        except (TypeError, ValueError):
+            uncertainty_value = 0.0
+        if np.isfinite(uncertainty_value) and uncertainty_value > uncertainty_median:
             reasons.append("wide outcome range")
         if (
             decision in {DecisionType.STASH, DecisionType.DYNASTY}
@@ -72,6 +77,10 @@ def build_decision_board(
     Market ADP is intentionally *not* subtracted from football value. ADP is a draft-timing
     variable, not a fantasy-points unit. Live draft logic consumes ADP separately to estimate
     whether a player will survive to the manager's next selection.
+
+    Decision-tail authority is inherited from :func:`value_players`. When a scoring contract is
+    ``q50_only``, season q10/q90 remain visible for audit but cannot influence trade, stash,
+    dynasty, or draft decision scores or their uncertainty reason codes.
     """
     decision = DecisionType(decision)
     data = value_players(projections, config)
@@ -85,6 +94,9 @@ def build_decision_board(
     prospect = _num(data, "prospect_prior_score", 0.0)
     breakout = _num(data, "breakout_probability", 0.0).clip(0, 1)
     playoff = _num(data, "playoff_schedule_score", schedule)
+    decision_floor_vorp = _num(data, "decision_floor_vorp", data["vorp"])
+    decision_upside_vorp = _num(data, "decision_upside_vorp", data["vorp"])
+    decision_uncertainty = _num(data, "decision_uncertainty", 0.0)
 
     data["market_value_gap"] = 0.0
     data["one_week_floor"] = _num(
@@ -126,12 +138,12 @@ def build_decision_board(
         ) * availability
     elif decision == DecisionType.TRADE:
         utility = (
-            0.45 * data["floor_vorp"]
+            0.45 * decision_floor_vorp
             + 0.75 * data["vorp"]
-            + 0.45 * data["upside_vorp"]
+            + 0.45 * decision_upside_vorp
             + 3.0 * playoff
             + 2.0 * opportunity
-            - 0.10 * data["uncertainty"]
+            - 0.10 * decision_uncertainty
         ) * availability
     elif decision == DecisionType.DRAFT:
         utility = (
@@ -143,7 +155,7 @@ def build_decision_board(
     elif decision == DecisionType.STASH:
         youth = np.clip((29.0 - age) / 8.0, -0.5, 1.0)
         utility = (
-            0.35 * data["upside_vorp"]
+            0.35 * decision_upside_vorp
             + 10.0 * growth
             + 8.0 * breakout
             + 6.0 * prospect
@@ -153,9 +165,9 @@ def build_decision_board(
     else:  # dynasty
         youth = np.clip((30.0 - age) / 10.0, -0.6, 1.0)
         utility = (
-            0.35 * data["floor_vorp"]
+            0.35 * decision_floor_vorp
             + 0.55 * data["vorp"]
-            + 0.60 * data["upside_vorp"]
+            + 0.60 * decision_upside_vorp
             + 8.0 * prospect
             + 6.0 * breakout
             + 5.0 * youth

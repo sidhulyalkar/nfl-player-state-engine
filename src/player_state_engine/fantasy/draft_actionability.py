@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 import pandas as pd
 
 from player_state_engine.fantasy.league import LeagueConfig
+from player_state_engine.fantasy.projection_contracts import select_projection_scoring_contract
 from player_state_engine.fantasy.readiness import (
     LeagueReadinessReport,
     required_projection_positions,
@@ -92,6 +93,9 @@ def assess_candidate_scope_actionability(
     The full league can remain blocked because K/DST or another required position is unsupported
     while a specific QB/RB/WR/TE candidate set is internally complete.
 
+    A shared projection file is first sliced to the requested scoring contract, so the same player
+    appearing once in PPR and once in half-PPR is not mislabeled as a duplicate candidate row.
+
     ``actionable=True`` requires verified exact league-score distributions for every supplied
     candidate. Complete marginal stat quantiles may still support useful approximate comparisons,
     but they do not earn exact actionability because quantiles are not additive.
@@ -100,6 +104,7 @@ def assess_candidate_scope_actionability(
     if not 0.0 <= minimum_market_coverage <= 1.0:
         raise ValueError("minimum_market_coverage must be between zero and one")
 
+    projections = select_projection_scoring_contract(projections, config)
     blockers: list[str] = []
     cautions: list[str] = []
 

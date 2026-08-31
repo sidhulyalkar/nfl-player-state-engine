@@ -36,8 +36,10 @@ def install_nfl_hub_routes(
     projections_path: str | Path | None = None,
 ) -> None:
     hub_root = Path(root or os.getenv("PSE_NFL_HUB_ROOT", "data/product/nfl_hub"))
-    projection_location = projections_path or os.getenv(
-        "PSE_PROJECTIONS_PATH", "artifacts/predictions/product_player_values.csv"
+    projection_location = (
+        projections_path
+        if projections_path is not None
+        else os.getenv("PSE_NFL_HUB_PROJECTIONS_PATH", "")
     )
 
     @app.get("/v1/nfl/hub")
@@ -106,6 +108,11 @@ def install_nfl_hub_routes(
                     "snapshot_age_seconds": age_seconds,
                     "stale_after_seconds": stale_after,
                     "stale": stale,
+                },
+                "projection_context": {
+                    "configured": bool(projection_location),
+                    "path": str(projection_location) if projection_location else None,
+                    "authority": "read_only_optional_context",
                 },
                 "refresh_warning": warning,
                 "served_at_utc": now.isoformat(),

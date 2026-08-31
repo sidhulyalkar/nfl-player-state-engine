@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from player_state_engine.fantasy.league import LeagueConfig
+from player_state_engine.fantasy.projection_contracts import select_projection_scoring_contract
 from player_state_engine.fantasy.scoring import prepare_league_scoring_quantiles
 
 CORE_POSITIONS = ("QB", "RB", "WR", "TE", "K", "DEF", "DST")
@@ -177,12 +178,16 @@ def value_players(
     without an explicit policy preserve historical behavior for compatibility, but production
     release gates should require an explicit qualified policy.
 
+    A shared production artifact may contain several scoring contracts. The exact league slice is
+    selected before any replacement, scarcity, or decision calculation so PPR and half-PPR rows can
+    never interact merely because they share a file.
+
     Median-game adjustments are fail-closed too. An unvalidated median league receives no hidden
     heuristic bonus. If a separate team-week replay later earns authority, the projection artifact
     must supply its replay-derived ``median_policy_adjustment`` explicitly; the authority token alone
     can never resurrect the old hard-coded floor-VORP coefficient.
     """
-    data = projections.copy()
+    data = select_projection_scoring_contract(projections, config)
     required = {
         "player_id",
         "player_name",
