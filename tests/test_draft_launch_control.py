@@ -9,7 +9,12 @@ import pytest
 import player_state_engine.product.draft_launch_control as launch_module
 from player_state_engine.product.draft_day_doctor import DraftDayDoctorReport
 from player_state_engine.product.draft_launch_control import DraftLaunchControlService
-from player_state_engine.product.schemas import FantasyRoster, LeagueIdentity, LeagueSettings, LeagueSnapshot
+from player_state_engine.product.schemas import (
+    FantasyRoster,
+    LeagueIdentity,
+    LeagueSettings,
+    LeagueSnapshot,
+)
 
 
 def _snapshot(*, roster_positions=None) -> LeagueSnapshot:
@@ -28,7 +33,9 @@ def _snapshot(*, roster_positions=None) -> LeagueSnapshot:
             scoring={"rec": 1.0, "pass_td": 4.0},
             roster_positions=roster_positions or ["QB", "RB", "WR", "TE", "FLEX", "BN"],
         ),
-        rosters=[FantasyRoster(roster_id=str(index), team_name=f"Team {index}") for index in range(8)],
+        rosters=[
+            FantasyRoster(roster_id=str(index), team_name=f"Team {index}") for index in range(8)
+        ],
     )
 
 
@@ -54,7 +61,11 @@ class _DraftService:
     def list_leagues(self):
         return [
             {"league_id": "demo-league", "platform": "demo", "name": "Demo"},
-            {"league_id": self.snapshot.identity.league_id, "platform": "sleeper", "name": self.snapshot.identity.name},
+            {
+                "league_id": self.snapshot.identity.league_id,
+                "platform": "sleeper",
+                "name": self.snapshot.identity.name,
+            },
         ]
 
     def load_snapshot(self, league_id: str):
@@ -92,16 +103,20 @@ def _service(tmp_path, draft, connections):
     )
 
 
+def _ready_hub(**kwargs):
+    return {
+        "generated_at_utc": "2026-08-31T23:00:00+00:00",
+        "status": "READY",
+        "authority": "observational",
+    }
+
+
 def test_prepare_refreshes_current_state_without_model_authority(monkeypatch, tmp_path) -> None:
     draft = _DraftService(_snapshot())
     connections = _Connections(draft)
     service = _service(tmp_path, draft, connections)
     monkeypatch.delenv("PSE_FANTASYPROS_API_KEY", raising=False)
-    monkeypatch.setattr(
-        launch_module,
-        "refresh_nfl_hub",
-        lambda **kwargs: {"generated_at_utc": "2026-08-31T23:00:00+00:00", "status": "READY", "authority": "observational"},
-    )
+    monkeypatch.setattr(launch_module, "refresh_nfl_hub", _ready_hub)
 
     report = service.prepare(season=2026)
 
@@ -124,11 +139,7 @@ def test_failed_league_refresh_preserves_valid_snapshot(monkeypatch, tmp_path) -
     connections = _Connections(draft, fail=True)
     service = _service(tmp_path, draft, connections)
     monkeypatch.delenv("PSE_FANTASYPROS_API_KEY", raising=False)
-    monkeypatch.setattr(
-        launch_module,
-        "refresh_nfl_hub",
-        lambda **kwargs: {"generated_at_utc": "2026-08-31T23:00:00+00:00", "status": "READY", "authority": "observational"},
-    )
+    monkeypatch.setattr(launch_module, "refresh_nfl_hub", _ready_hub)
 
     report = service.prepare()
 
@@ -137,31 +148,75 @@ def test_failed_league_refresh_preserves_valid_snapshot(monkeypatch, tmp_path) -
     assert "preserved" in league_stage.detail.lower()
 
 
-def test_failed_special_teams_refresh_preserves_previous_market(monkeypatch, tmp_path) -> None:
+def test_failed_special_teams_refresh_preserves_validated_previous_market(
+    monkeypatch, tmp_path
+) -> None:
     draft = _DraftService(_snapshot(roster_positions=["QB", "RB", "WR", "K", "DST", "BN"]))
-    connections = _Connections(draft)
-    service = _service(tmp_path, draft, connections)
+    service = _service(tmp_path, draft, _Connections(draft))
     monkeypatch.delenv("PSE_FANTASYPROS_API_KEY", raising=False)
-    monkeypatch.setattr(
-        launch_module,
-        "refresh_nfl_hub",
-        lambda **kwargs: {"generated_at_utc": "2026-08-31T23:00:00+00:00", "status": "READY", "authority": "observational"},
-    )
-    service.special_teams_path.write_text(
-        json.dumps({"authority": "external_market_only", "generated_at_utc": "2026-08-31T20:00:00+00:00"}),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(
-        launch_module,
-        "refresh_special_teams_market",
-        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("source unavailable")),
-    )
+    monkeypatch.setattr(launch_module, "refresh_nfl_hub", _ready_hub)
+    previous = {
+        "authority": "external_market_only",
+        "model_fields_present": False,
+        "season": 2026,
+        "kicker_count": 12,
+        "dst_count": 32,
+        "generated_at_utc": "2026-08-31T20:00:00+00:00",
+        "source_date": "2026-08-31",
+    }
+    service.special_teams_path.write_text(json.dumps(previous), encoding="utf-8")
+
+    def fail_refresh(*args, **kwargs):
+        raise RuntimeError("source unavailable")
+
+    monkeypatch.setattr(launch_module, "refresh_special_teams_market", fail_refresh)
 
     report = service.prepare()
 
     stage = next(stage for stage in report.stages if stage.name == "special_teams_market")
     assert stage.status == "PRESERVED"
-    assert json.loads(service.special_teams_path.read_text(encoding="utf-8"))["authority"] == "external_market_only"
+    assert json.loads(service.special_teams_path.read_text(encoding="utf-8")) == previous
+
+
+def test_invalid_special_teams_fallback_is_not_called_preserved(monkeypatch, tmp_path) -> None:
+    draft = _DraftService(_snapshot(roster_positions=["QB", "K", "DST", "BN"]))
+    service = _service(tmp_path, draft, _Connections(draft))
+    monkeypatch.delenv("PSE_FANTASYPROS_API_KEY", raising=False)
+    monkeypatch.setattr(launch_module, "refresh_nfl_hub", _ready_hub)
+    service.special_teams_path.write_text(
+        json.dumps({"authority": "production_model", "season": 2026}),
+        encoding="utf-8",
+    )
+
+    def fail_refresh(*args, **kwargs):
+        raise RuntimeError("source unavailable")
+
+    monkeypatch.setattr(launch_module, "refresh_special_teams_market", fail_refresh)
+
+    report = service.prepare()
+
+    stage = next(stage for stage in report.stages if stage.name == "special_teams_market")
+    assert stage.status == "FAILED"
+
+
+def test_market_status_failure_remains_bounded_when_adp_not_configured(
+    monkeypatch, tmp_path
+) -> None:
+    class _BrokenMarketDraft(_DraftService):
+        def market_status(self):
+            raise RuntimeError("corrupt market metadata")
+
+    draft = _BrokenMarketDraft(_snapshot())
+    service = _service(tmp_path, draft, _Connections(draft))
+    monkeypatch.delenv("PSE_FANTASYPROS_API_KEY", raising=False)
+    monkeypatch.setattr(launch_module, "refresh_nfl_hub", _ready_hub)
+
+    report = service.prepare()
+
+    stage = next(stage for stage in report.stages if stage.name == "live_adp")
+    assert stage.status == "SKIPPED"
+    assert stage.data is not None
+    assert stage.data["reason"] == "market_status_unavailable"
 
 
 def test_prepare_is_single_flight(tmp_path) -> None:
