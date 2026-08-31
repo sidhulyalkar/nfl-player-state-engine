@@ -62,8 +62,11 @@ _STATUS_EXACT_MAP = {
     "TRD": "TRANSACTIONAL",
     "TRL": "TRANSACTIONAL",
     "TRT": "TRANSACTIONAL",
-    # Documented nflverse status-description IDs.
+    # Documented or independently reconciled nflverse status-description IDs.
     "A01": "ACTIVE",
+    # Current 2026 A02 rows reconcile to reserve/PUP players across multiple clubs.
+    # Keep this exact-map-only: the broader Axx family has not earned one shared meaning.
+    "A02": "RESERVE",
     "E02": "EXEMPT",
     "P01": "PRACTICE_SQUAD",
     "P02": "PRACTICE_SQUAD",
