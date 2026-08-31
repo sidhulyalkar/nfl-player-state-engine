@@ -3,19 +3,38 @@ from __future__ import annotations
 from typing import Any
 
 
+NON_REAL_LEAGUE_PLATFORMS = frozenset({"demo", "synthetic", "example"})
+
+
+def is_real_league_summary(item: dict[str, object]) -> bool:
+    platform = str(item.get("platform") or "").strip().lower()
+    league_id = str(item.get("league_id") or "").strip().lower()
+    if not league_id:
+        return False
+    if platform in NON_REAL_LEAGUE_PLATFORMS:
+        return False
+    return not league_id.startswith("demo-")
+
+
 class DoctorDraftServiceAdapter:
     """Exception-safe read facade over the live draft service for readiness diagnosis.
 
     Champion/model authority is diagnosed separately by ``DraftDayDoctorService``. A failure while
     reading the optional market overlay must therefore be represented as unavailable timing evidence,
-    not escape as an exception and hide the more important hard-authority finding.
+    not escape as an exception and hide the more important hard-authority finding. Aggregate draft
+    readiness also excludes tracked demo/example snapshots so showcase data cannot satisfy or poison
+    the operator's real-league portfolio contract.
     """
 
     def __init__(self, service: Any) -> None:
         self.service = service
 
     def list_leagues(self) -> list[dict[str, object]]:
-        return self.service.list_leagues()
+        return [
+            dict(item)
+            for item in self.service.list_leagues()
+            if is_real_league_summary(dict(item))
+        ]
 
     def load_snapshot(self, league_id: str):
         return self.service.load_snapshot(league_id)
