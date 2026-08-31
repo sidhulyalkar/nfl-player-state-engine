@@ -63,7 +63,41 @@ pse import-sleeper-league --league-id YOUR_LEAGUE_ID
 
 For other platforms, use the maintained importer or explicit CSV/manual boundary. Never create fake ownership or pick history simply to make strict preflight green.
 
-## 4. Verify actual-draft readiness
+## 4. Refresh the live draft market
+
+True ADP is a current **market-timing overlay**, not part of the immutable football projection champion. This separation is intentional: the market can move during draft week without retraining or reapproving the preseason model.
+
+When FantasyPros API access is configured:
+
+```bash
+export PSE_FANTASYPROS_API_KEY=<YOUR_KEY>
+python scripts/refresh_live_adp.py --season 2026
+```
+
+The Product API exposes the same operations:
+
+```text
+GET  /v1/draft/market/status
+POST /v1/draft/market/refresh?season=2026
+GET  /v1/leagues/{league_id}/draft/market
+```
+
+The refresh collects four point-in-time market views:
+
+```text
+PPR  / ALL
+PPR  / OP
+HALF / ALL
+HALF / OP
+```
+
+`ALL` supplies the ordinary 1QB timing context. `OP` supplies a superflex-style market proxy for multi-QB rooms. It is **not** labeled as exact 2QB authority. The API also does not certify an exact team count, so an 8-team 2QB league receives a deliberately reduced format-confidence score and a wider timing-uncertainty proxy.
+
+For `type=ADP`, the integration requires an explicit average-position field such as `rank_ave`. It refuses to substitute the ordinal `rank_ecr` field as ADP. Likewise, FantasyPros `rank_std` is not represented as empirical pick-position standard deviation. The live board derives a conservative timing uncertainty and labels that provenance explicitly.
+
+If the API key is absent, the refresh fails, the previous valid snapshot is preserved, and the Draft Room remains usable. Without true ADP the board falls back to neutral market timing rather than manufacturing a pick position. Market snapshots older than six hours are reported as stale in `/health` and the market-status endpoint.
+
+## 5. Verify actual-draft readiness
 
 ```bash
 export PSE_PROJECTION_SOURCE_MODE=champion
@@ -73,9 +107,9 @@ export PSE_PROJECTION_CHAMPION_TARGET=preseason_multicontract_player_values_2026
 python scripts/check_draft_checkout.py --strict-data
 ```
 
-Strict preflight re-resolves and re-verifies the same champion used by the Product API. A schema-valid development path is not sufficient.
+Strict preflight re-resolves and re-verifies the same champion used by the Product API. A schema-valid development path is not sufficient. Live ADP is a quality enhancement rather than a model-authority blocker.
 
-## 5. Launch the Draft War Room
+## 6. Launch the Draft War Room
 
 The default Docker Compose stack is production-authority aware:
 
@@ -92,6 +126,8 @@ projection_integrity_verified=true
 projection_target=preseason_multicontract_player_values_2026
 ```
 
+`/health` also surfaces the current draft-market status independently from champion health.
+
 Open:
 
 ```text
@@ -104,7 +140,7 @@ Docker Compose waits for the verified API health check before starting the front
 
 Promotion changes artifact authority, not scientific evidence. Continue to surface known limitations honestly, including any current release flags for:
 
-- true ADP availability;
+- live ADP unavailable, stale, or format-proxy-only;
 - K/DST `external_market_only` authority;
 - unvalidated median-game policy;
 - optional/degraded NFL Hub source families.
