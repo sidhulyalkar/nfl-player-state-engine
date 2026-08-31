@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from player_state_engine.product.schemas import LeagueSnapshot
@@ -26,8 +28,33 @@ class LeagueSnapshotStore:
         return self.root / f"{safe}.json"
 
     def save(self, snapshot: LeagueSnapshot) -> Path:
+        """Atomically replace one normalized league snapshot.
+
+        Draft refreshes and first-time onboarding share this write path. Readers should therefore
+        observe either the previous complete JSON document or the new complete document, never a
+        partially written snapshot if the process is interrupted mid-write.
+        """
+
         path = self._path(snapshot.identity.league_id)
-        path.write_text(snapshot.model_dump_json(indent=2), encoding="utf-8")
+        encoded = snapshot.model_dump_json(indent=2) + "\n"
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.root,
+                prefix=f".{path.stem}.",
+                suffix=".next",
+                delete=False,
+            ) as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+                temporary = Path(handle.name)
+            temporary.replace(path)
+        finally:
+            if temporary is not None and temporary.exists():
+                temporary.unlink(missing_ok=True)
         return path
 
     def load(self, league_id: str) -> LeagueSnapshot:
