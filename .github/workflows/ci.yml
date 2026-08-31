@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install -e '.[dev,intelligence,api]'
+      - run: python -m pip install -e '.[dev,intelligence,api,espn]'
       - name: Lint package, tests, and operational research scripts
         run: |
           ruff check src tests \
