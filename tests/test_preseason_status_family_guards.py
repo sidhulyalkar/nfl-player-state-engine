@@ -30,6 +30,36 @@ def test_opaque_e_family_is_broadly_exempt() -> None:
     assert diagnostics.unknown_status_rows == 0
 
 
+def test_current_a02_is_exactly_reserve_without_generalizing_a_family() -> None:
+    rosters = pd.DataFrame(
+        [
+            {
+                "season": 2026,
+                "week": 1,
+                "team": "AAA",
+                "position": "RB",
+                "gsis_id": "P-A02",
+                "full_name": "Reserve Player",
+                "status": "A02",
+                "status_description_abbr": "A02",
+            }
+        ]
+    )
+    normalized, diagnostics = _normalize_opening_roster(
+        rosters,
+        season=2026,
+        snapshot_week=1,
+    )
+    assert normalized.iloc[0]["roster_status"] == "RESERVE"
+    assert diagnostics.unknown_status_rows == 0
+
+    unknown = rosters.copy()
+    unknown.loc[:, "status"] = "A99"
+    unknown.loc[:, "status_description_abbr"] = "A99"
+    with pytest.raises(ValueError, match="Unknown roster status semantics"):
+        _normalize_opening_roster(unknown, season=2026, snapshot_week=1)
+
+
 def test_unknown_r_family_does_not_inherit_reserve_semantics() -> None:
     rosters = pd.DataFrame(
         [
