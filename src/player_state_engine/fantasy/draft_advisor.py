@@ -83,6 +83,8 @@ def augment_live_draft_board_with_reliability(
     Shared projection artifacts are reduced to the active scoring contract before opponent-position
     counts are derived. Reliability also consumes ``decision_uncertainty`` rather than raw interval
     width, so a q50-only scoring contract cannot be indirectly penalized by unqualified q10/q90.
+    Median-game scoring is likewise neutral unless the baseline explicitly declares a separately
+    qualified median policy as applied.
     """
 
     if baseline.empty:
@@ -123,7 +125,12 @@ def augment_live_draft_board_with_reliability(
     need_component = ((_numeric_column(out, "roster_need_score", 0.0) + 0.5) / 1.5).clip(0, 1)
     tier_pct = _numeric_column(out, "tier_cliff_percentile", 0.5).clip(0, 1)
     median_score = _numeric_column(out, "median_format_score", 0.5).clip(0, 1)
-    median_weight = 0.04 if config.median_scoring else 0.0
+    median_policy_applied = (
+        bool(out["median_policy_applied"].fillna(False).astype(bool).all())
+        if "median_policy_applied" in out
+        else False
+    )
+    median_weight = 0.04 if median_policy_applied else 0.0
     denominator = 0.48 + 0.14 + 0.12 + 0.08 + 0.14 + median_weight
     out["room_challenger_score"] = 100.0 * (
         0.48 * base_pct

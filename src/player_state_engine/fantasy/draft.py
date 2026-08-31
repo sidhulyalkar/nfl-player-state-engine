@@ -211,6 +211,11 @@ def build_live_draft_board(
 
     The production score remains the interpretable v0.8 blend. v0.9 adds a separately exposed
     dynamic-scarcity challenger so historical replay can decide whether it deserves promotion.
+
+    Median-game scoring is a separate team-week policy. No median-specific live-draft adjustment
+    is authorized in v0.17, so merely setting ``LeagueConfig.median_scoring`` cannot change player
+    scores, rankings, actions, or reasons. The flag is surfaced as metadata only until a separately
+    replayed median policy earns explicit authority.
     """
     if state.teams != config.teams:
         raise ValueError("DraftState.teams must match LeagueConfig.teams")
@@ -263,16 +268,13 @@ def build_live_draft_board(
     ).fillna(0.0)
     available = _add_dynamic_draft_scarcity(available, state)
 
-    floor_pct = _percentile(available["floor_vorp"])
-    uncertainty_pct = _percentile(available["uncertainty"])
-    if config.median_scoring:
-        available["median_format_score"] = (
-            0.75 * floor_pct + 0.25 * (1.0 - uncertainty_pct)
-        ).clip(0, 1)
-        available["median_scoring_boost"] = available["median_format_score"] >= 0.75
-    else:
-        available["median_format_score"] = 0.5
-        available["median_scoring_boost"] = False
+    # Median-game policy is intentionally neutral until a separately replayed team-week policy
+    # earns authority. Do not derive a median boost from season floor or uncertainty tails.
+    available["median_scoring_requested"] = bool(config.median_scoring)
+    available["median_policy_applied"] = False
+    available["median_policy_authority"] = "none"
+    available["median_format_score"] = 0.5
+    available["median_scoring_boost"] = False
 
     weights = {
         "base": 0.54,
@@ -280,7 +282,7 @@ def build_live_draft_board(
         "urgency": 0.12,
         "tier": 0.08,
         "vorp": 0.07,
-        "median": 0.04 if config.median_scoring else 0.0,
+        "median": 0.0,
     }
     total_weight = sum(weights.values())
     need_component = ((available["roster_need_score"] + 0.5) / 1.5).clip(0, 1)
@@ -298,15 +300,14 @@ def build_live_draft_board(
     available["live_draft_score"] = available["live_draft_score"].clip(0, 100)
 
     # Challenger keeps the same semantic pieces but swaps static scarcity for the measured
-    # projected loss from waiting. It is deliberately not used for draft_action until promoted.
+    # projected loss from waiting. Median-game policy remains neutral here too.
     challenger = 100.0 * (
         0.52 * available["base_draft_percentile"]
         + 0.14 * need_component
         + 0.11 * available["market_urgency"]
         + 0.08 * available["tier_cliff_percentile"]
         + 0.11 * available["draft_dynamic_scarcity_score"]
-        + (0.04 if config.median_scoring else 0.0) * available["median_format_score"]
-    ) / (1.0 if config.median_scoring else 0.96)
+    ) / 0.96
     available["ranking_challenger_score"] = (challenger - 3.0 * wait_penalty).clip(0, 100)
     available["ranking_challenger_delta"] = (
         available["ranking_challenger_score"] - available["live_draft_score"]
@@ -377,7 +378,6 @@ def draft_state_from_snapshot(
     if not total_rounds:
         roster_positions = list(getattr(settings, "roster_positions", []) or [])
         total_rounds = max(1, len(roster_positions))
-
     current_pick = len(picks) + 1
     draft_type = str(getattr(settings, "draft_type", None) or active_draft.get("type") or "snake")
     return DraftState(
