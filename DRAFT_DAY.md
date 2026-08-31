@@ -130,7 +130,7 @@ so the Hub refreshes from roster, depth-chart, injury, ranking, identity, and sc
 Before using the board for an actual draft, all of these must exist and be current:
 
 ```text
-artifacts/predictions/product_player_values.csv
+verified production projection champion
 data/product/nfl_hub/current.json
 data/product/special_teams_market/current.json
 data/product/leagues/*.json or data/product/live_leagues/*.json
@@ -142,7 +142,7 @@ Run:
 python scripts/check_draft_checkout.py --strict-data
 ```
 
-A missing artifact is a blocker, not an invitation to create placeholder values.
+A missing artifact is a blocker, not an invitation to create placeholder values. A schema-valid file in `PSE_PROJECTIONS_PATH` is also **not** enough for actual-draft readiness: path mode is deliberately `path_unverified`. The strict data gate requires `PSE_PROJECTION_SOURCE_MODE=champion` and re-verifies the same immutable champion used by the Product API.
 
 Refresh maintained current-state sources with:
 
@@ -152,6 +152,56 @@ python scripts/refresh_special_teams_market.py --season 2026
 ```
 
 The projection artifact must come from the immutable preseason release pipeline and its exact scoring-contract authority. Do not manually edit `product_player_values.csv` to make the UI green.
+
+## Human approval and champion activation
+
+The successful release rehearsal produces an immutable **challenger** bundle. That is intentionally not enough to serve production recommendations. Review the exact release report, manifest, file hashes, scoring-contract metadata, current-source timestamps, and known provisional reasons before approving it.
+
+Approval and activation are two separate actions.
+
+First derive a `production_approved` manifest over the exact challenger bytes. This re-verifies the challenger and records the human approver but does **not** move the champion pointer:
+
+```bash
+python scripts/derive_production_approval.py \
+  --bundle-root <IMMUTABLE_BUNDLE_ROOT> \
+  --registry-root <REGISTRY_ROOT> \
+  --challenger-bundle-id <CHALLENGER_BUNDLE_ID> \
+  --approved-by <APPROVER> \
+  --note "Reviewed 2026 three-league release rehearsal"
+```
+
+Record the returned production bundle ID. Then, as a separate explicit activation, promote exactly that production-approved bundle:
+
+```bash
+python scripts/artifact_registry.py promote \
+  --bundle-root <IMMUTABLE_BUNDLE_ROOT> \
+  --registry-root <REGISTRY_ROOT> \
+  --target preseason_multicontract_player_values_2026 \
+  --bundle-id <PRODUCTION_BUNDLE_ID> \
+  --approved-by <APPROVER> \
+  --note "Activate reviewed 2026 draft champion"
+```
+
+Configure production serving to resolve that champion, never the development path:
+
+```bash
+export PSE_PROJECTION_SOURCE_MODE=champion
+export PSE_ARTIFACT_REGISTRY_ROOT=<REGISTRY_ROOT>
+export PSE_PRODUCTION_BUNDLE_ROOT=<IMMUTABLE_BUNDLE_ROOT>
+export PSE_PROJECTION_CHAMPION_TARGET=preseason_multicontract_player_values_2026
+```
+
+Then verify the exact runtime identity:
+
+```bash
+python scripts/check_draft_checkout.py --strict-data
+python -m player_state_engine.api
+curl -fsS http://localhost:8000/health
+```
+
+The health payload must report `projection_source_mode=champion`, `projection_authority=production_approved`, `projection_integrity_verified=true`, the expected target, and the exact promoted bundle ID. If champion bytes or the champion pointer change while the API process is running, decision routes fail closed and require a restart instead of mixing artifact identities.
+
+Promotion does not erase known scientific limitations. The release may still be `PROVISIONAL`, for example because median-game policy is unvalidated or K/DST use separate `external_market_only` authority. Do not relabel a provisional release as READY.
 
 ## Gemini frontend handoff contract
 
@@ -181,4 +231,4 @@ cd apps/gemini-fantasy-console && npm run build && cd ../..
 python scripts/check_draft_checkout.py --strict-data
 ```
 
-Then run the multicontract Sept. 1 release gate against the immutable production bundle and current snapshots. A green build does not override a `BLOCKED` release verdict.
+Then run the multicontract release gate against the exact promoted immutable production bundle and current snapshots. A green build does not override a `BLOCKED` or `PROVISIONAL` release verdict.
