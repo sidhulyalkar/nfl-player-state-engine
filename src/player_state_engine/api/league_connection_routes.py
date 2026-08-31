@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from player_state_engine.product.draft_day_doctor_adapter import is_real_league_summary
 from player_state_engine.product.league_connections import (
     LeagueConnectionService,
     LeaguePortfolioExpectationStore,
@@ -47,12 +48,13 @@ def install_league_connection_routes(
 
     def portfolio_payload() -> dict[str, object]:
         try:
-            connections = list(getattr(draft_service, "list_leagues")())
+            all_connections = [dict(item) for item in getattr(draft_service, "list_leagues")()]
         except Exception as exc:  # noqa: BLE001 - operator endpoint should surface store failure.
             raise HTTPException(
                 status_code=503,
                 detail=f"League snapshot store could not be enumerated: {exc}",
             ) from exc
+        connections = [item for item in all_connections if is_real_league_summary(item)]
         connected_ids = {
             str(item.get("league_id"))
             for item in connections
@@ -67,6 +69,7 @@ def install_league_connection_routes(
             "missing_league_count": missing,
             "complete": bool(expected is not None and connected >= expected),
             "connections": connections,
+            "ignored_non_real_snapshot_count": len(all_connections) - len(connections),
             "supported_platforms": ["sleeper", "espn"],
             "espn_private_auth_configured": bool(
                 os.getenv("PSE_ESPN_S2") and os.getenv("PSE_ESPN_SWID")
