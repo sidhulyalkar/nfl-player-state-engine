@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -56,8 +57,10 @@ class LeaguePortfolioExpectationStore:
         if self.path.is_file():
             try:
                 payload = json.loads(self.path.read_text(encoding="utf-8"))
+                if not isinstance(payload, dict):
+                    return None
                 value = int(payload.get("expected_league_count"))
-                return value if value > 0 else None
+                return value if 1 <= value <= 20 else None
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
                 return None
         raw = str(os.getenv("PSE_EXPECTED_DRAFT_LEAGUE_COUNT", "")).strip()
@@ -67,17 +70,36 @@ class LeaguePortfolioExpectationStore:
             value = int(raw)
         except ValueError:
             return None
-        return value if value > 0 else None
+        return value if 1 <= value <= 20 else None
 
     def save_expected_count(self, expected_league_count: int) -> Path:
         value = int(expected_league_count)
         if value < 1 or value > 20:
             raise ValueError("expected_league_count must be between 1 and 20")
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        next_path = self.path.with_suffix(self.path.suffix + ".next")
-        payload = {"schema_version": 1, "expected_league_count": value}
-        next_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        next_path.replace(self.path)
+        encoded = json.dumps(
+            {"schema_version": 1, "expected_league_count": value},
+            indent=2,
+            sort_keys=True,
+        ) + "\n"
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.path.parent,
+                prefix=f".{self.path.stem}.",
+                suffix=".next",
+                delete=False,
+            ) as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+                temporary = Path(handle.name)
+            temporary.replace(self.path)
+        finally:
+            if temporary is not None and temporary.exists():
+                temporary.unlink(missing_ok=True)
         return self.path
 
 
