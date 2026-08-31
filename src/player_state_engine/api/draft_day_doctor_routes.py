@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from player_state_engine.product.draft_day_doctor import DraftDayDoctorService
+from player_state_engine.product.draft_day_doctor_adapter import DoctorDraftServiceAdapter
 from player_state_engine.product.projection_artifact_source import ProjectionArtifactSource
 
 try:
@@ -21,7 +22,7 @@ def install_draft_day_doctor_routes(
 ) -> DraftDayDoctorService:
     service = DraftDayDoctorService(
         projection_source=projection_source,
-        draft_service=draft_service,
+        draft_service=DoctorDraftServiceAdapter(draft_service),
         nfl_hub_root=nfl_hub_root,
         special_teams_path=special_teams_path,
     )
