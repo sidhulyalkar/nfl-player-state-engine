@@ -3,10 +3,21 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from scripts.check_draft_checkout import _projection_contract_check
+from player_state_engine.learning.artifact_registry import (
+    build_artifact_bundle,
+    promote_artifact_bundle,
+    save_artifact_bundle_manifest,
+)
+from scripts.check_draft_checkout import (
+    _production_projection_check,
+    _projection_contract_check,
+)
+
+TARGET = "preseason_multicontract_player_values_2026"
 
 
 def _write_projection(path: Path, *, rows_per_contract: int = 250) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     fields = [
         "scoring_contract_id",
         "player_id",
@@ -31,6 +42,32 @@ def _write_projection(path: Path, *, rows_per_contract: int = 250) -> None:
                         "decision_quantile_policy": policy,
                     }
                 )
+
+
+def _promoted_champion(root: Path) -> tuple[Path, Path, Path]:
+    bundle_root = root / "bundle"
+    registry_root = root / "registry"
+    values_path = bundle_root / "product_player_values.csv"
+    _write_projection(values_path)
+    manifest = build_artifact_bundle(
+        bundle_root,
+        {"player_values": values_path},
+        artifact_type="preseason_multicontract_player_values_production",
+        authority="production_approved",
+        activation_eligible=True,
+        model_id="preseason_direct_league_score_v017",
+        target=TARGET,
+        source_cutoff_utc="2026-08-31T16:00:00+00:00",
+    )
+    save_artifact_bundle_manifest(manifest, registry_root)
+    promote_artifact_bundle(
+        registry_root,
+        bundle_root,
+        target=TARGET,
+        bundle_id=manifest.bundle_id,
+        approved_by="release-owner",
+    )
+    return bundle_root, registry_root, values_path
 
 
 def test_projection_contract_preflight_accepts_current_multicontract_shape(tmp_path: Path) -> None:
@@ -85,3 +122,52 @@ def test_projection_contract_preflight_rejects_duplicate_player_inside_contract(
 
     assert ok is False
     assert "duplicate contract/player rows" in detail
+
+
+def test_actual_draft_preflight_rejects_schema_valid_path_mode(
+    tmp_path: Path, monkeypatch
+) -> None:
+    path = tmp_path / "product_player_values.csv"
+    _write_projection(path)
+    monkeypatch.setenv("PSE_PROJECTION_SOURCE_MODE", "path")
+    monkeypatch.setenv("PSE_PROJECTIONS_PATH", str(path))
+
+    ok, detail = _production_projection_check(tmp_path)
+
+    assert ok is False
+    assert "path_unverified" in detail
+    assert "requires PSE_PROJECTION_SOURCE_MODE=champion" in detail
+
+
+def test_actual_draft_preflight_accepts_verified_promoted_champion(
+    tmp_path: Path, monkeypatch
+) -> None:
+    bundle_root, registry_root, _values_path = _promoted_champion(tmp_path)
+    monkeypatch.setenv("PSE_PROJECTION_SOURCE_MODE", "champion")
+    monkeypatch.setenv("PSE_ARTIFACT_REGISTRY_ROOT", str(registry_root))
+    monkeypatch.setenv("PSE_PRODUCTION_BUNDLE_ROOT", str(bundle_root))
+    monkeypatch.setenv("PSE_PROJECTION_CHAMPION_TARGET", TARGET)
+
+    ok, detail = _production_projection_check(tmp_path)
+
+    assert ok is True
+    assert "verified champion bundle=" in detail
+    assert f"target={TARGET}" in detail
+    assert "2 contracts" in detail
+
+
+def test_actual_draft_preflight_detects_champion_tampering(
+    tmp_path: Path, monkeypatch
+) -> None:
+    bundle_root, registry_root, values_path = _promoted_champion(tmp_path)
+    monkeypatch.setenv("PSE_PROJECTION_SOURCE_MODE", "champion")
+    monkeypatch.setenv("PSE_ARTIFACT_REGISTRY_ROOT", str(registry_root))
+    monkeypatch.setenv("PSE_PRODUCTION_BUNDLE_ROOT", str(bundle_root))
+    monkeypatch.setenv("PSE_PROJECTION_CHAMPION_TARGET", TARGET)
+    values_path.write_text("player_id\nTAMPERED\n", encoding="utf-8")
+
+    ok, detail = _production_projection_check(tmp_path)
+
+    assert ok is False
+    assert "verified champion unavailable" in detail
+    assert "failed integrity checks" in detail
