@@ -139,24 +139,35 @@ def _copy_member(archive: zipfile.ZipFile, member: str, destination: Path) -> No
 
 def _existing_approved_champion(
     registry_root: Path,
-    bundle_root: Path,
     *,
     challenger_bundle_id: str,
 ) -> ArtifactBundleManifest | None:
+    """Return the idempotent champion or fail before touching bytes for a different champion."""
+
     pointer = load_champion_pointer(registry_root)
     record = pointer.champions.get(TARGET)
     if record is None:
         return None
+
     manifest = load_artifact_bundle_manifest(registry_root, record.bundle_id)
-    require_valid_bundle(manifest, bundle_root)
     approval = manifest.metadata.get("manual_production_approval")
-    if not isinstance(approval, dict):
-        return None
-    if approval.get("source_challenger_bundle_id") != challenger_bundle_id:
-        return None
-    if manifest.authority != "production_approved" or not manifest.activation_eligible:
-        return None
-    return manifest
+    same_challenger = (
+        isinstance(approval, dict)
+        and approval.get("source_challenger_bundle_id") == challenger_bundle_id
+    )
+    if (
+        same_challenger
+        and manifest.authority == "production_approved"
+        and manifest.activation_eligible
+        and manifest.target == TARGET
+    ):
+        return manifest
+
+    raise PermissionError(
+        f"Champion target {TARGET!r} already points to a different approved bundle "
+        f"({record.bundle_id}). This one-shot preseason materializer will not overwrite bytes "
+        "under an existing champion. Use a separately reviewed storage/rollback migration."
+    )
 
 
 def materialize_release(
@@ -170,7 +181,6 @@ def materialize_release(
     special_teams_path: str | Path = "data/product/special_teams_market/current.json",
     activation_report_path: str | Path = "artifacts/release_reports/preseason_2026_activation.json",
     note: str = "Reviewed 2026 three-league release rehearsal",
-    replace_existing_champion: bool = False,
 ) -> dict[str, Any]:
     """Materialize, approve, and promote one exact reviewed preseason workflow artifact.
 
@@ -208,6 +218,13 @@ def materialize_release(
         challenger = ArtifactBundleManifest.model_validate(manifest_payload)
         _validate_challenger(challenger, expected_bundle_id=expected_bundle_id)
 
+        # Check the mutable authority pointer before copying a single candidate byte. This preserves
+        # the currently promoted bundle if this checkout already serves a different champion.
+        existing = _existing_approved_champion(
+            output_registry_root,
+            challenger_bundle_id=challenger.bundle_id,
+        )
+
         output_bundle_root.mkdir(parents=True, exist_ok=True)
         for record in challenger.files:
             relative = _safe_relative_path(record.relative_path)
@@ -220,21 +237,9 @@ def materialize_release(
         save_artifact_bundle_manifest(challenger, output_registry_root)
         require_valid_bundle(challenger, output_bundle_root)
 
-        existing = _existing_approved_champion(
-            output_registry_root,
-            output_bundle_root,
-            challenger_bundle_id=challenger.bundle_id,
-        )
         if existing is not None:
             production = existing
         else:
-            pointer = load_champion_pointer(output_registry_root)
-            current = pointer.champions.get(TARGET)
-            if current is not None and not replace_existing_champion:
-                raise PermissionError(
-                    f"Champion target {TARGET!r} already points to {current.bundle_id}; "
-                    "pass --replace-existing-champion only after reviewing that authority change."
-                )
             production = derive_production_approved_bundle(
                 output_registry_root,
                 output_bundle_root,
@@ -312,11 +317,6 @@ def parse_args() -> argparse.Namespace:
         default=Path("artifacts/registry"),
     )
     parser.add_argument("--note", default="Reviewed 2026 three-league release rehearsal")
-    parser.add_argument(
-        "--replace-existing-champion",
-        action="store_true",
-        help="Permit replacing an already promoted champion after explicit review.",
-    )
     return parser.parse_args()
 
 
@@ -329,7 +329,6 @@ def main() -> None:
         bundle_root=args.bundle_root,
         registry_root=args.registry_root,
         note=args.note,
-        replace_existing_champion=args.replace_existing_champion,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
 
