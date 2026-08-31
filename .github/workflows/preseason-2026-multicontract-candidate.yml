@@ -2,6 +2,27 @@ name: 2026 multicontract preseason candidate rehearsal
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/preseason-2026-multicontract-candidate.yml'
+      - 'scripts/materialize_multicontract_preseason_2026_candidate.py'
+      - 'src/player_state_engine/product/preseason_multicontract_candidate.py'
+      - 'tests/test_preseason_multicontract_candidate.py'
+      - 'src/player_state_engine/fantasy/preseason.py'
+      - 'tests/test_preseason_status_family_guards.py'
+      - 'src/player_state_engine/fantasy/preseason_league_score.py'
+      - 'src/player_state_engine/evaluation/uncertainty_qualification.py'
+      - 'scripts/run_direct_league_score_preseason_benchmark.py'
+      - 'scripts/run_direct_league_score_conformal_qualification.py'
+      - 'src/player_state_engine/fantasy/projection_contracts.py'
+      - 'src/player_state_engine/product/release_readiness.py'
+      - 'src/player_state_engine/product/special_teams_market.py'
+      - 'scripts/refresh_special_teams_market.py'
+      - 'src/player_state_engine/product/nfl_hub.py'
+      - 'scripts/refresh_nfl_hub.py'
+      - 'configs/fantasy/**'
   pull_request:
     paths:
       - '.github/workflows/preseason-2026-multicontract-candidate.yml'
@@ -16,6 +37,10 @@ on:
       - 'scripts/run_direct_league_score_conformal_qualification.py'
       - 'src/player_state_engine/fantasy/projection_contracts.py'
       - 'src/player_state_engine/product/release_readiness.py'
+      - 'src/player_state_engine/product/special_teams_market.py'
+      - 'scripts/refresh_special_teams_market.py'
+      - 'src/player_state_engine/product/nfl_hub.py'
+      - 'scripts/refresh_nfl_hub.py'
       - 'configs/fantasy/**'
 
 permissions:
@@ -126,7 +151,14 @@ jobs:
               expected_release_version='0.17.0',
               now=datetime.now(UTC),
           )
-          print(json.dumps(report.as_dict(), indent=2, default=str))
+          release_payload = report.as_dict()
+          print(json.dumps(release_payload, indent=2, default=str))
+          report_root = Path('artifacts/release_reports')
+          report_root.mkdir(parents=True, exist_ok=True)
+          (report_root / 'preseason_2026_multicontract_rehearsal.json').write_text(
+              json.dumps(release_payload, indent=2, sort_keys=True, default=str) + '\n',
+              encoding='utf-8',
+          )
           assert report.status == 'BLOCKED', report
           assert report.promotion_rehearsal_eligible is True, report
           assert report.rehearsal_status == 'PROVISIONAL', report
@@ -147,7 +179,7 @@ jobs:
         with:
           name: preseason-2026-multicontract-candidate-${{ github.sha }}
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 90
           path: |
             /tmp/direct_league_score_preseason
             /tmp/direct_league_score_conformal
@@ -155,3 +187,4 @@ jobs:
             /tmp/special_teams_market.json
             artifacts/preseason_2026_multicontract_candidate
             artifacts/registry
+            artifacts/release_reports/preseason_2026_multicontract_rehearsal.json
