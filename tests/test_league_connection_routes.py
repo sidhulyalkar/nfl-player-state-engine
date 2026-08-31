@@ -73,5 +73,6 @@ def test_connection_endpoint_rejects_browser_supplied_espn_cookies(tmp_path, mon
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 400
     assert "browser-secret" not in response.text
+    assert "server-side" in response.json()["detail"]
