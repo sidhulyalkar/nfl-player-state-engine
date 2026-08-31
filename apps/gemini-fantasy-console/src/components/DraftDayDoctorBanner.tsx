@@ -113,10 +113,16 @@ export function DraftDayDoctorBanner() {
 
   if (!report) return null;
   const usable = report.leagues.filter((league) => league.can_use_core_draft_board).length;
-  return <div className={`doctor-banner ${report.status.toLowerCase()}`}>
-    <div className="doctor-verdict">{statusIcon(report.status)}<div><span>DRAFT-DAY DOCTOR</span><strong>{report.status}</strong></div></div>
-    <div className="doctor-summary"><Stethoscope size={16}/><span>{report.can_open_war_room ? 'Core War Room authority is usable.' : 'Do not rely on the War Room yet.'} {report.leagues.length ? `${usable}/${report.leagues.length} installed league${report.leagues.length === 1 ? '' : 's'} core-usable.` : 'No installed league is available.'}</span></div>
-    <div className="doctor-finding"><strong>{finding?.code.replaceAll('_', ' ') ?? 'ALL CHECKS GREEN'}</strong><span>{finding?.detail ?? 'Champion, NFL state, league, and timing surfaces passed the active doctor checks.'}</span>{finding?.remediation && <small>{finding.remediation}</small>}</div>
+  const displayedStatus: DoctorStatus = error && report.status === 'READY' ? 'PROVISIONAL' : report.status;
+  const displayedFinding = error ? {
+    code: 'DOCTOR_REFRESH_FAILED',
+    detail: 'The previous doctor verdict is being shown for context, but its latest refresh failed.',
+    remediation: error,
+  } : finding;
+  return <div className={`doctor-banner ${displayedStatus.toLowerCase()}`}>
+    <div className="doctor-verdict">{statusIcon(displayedStatus)}<div><span>DRAFT-DAY DOCTOR</span><strong>{displayedStatus}</strong></div></div>
+    <div className="doctor-summary"><Stethoscope size={16}/><span>{!error && report.can_open_war_room ? 'Core War Room authority is usable.' : error ? 'Latest readiness verification is unavailable.' : 'Do not rely on the War Room yet.'} {report.leagues.length ? `${usable}/${report.leagues.length} installed league${report.leagues.length === 1 ? '' : 's'} core-usable in the last verified report.` : 'No installed league is available.'}</span></div>
+    <div className="doctor-finding"><strong>{displayedFinding?.code.replaceAll('_', ' ') ?? 'ALL CHECKS GREEN'}</strong><span>{displayedFinding?.detail ?? 'Champion, NFL state, league, and timing surfaces passed the active doctor checks.'}</span>{displayedFinding?.remediation && <small>{displayedFinding.remediation}</small>}</div>
     {loading && <RefreshCw size={14} className="spin doctor-refresh"/>}
   </div>;
 }
