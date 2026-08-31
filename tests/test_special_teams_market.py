@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 import pandas as pd
 
+from player_state_engine.product.release_readiness import _special_teams_support
 from player_state_engine.product.special_teams_market import build_special_teams_market
 
 
@@ -115,12 +116,31 @@ def test_special_teams_board_keeps_market_authority_separate_from_model_fields()
     assert snapshot["model_fields_present"] is False
     assert snapshot["source_date"] == "2026-08-28"
     assert snapshot["kicker_count"] == 1
+    assert snapshot["kicker_identity_scheme"] == "gsis_id"
+    assert snapshot["kicker_ids"] == ["00-0039999"]
     assert snapshot["dst_count"] == 2
+    assert snapshot["dst_identity_scheme"] == "team_abbr"
+    assert snapshot["dst_ids"] == ["HOU", "LA"]
     for row in snapshot["kickers"] + snapshot["defenses"]:
         assert row["authority"] == "external_market_only"
         assert "projection_q50" not in row
         assert "vorp" not in row
         assert "season_points_q50" not in row
+
+
+def test_real_special_teams_snapshot_satisfies_release_identity_contract() -> None:
+    now = datetime(2026, 8, 29, 12, tzinfo=UTC)
+    snapshot = build_special_teams_market(
+        _rankings(),
+        _playerids(),
+        _rosters(),
+        season=2026,
+        generated_at=now,
+    )
+
+    supported = _special_teams_support(snapshot, now=now, max_age_hours=36.0)
+
+    assert supported == ("K", "DST")
 
 
 def test_kicker_board_uses_exact_identity_and_current_roster_truth() -> None:
