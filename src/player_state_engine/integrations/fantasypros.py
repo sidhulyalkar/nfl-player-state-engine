@@ -29,6 +29,30 @@ def _position_rank_number(value: object) -> float | None:
     return float(match.group(1)) if match else None
 
 
+def _first_present(frame: pd.DataFrame, names: tuple[str, ...]) -> pd.Series | None:
+    for name in names:
+        if name in frame.columns:
+            return frame[name]
+    return None
+
+
+def _adp_field_candidates(scoring: str) -> tuple[str, ...]:
+    normalized = scoring.strip().upper()
+    scoring_specific = {
+        "PPR": ("rank_adp_ppr",),
+        "HALF": ("rank_adp_half", "rank_adp_half_ppr"),
+        "STD": ("rank_adp", "rank_adp_std"),
+    }.get(normalized, ())
+    return (
+        *scoring_specific,
+        "rank_ave",
+        "rank_adp",
+        "adp",
+        "average_draft_position",
+        "avg_draft_position",
+    )
+
+
 class FantasyProsClient:
     """Thin client for FantasyPros' documented public v2 API.
 
@@ -129,7 +153,21 @@ class FantasyProsClient:
             prepared["player_name"] = raw.get("player_name")
             prepared["position"] = raw.get("player_position_id", raw.get("player_positions"))
             prepared["nfl_team"] = raw.get("player_team_id")
-            prepared["rank"] = raw.get("rank_ecr")
+            if resolved_type == "adp":
+                # FantasyPros exposes ADP separately from ECR. Accept an explicit scoring-specific
+                # ADP field or an average-position field from the ranking response, but never turn
+                # the ordinal rank_ecr into a fabricated average draft position.
+                average_position = _first_present(raw, _adp_field_candidates(scoring))
+                if average_position is None or pd.to_numeric(
+                    average_position, errors="coerce"
+                ).isna().all():
+                    raise ValueError(
+                        "FantasyPros ADP response did not expose an average draft-position field; "
+                        "refusing to substitute rank_ecr as ADP."
+                    )
+                prepared["rank"] = average_position
+            else:
+                prepared["rank"] = raw.get("rank_ecr")
             prepared["position_rank"] = raw.get(
                 "pos_rank", pd.Series(index=raw.index, dtype=object)
             ).map(_position_rank_number)
@@ -159,6 +197,9 @@ class FantasyProsClient:
             "position": position.upper(),
             "scoring": scoring.upper(),
             "ranking_type": resolved_type,
+            "rank_semantics": (
+                "average_draft_position" if resolved_type == "adp" else "consensus_ordinal_rank"
+            ),
             "expert_publication_times": payload.get("expert_pub") or {},
             "teams": source_teams,
             "qb_format": source_qb_format,

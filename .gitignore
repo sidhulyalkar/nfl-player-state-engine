@@ -48,6 +48,7 @@ Desktop.ini
 /data/interim/*
 /data/processed/*
 /data/external/*
+/data/product/draft_market/*
 /artifacts/models/*
 /artifacts/predictions/*
 /artifacts/reports/*

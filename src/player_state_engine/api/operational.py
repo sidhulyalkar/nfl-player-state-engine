@@ -10,10 +10,10 @@ from player_state_engine import __version__
 from player_state_engine.api.app import create_app as create_base_app
 from player_state_engine.api.draft_planner_routes import install_draft_planner_routes
 from player_state_engine.api.draft_reliability_routes import install_draft_reliability_routes
-from player_state_engine.api.draft_routes import install_draft_routes
 from player_state_engine.api.evidence_routes import install_evidence_routes
 from player_state_engine.api.game_intelligence_routes import install_game_intelligence_routes
 from player_state_engine.api.intelligence_routes import install_intelligence_routes
+from player_state_engine.api.market_draft_routes import install_market_draft_routes
 from player_state_engine.api.nfl_hub_routes import install_nfl_hub_routes
 from player_state_engine.api.ranking_routes import install_ranking_routes
 from player_state_engine.api.shadow_season_routes import install_shadow_season_routes
@@ -65,6 +65,9 @@ def _replace_health_version(app: FastAPI) -> None:
             payload["status"] = "degraded"
             return payload
         payload.update(snapshot.trust_metadata())
+        draft_service = getattr(app.state, "draft_service", None)
+        if draft_service is not None and hasattr(draft_service, "market_status"):
+            payload["draft_market"] = draft_service.market_status()
         return payload
 
 
@@ -119,6 +122,7 @@ def create_app(**kwargs: Any) -> FastAPI:
         "intelligence_activation_registry",
         "nfl_hub_root",
         "nfl_hub_projections_path",
+        "live_adp_root",
     }
     base_kwargs = {key: value for key, value in kwargs.items() if key not in operational_only}
 
@@ -141,11 +145,13 @@ def create_app(**kwargs: Any) -> FastAPI:
         initial_projection.bundle_id if initial_projection is not None else None
     )
 
-    draft_service = install_draft_routes(
+    draft_service = install_market_draft_routes(
         app,
         store_root=kwargs.get("store_root"),
         projections_path=resolved_projections_path,
+        market_root=kwargs.get("live_adp_root"),
     )
+    app.state.draft_service = draft_service
     install_draft_planner_routes(app, draft_service)
     install_draft_reliability_routes(app, draft_service)
     install_intelligence_routes(
@@ -198,13 +204,13 @@ def create_app(**kwargs: Any) -> FastAPI:
     app.version = __version__
     _replace_health_version(app)
     app.description = (
-        f"{app.description} Live Draft War Room, NFL Hub state-change intelligence, player "
-        "intelligence, cross-league portfolio exposure, Player State Graph shadow comparison "
-        "and sensitivity, frozen Evidence Factory, immutable 2026 live shadow-season evidence, "
-        "structured intelligence evidence ledger, model observatory, ranking calibration, guarded "
-        "draft reliability, guarded game-intelligence simulation, expanding frozen replay, "
-        "factorial attribution, simulated-state opportunity, drive-volume, possession-transition, "
-        "fourth-down decision, and terminal-family research surfaces."
+        f"{app.description} Live Draft War Room with point-in-time external ADP timing, NFL Hub "
+        "state-change intelligence, player intelligence, cross-league portfolio exposure, Player "
+        "State Graph shadow comparison and sensitivity, frozen Evidence Factory, immutable 2026 "
+        "live shadow-season evidence, structured intelligence evidence ledger, model observatory, "
+        "ranking calibration, guarded draft reliability, guarded game-intelligence simulation, "
+        "expanding frozen replay, factorial attribution, simulated-state opportunity, drive-volume, "
+        "possession-transition, fourth-down decision, and terminal-family research surfaces."
     )
     return app
 
