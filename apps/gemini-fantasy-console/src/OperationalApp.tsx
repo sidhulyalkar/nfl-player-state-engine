@@ -3,6 +3,7 @@ import App from './App';
 import { DraftDayDoctorBanner } from './components/DraftDayDoctorBanner';
 import { DraftDecisionConsole } from './components/DraftDecisionConsole';
 import { IntelligencePortal } from './components/IntelligencePortal';
+import { LeagueOnboardingPanel } from './components/LeagueOnboardingPanel';
 import { ModelObservatoryPortal } from './components/ModelObservatoryPortal';
 import { NflHubPortal } from './components/NflHubPortal';
 import { PortfolioPortal } from './components/PortfolioPortal';
@@ -68,7 +69,7 @@ export default function OperationalApp() {
       <div className="workspace-status"><i/><span>Server-side model truth</span></div>
     </nav>
     <div className="workspace-surface">
-      {route.surface === 'draft' && <><DraftDayDoctorBanner/><DraftDecisionConsole onOpenConsole={() => navigate('league')} /></>}
+      {route.surface === 'draft' && <><LeagueOnboardingPanel/><DraftDayDoctorBanner/><DraftDecisionConsole onOpenConsole={() => navigate('league')} /></>}
       {route.surface === 'nfl' && <NflHubPortal/>}
       {route.surface === 'intelligence' && <IntelligencePortal initialLeagueId={route.leagueId} initialPlayerId={route.playerId}/>} 
       {route.surface === 'portfolio' && <PortfolioPortal/>}
