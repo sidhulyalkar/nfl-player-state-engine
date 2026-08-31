@@ -101,7 +101,7 @@ jobs:
             --nfl-hub-snapshot /tmp/nfl_hub/current.json \
             --bundle-root artifacts/preseason_2026_multicontract_candidate \
             --registry-root artifacts/registry
-      - name: Require exact challenger rehearsal state
+      - name: Require exact challenger rehearsal state across all three league profiles
         run: |
           python - <<'PY'
           import json
@@ -124,8 +124,15 @@ jobs:
           league_paths = {
               '8_team_ppr_2qb_expanded': Path('configs/fantasy/8_team_ppr_2qb_expanded.yaml'),
               '12_team_half_ppr_median': Path('configs/fantasy/12_team_half_ppr_median.yaml'),
+              '12_team_half_ppr_median_2qb': Path(
+                  'configs/fantasy/12_team_half_ppr_median_2qb.yaml'
+              ),
           }
           leagues = {slug: LeagueConfig.from_yaml(path) for slug, path in league_paths.items()}
+          assert (
+              leagues['12_team_half_ppr_median'].scoring_contract_id
+              == leagues['12_team_half_ppr_median_2qb'].scoring_contract_id
+          ), 'Roster construction must not create a fake third scoring contract.'
           projection_sets = {
               config.scoring_contract_id: product.loc[
                   product['scoring_contract_id'].astype(str).eq(config.scoring_contract_id)
@@ -165,6 +172,8 @@ jobs:
           assert report.blocking_reasons == (
               'PROJECTION_BUNDLE_NOT_PRODUCTION_APPROVED',
           ), report.blocking_reasons
+          assert {item.league for item in report.leagues} == set(league_paths), report.leagues
+          assert all(item.core_readiness and item.core_readiness.ready for item in report.leagues)
           assert len(product) >= 500, len(product)
           assert product['player_id'].nunique() >= 250
           assert not product.duplicated(['scoring_contract_id', 'player_id']).any()
