@@ -51,17 +51,82 @@ data/product/special_teams_market/current.json
 artifacts/release_reports/preseason_2026_activation.json
 ```
 
-## 3. Import or sync your real leagues
+## 3. Declare and connect the real draft portfolio
 
-The production model can be activated without inventing league state. Actual-draft readiness still requires real league snapshots.
+The release artifact does not contain ownership or pick history. Actual-draft readiness therefore requires real platform snapshots, and aggregate readiness also needs to know how many leagues you intend to use.
 
-Sleeper example:
+The preferred path is the **Real Leagues** panel at the top of the Draft Room. First set the intended league count, then connect each real league by platform and numeric league ID. The aggregate Draft-Day Doctor behaves deliberately:
+
+- intended count undeclared -> `PROVISIONAL` because portfolio completeness is unknown;
+- fewer real leagues connected than declared -> aggregate `BLOCKED`;
+- all intended real leagues connected -> the portfolio completeness check is `READY`, while any independent scientific caveats remain intact.
+
+Tracked demo/example snapshots never count toward this contract and are excluded from aggregate actual-draft diagnosis.
+
+The Product API exposes the same local onboarding boundary:
+
+```text
+GET /v1/draft/connections
+PUT /v1/draft/connections/expectation
+POST /v1/draft/connections
+```
+
+Example expectation payload:
+
+```json
+{"expected_league_count": 3}
+```
+
+Example Sleeper connection payload:
+
+```json
+{
+  "platform": "sleeper",
+  "league_id": "YOUR_NUMERIC_LEAGUE_ID",
+  "season": 2026,
+  "external_user_id": "OPTIONAL_SLEEPER_USER_ID",
+  "include_free_agents": true
+}
+```
+
+Example ESPN connection payload:
+
+```json
+{
+  "platform": "espn",
+  "league_id": "YOUR_NUMERIC_LEAGUE_ID",
+  "season": 2026,
+  "include_free_agents": true
+}
+```
+
+ESPN cookie values are **not valid browser/API fields**. Private ESPN authentication is resolved only inside the Product API process from:
+
+```bash
+PSE_ESPN_S2=...
+PSE_ESPN_SWID=...
+```
+
+The connection endpoint rejects unexpected fields with a sanitized error response so an accidentally supplied cookie value is not reflected back. The status endpoint exposes only the boolean `espn_private_auth_configured`, never either credential value.
+
+Every platform import must pass the following validation before it can replace a snapshot:
+
+- exact requested platform;
+- exact requested league ID;
+- exact requested season;
+- at least one real roster and at least two teams;
+- platform roster positions;
+- platform scoring settings.
+
+The normalized JSON snapshot is then atomically replaced. A failed import or failed validation preserves any previous valid snapshot. Real league JSON files and the local portfolio declaration are gitignored.
+
+The older Sleeper CLI remains available as an operator fallback:
 
 ```bash
 pse import-sleeper-league --league-id YOUR_LEAGUE_ID
 ```
 
-For other platforms, use the maintained importer or explicit CSV/manual boundary. Never create fake ownership or pick history simply to make strict preflight green.
+Never create fake ownership or pick history simply to make readiness green.
 
 ## 4. Refresh the live draft market
 
@@ -133,17 +198,18 @@ For machine-readable automation:
 python scripts/draft_day_doctor.py --json
 ```
 
-Once the Product API is running, the same read-only diagnosis is available at:
+Once the Product API is running, the same diagnosis is available at:
 
 ```text
 GET /v1/draft/doctor
 GET /v1/draft/doctor?league_id=YOUR_LEAGUE_ID
 ```
 
-The doctor composes, but never changes, the underlying authorities:
+The aggregate endpoint composes:
 
 - exact production champion mode, authority, integrity, and projection source cutoff;
 - NFL Hub authority, freshness, required-source health, and market identity coverage;
+- declared real-league portfolio completeness;
 - real league snapshot/roster presence and snapshot age;
 - exact scoring-contract selection and core QB/RB/WR/TE readiness;
 - K/DST `external_market_only` availability when a league actually requires those slots;
@@ -156,13 +222,13 @@ Verdicts mean:
 - `PROVISIONAL`: core draft recommendations remain usable, but at least one explicitly bounded caveat is active;
 - `BLOCKED`: at least one hard authority/data contract is violated. Do not use the affected draft board until its remediation is completed.
 
-Missing, stale, or format-proxy ADP is deliberately `PROVISIONAL`, not a hard model blocker. Missing required K/DST support, invalid champion authority, stale hard-gated NFL state, or broken core scoring-contract readiness are `BLOCKED`.
+Portfolio incompleteness blocks the **aggregate** readiness badge but does not revoke core authority from an already connected, individually healthy league. Missing, stale, or format-proxy ADP is deliberately `PROVISIONAL`, not a hard model blocker. Missing required K/DST support, invalid champion authority, stale hard-gated NFL state, or broken core scoring-contract readiness are `BLOCKED`.
 
 The doctor is diagnostic only: it does not refresh sources, rewrite league state, approve/promote artifacts, or move champion pointers.
 
 ## 7. Launch the Draft War Room
 
-The default Docker Compose stack is production-authority aware:
+The default Docker Compose stack is production-authority aware and includes the optional ESPN adapter:
 
 ```bash
 docker compose up --build pse-api fantasy-console
