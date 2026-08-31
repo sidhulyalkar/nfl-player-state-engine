@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from player_state_engine import __version__
 from player_state_engine.api.app import create_app as create_base_app
+from player_state_engine.api.draft_day_doctor_routes import install_draft_day_doctor_routes
 from player_state_engine.api.draft_planner_routes import install_draft_planner_routes
 from player_state_engine.api.draft_reliability_routes import install_draft_reliability_routes
 from player_state_engine.api.evidence_routes import install_evidence_routes
@@ -123,6 +124,7 @@ def create_app(**kwargs: Any) -> FastAPI:
         "nfl_hub_root",
         "nfl_hub_projections_path",
         "live_adp_root",
+        "special_teams_market_path",
     }
     base_kwargs = {key: value for key, value in kwargs.items() if key not in operational_only}
 
@@ -152,6 +154,14 @@ def create_app(**kwargs: Any) -> FastAPI:
         market_root=kwargs.get("live_adp_root"),
     )
     app.state.draft_service = draft_service
+    doctor_service = install_draft_day_doctor_routes(
+        app,
+        projection_source=projection_source,
+        draft_service=draft_service,
+        nfl_hub_root=kwargs.get("nfl_hub_root"),
+        special_teams_path=kwargs.get("special_teams_market_path"),
+    )
+    app.state.draft_day_doctor = doctor_service
     install_draft_planner_routes(app, draft_service)
     install_draft_reliability_routes(app, draft_service)
     install_intelligence_routes(
@@ -204,13 +214,14 @@ def create_app(**kwargs: Any) -> FastAPI:
     app.version = __version__
     _replace_health_version(app)
     app.description = (
-        f"{app.description} Live Draft War Room with point-in-time external ADP timing, NFL Hub "
-        "state-change intelligence, player intelligence, cross-league portfolio exposure, Player "
-        "State Graph shadow comparison and sensitivity, frozen Evidence Factory, immutable 2026 "
-        "live shadow-season evidence, structured intelligence evidence ledger, model observatory, "
-        "ranking calibration, guarded draft reliability, guarded game-intelligence simulation, "
-        "expanding frozen replay, factorial attribution, simulated-state opportunity, drive-volume, "
-        "possession-transition, fourth-down decision, and terminal-family research surfaces."
+        f"{app.description} Live Draft War Room with a fail-closed draft-day doctor and point-in-time "
+        "external ADP timing, NFL Hub state-change intelligence, player intelligence, cross-league "
+        "portfolio exposure, Player State Graph shadow comparison and sensitivity, frozen Evidence "
+        "Factory, immutable 2026 live shadow-season evidence, structured intelligence evidence "
+        "ledger, model observatory, ranking calibration, guarded draft reliability, guarded "
+        "game-intelligence simulation, expanding frozen replay, factorial attribution, simulated-state "
+        "opportunity, drive-volume, possession-transition, fourth-down decision, and terminal-family "
+        "research surfaces."
     )
     return app
 
