@@ -22,6 +22,9 @@ _REQUIRED_PROJECTION_COLUMNS = {
     "decision_quantile_policy",
 }
 _REQUIRED_DECISION_POLICIES = {"qualified_distribution", "q50_only"}
+_DEFAULT_PROJECTION_PATH = "artifacts/predictions/product_player_values.csv"
+_DEFAULT_REGISTRY_ROOT = "artifacts/registry"
+_DEFAULT_CHAMPION_TARGET = "preseason_multicontract_player_values_2026"
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +68,7 @@ def _truthy(value: object) -> bool:
 
 
 def _projection_contract_check(path: Path) -> tuple[bool, str]:
-    """Validate the current draft-release shape without importing the application package."""
+    """Validate the current multicontract player-values shape."""
 
     if not path.is_file():
         return False, f"unavailable: {path}"
@@ -130,6 +133,75 @@ def _projection_contract_check(path: Path) -> tuple[bool, str]:
     )
 
 
+def _rooted(root: Path, raw_path: str) -> Path:
+    path = Path(raw_path).expanduser()
+    return path if path.is_absolute() else root / path
+
+
+def _production_projection_check(root: Path) -> tuple[bool, str]:
+    """Require the same verified champion authority used by the live Product API.
+
+    A schema-valid path is useful for development, but it is deliberately insufficient for the
+    actual-draft data gate. Production readiness requires an explicitly promoted champion whose
+    immutable bytes are re-verified by ``ProjectionArtifactSource`` before the schema check runs.
+    """
+
+    mode = str(os.getenv("PSE_PROJECTION_SOURCE_MODE", "path")).strip().lower()
+    if mode == "path":
+        path = _rooted(root, os.getenv("PSE_PROJECTIONS_PATH", _DEFAULT_PROJECTION_PATH))
+        schema_ok, detail = _projection_contract_check(path)
+        if not schema_ok:
+            return False, f"source_mode=path_unverified; {path}: {detail}"
+        return (
+            False,
+            "source_mode=path_unverified; multicontract schema is valid but actual-draft "
+            "readiness requires PSE_PROJECTION_SOURCE_MODE=champion",
+        )
+    if mode != "champion":
+        return False, f"unsupported PSE_PROJECTION_SOURCE_MODE={mode!r}"
+
+    raw_bundle_root = str(os.getenv("PSE_PRODUCTION_BUNDLE_ROOT", "")).strip()
+    if not raw_bundle_root:
+        return False, "champion mode requires PSE_PRODUCTION_BUNDLE_ROOT"
+
+    registry_root = _rooted(
+        root,
+        os.getenv("PSE_ARTIFACT_REGISTRY_ROOT", _DEFAULT_REGISTRY_ROOT),
+    )
+    bundle_root = _rooted(root, raw_bundle_root)
+    target = str(
+        os.getenv("PSE_PROJECTION_CHAMPION_TARGET", _DEFAULT_CHAMPION_TARGET)
+    ).strip()
+    if not target:
+        return False, "champion mode requires a non-empty PSE_PROJECTION_CHAMPION_TARGET"
+
+    try:
+        from player_state_engine.product.projection_artifact_source import ProjectionArtifactSource
+
+        source = ProjectionArtifactSource(
+            mode="champion",
+            registry_root=registry_root,
+            bundle_root=bundle_root,
+            champion_target=target,
+        )
+        snapshot = source.load()
+    except (ImportError, OSError, KeyError, ValueError, PermissionError, RuntimeError) as exc:
+        return False, f"verified champion unavailable: {exc}"
+
+    if snapshot.authority != "production_approved" or not snapshot.integrity_verified:
+        return False, (
+            f"champion authority invalid: authority={snapshot.authority!r}; "
+            f"integrity_verified={snapshot.integrity_verified}"
+        )
+    schema_ok, detail = _projection_contract_check(snapshot.path)
+    if not schema_ok:
+        return False, f"verified champion schema invalid: {detail}"
+    return (
+        True,
+        f"verified champion bundle={snapshot.bundle_id}; target={snapshot.target}; {detail}",
+    )
+
+
 def run_preflight(root: Path) -> list[Check]:
     checks: list[Check] = []
 
@@ -164,6 +236,7 @@ def run_preflight(root: Path) -> list[Check]:
         "apps/gemini-fantasy-console/.env.example",
         "configs/fantasy/8_team_ppr_2qb_expanded.yaml",
         "configs/fantasy/12_team_half_ppr_median.yaml",
+        "configs/fantasy/12_team_half_ppr_median_2qb.yaml",
     ):
         path = root / relative
         checks.append(Check(relative, path.is_file(), str(path), "build"))
@@ -186,19 +259,16 @@ def run_preflight(root: Path) -> list[Check]:
         )
     )
 
-    projection_path = root / os.getenv(
-        "PSE_PROJECTIONS_PATH", "artifacts/predictions/product_player_values.csv"
-    )
-    projection_ok, projection_detail = _projection_contract_check(projection_path)
+    projection_ok, projection_detail = _production_projection_check(root)
     hub_path = root / "data/product/nfl_hub/current.json"
     special_teams_path = root / "data/product/special_teams_market/current.json"
     league_count = _league_snapshot_count(root)
     checks.extend(
         [
             Check(
-                "production_projection_artifact",
+                "production_projection_champion",
                 projection_ok,
-                f"{projection_path}: {projection_detail}",
+                projection_detail,
                 "data",
             ),
             Check("nfl_hub_snapshot", hub_path.is_file(), str(hub_path), "data"),
@@ -228,7 +298,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Check whether a fresh checkout can build the draft workspace and whether the real "
-            "draft data plane has been materialized."
+            "draft data plane has been materialized and promoted."
         )
     )
     parser.add_argument(
@@ -254,7 +324,8 @@ def main() -> None:
         "checks": [asdict(check) for check in checks],
         "notes": [
             "The React/Express workspace can build without GEMINI_API_KEY; copilot falls back to deterministic Product API tools.",
-            "A projection filename alone is insufficient: the strict data gate requires the current multicontract schema and decision-authority policies.",
+            "Actual-draft projection readiness requires the byte-verified production champion; path mode is development authority only.",
+            "The champion must also contain the current multicontract schema and qualified decision-authority policies.",
             "Missing draft-data artifacts must remain unavailable. Do not fabricate frontend placeholder projections to satisfy strict preflight.",
         ],
     }
@@ -270,7 +341,7 @@ def main() -> None:
         if data_status != "READY":
             print(
                 "The UI may still build, but draft recommendations are not release-ready until "
-                "the real multicontract projection, NFL Hub, K/DST, and league artifacts satisfy "
+                "the verified production champion, NFL Hub, K/DST, and league artifacts satisfy "
                 "their release contracts."
             )
 
