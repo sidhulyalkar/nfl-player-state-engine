@@ -89,6 +89,16 @@ class DraftLaunchControlService:
             if is_real_league_summary(dict(item))
         ]
 
+    def _safe_market_status(self) -> dict[str, object]:
+        try:
+            return dict(self.draft_service.market_status())
+        except Exception as exc:  # noqa: BLE001 - market timing is optional diagnostic evidence.
+            return {
+                "available": False,
+                "reason": "market_status_unavailable",
+                "error": str(exc),
+            }
+
     def _refresh_hub(self, season: int) -> DraftLaunchStage:
         try:
             snapshot = refresh_nfl_hub(
@@ -97,7 +107,10 @@ class DraftLaunchControlService:
                 projections_path=self.nfl_hub_projections_path,
             )
         except Exception as exc:  # noqa: BLE001 - preserve last good current-state snapshot.
-            previous = load_nfl_hub_snapshot(self.nfl_hub_root)
+            try:
+                previous = load_nfl_hub_snapshot(self.nfl_hub_root)
+            except Exception:  # noqa: BLE001 - a broken fallback is equivalent to no fallback.
+                previous = None
             if previous is not None:
                 return self._stage(
                     "nfl_hub",
@@ -109,7 +122,7 @@ class DraftLaunchControlService:
             return self._stage(
                 "nfl_hub",
                 "FAILED",
-                "NFL Hub refresh failed and no previous snapshot is available.",
+                "NFL Hub refresh failed and no readable previous snapshot is available.",
                 error=str(exc),
             )
         return self._stage(
@@ -123,18 +136,18 @@ class DraftLaunchControlService:
 
     def _refresh_adp(self, season: int) -> DraftLaunchStage:
         if not str(os.getenv("PSE_FANTASYPROS_API_KEY", "")).strip():
-            status = dict(self.draft_service.market_status())
+            status = self._safe_market_status()
             return self._stage(
                 "live_adp",
                 "SKIPPED",
-                "FantasyPros API key is not configured; preserved neutral/current cached timing semantics.",
+                "FantasyPros API key is not configured; cached/neutral timing remains in force.",
                 market_available=bool(status.get("available")),
                 reason=status.get("reason"),
             )
         try:
             result = dict(self.draft_service.refresh_market(int(season)))
         except Exception as exc:  # noqa: BLE001 - external market failure must preserve prior state.
-            status = dict(self.draft_service.market_status())
+            status = self._safe_market_status()
             if bool(status.get("available")):
                 return self._stage(
                     "live_adp",
@@ -146,8 +159,9 @@ class DraftLaunchControlService:
             return self._stage(
                 "live_adp",
                 "FAILED",
-                "Live ADP refresh failed and no valid market snapshot is available; timing remains neutral.",
+                "Live ADP refresh failed and no readable market snapshot is available; timing is neutral.",
                 error=str(exc),
+                market_status_reason=status.get("reason"),
             )
         return self._stage(
             "live_adp",
@@ -166,6 +180,25 @@ class DraftLaunchControlService:
             for slot in snapshot.settings.roster_positions
         )
 
+    def _validated_special_teams_fallback(self, season: int) -> dict[str, object] | None:
+        if not self.special_teams_path.is_file():
+            return None
+        try:
+            previous = json.loads(self.special_teams_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(previous, dict):
+            return None
+        if previous.get("authority") != "external_market_only":
+            return None
+        if previous.get("model_fields_present") is not False:
+            return None
+        if int(previous.get("season") or -1) != int(season):
+            return None
+        if int(previous.get("kicker_count") or 0) <= 0 or int(previous.get("dst_count") or 0) <= 0:
+            return None
+        return previous
+
     def _refresh_special_teams(self, season: int, snapshots: list[Any]) -> DraftLaunchStage:
         if not self._requires_special_teams(snapshots):
             return self._stage(
@@ -179,23 +212,20 @@ class DraftLaunchControlService:
                 output=self.special_teams_path,
             )
         except Exception as exc:  # noqa: BLE001 - Doctor will validate any preserved snapshot.
-            if self.special_teams_path.is_file():
-                try:
-                    previous = json.loads(self.special_teams_path.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError):
-                    previous = None
-                if isinstance(previous, dict):
-                    return self._stage(
-                        "special_teams_market",
-                        "PRESERVED",
-                        "K/DST market refresh failed; preserved the previous model-free market snapshot.",
-                        error=str(exc),
-                        previous_generated_at_utc=previous.get("generated_at_utc"),
-                    )
+            previous = self._validated_special_teams_fallback(int(season))
+            if previous is not None:
+                return self._stage(
+                    "special_teams_market",
+                    "PRESERVED",
+                    "K/DST market refresh failed; preserved a validated model-free market snapshot.",
+                    error=str(exc),
+                    previous_generated_at_utc=previous.get("generated_at_utc"),
+                    previous_source_date=previous.get("source_date"),
+                )
             return self._stage(
                 "special_teams_market",
                 "FAILED",
-                "K/DST market refresh failed and no prior snapshot can be evaluated.",
+                "K/DST market refresh failed and no validated prior snapshot can be evaluated.",
                 error=str(exc),
             )
         return self._stage(
@@ -208,7 +238,17 @@ class DraftLaunchControlService:
     def _refresh_leagues(self) -> tuple[list[DraftLaunchStage], list[Any]]:
         stages: list[DraftLaunchStage] = []
         snapshots: list[Any] = []
-        summaries = self._real_league_summaries()
+        try:
+            summaries = self._real_league_summaries()
+        except Exception as exc:  # noqa: BLE001 - Doctor should still run after store enumeration failure.
+            return [
+                self._stage(
+                    "real_leagues",
+                    "FAILED",
+                    "Connected real leagues could not be enumerated for refresh.",
+                    error=str(exc),
+                )
+            ], snapshots
         if not summaries:
             return [
                 self._stage(
