@@ -21,8 +21,11 @@ services:
       PSE_HISTORICAL_SOURCE_REPORT_ROOT: /app/artifacts/reports/historical_source_ablation_hardened
       PSE_LEAGUE_STORE: /app/data/product/leagues
       PSE_LIVE_LEAGUE_STORE: /app/data/product/live_leagues
+      PSE_LEAGUE_PORTFOLIO_PATH: /app/data/product/league_portfolio.json
       PSE_LIVE_ADP_ROOT: /app/data/product/draft_market
       PSE_FANTASYPROS_API_KEY: ${PSE_FANTASYPROS_API_KEY:-}
+      PSE_ESPN_S2: ${PSE_ESPN_S2:-}
+      PSE_ESPN_SWID: ${PSE_ESPN_SWID:-}
       PSE_CORS_ORIGINS: http://localhost:3000,http://localhost:5173
     volumes:
       - ./data:/app/data
