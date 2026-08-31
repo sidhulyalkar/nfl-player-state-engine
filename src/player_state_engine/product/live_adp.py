@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,6 +16,16 @@ from player_state_engine.integrations.fantasypros import FantasyProsClient
 DEFAULT_LIVE_ADP_ROOT = Path("data/product/draft_market")
 LIVE_ADP_SCHEMA_VERSION = 1
 _REQUIRED_SNAPSHOTS = (("PPR", "ALL"), ("PPR", "OP"), ("HALF", "ALL"), ("HALF", "OP"))
+_STALE_SECONDS = 6 * 3600
+_EXPIRED_SECONDS = 24 * 3600
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _scoring_code(config: LeagueConfig) -> str:
@@ -54,11 +65,36 @@ def _format_confidence(config: LeagueConfig, scope: str) -> tuple[float, str, li
     return float(np.clip(confidence, 0.0, 1.0)), authority, reasons
 
 
-def _effective_adp_sd(adp: float, format_confidence: float, identity_confidence: float) -> float:
+def _snapshot_age_seconds(metadata: dict[str, object] | None) -> float | None:
+    if metadata is None:
+        return None
+    generated = pd.to_datetime(metadata.get("generated_at_utc"), utc=True, errors="coerce")
+    if pd.isna(generated):
+        return None
+    return float(max(0.0, (pd.Timestamp.now(tz="UTC") - generated).total_seconds()))
+
+
+def _freshness_confidence(metadata: dict[str, object] | None) -> tuple[float, float | None]:
+    # Direct in-memory injection is useful in unit tests and research. Production disk snapshots
+    # always include generated_at_utc and are handled by the age gates below.
+    if metadata is None:
+        return 1.0, None
+    age = _snapshot_age_seconds(metadata)
+    if age is None:
+        return 0.0, None
+    if age <= _STALE_SECONDS:
+        return 1.0, age
+    if age >= _EXPIRED_SECONDS:
+        return 0.0, age
+    progress = (age - _STALE_SECONDS) / (_EXPIRED_SECONDS - _STALE_SECONDS)
+    return float(1.0 - 0.75 * progress), age
+
+
+def _effective_adp_sd(adp: float, market_confidence: float, identity_confidence: float) -> float:
     # The API's rank_std is dispersion across ranking/ADP sources, not an observed pick-position
     # standard deviation. Do not pass it to the normal survival approximation as if it were one.
     baseline = max(6.0, min(18.0, 5.0 + 0.055 * float(adp)))
-    confidence = max(0.25, min(1.0, float(format_confidence) * float(identity_confidence)))
+    confidence = max(0.25, min(1.0, float(market_confidence) * float(identity_confidence)))
     return float(min(36.0, baseline / confidence))
 
 
@@ -100,6 +136,7 @@ def refresh_fantasypros_adp_snapshot(
                 "last_updated": metadata.get("last_updated"),
                 "last_updated_ts": metadata.get("last_updated_ts"),
                 "ranking_type": metadata.get("ranking_type"),
+                "rank_semantics": metadata.get("rank_semantics"),
                 "source_teams": metadata.get("teams"),
                 "source_qb_format": metadata.get("qb_format"),
             }
@@ -113,8 +150,14 @@ def refresh_fantasypros_adp_snapshot(
 
     output_root = Path(root)
     output_root.mkdir(parents=True, exist_ok=True)
+    next_frame = output_root / "current.next.parquet"
+    next_metadata = output_root / "current.metadata.next.json"
+    final_frame = output_root / "current.parquet"
+    final_metadata = output_root / "current.metadata.json"
+
+    written = Path(write_table(combined, next_frame))
     generated_at = datetime.now(UTC)
-    metadata: dict[str, object] = {
+    metadata = {
         "schema_version": LIVE_ADP_SCHEMA_VERSION,
         "source": "fantasypros_adp",
         "authority": "external_market_overlay",
@@ -122,19 +165,20 @@ def refresh_fantasypros_adp_snapshot(
         "generated_at_utc": generated_at.isoformat(),
         "snapshots": snapshots,
         "rows": int(len(combined)),
+        "data_sha256": _sha256_file(written),
+        "data_bytes": int(written.stat().st_size),
         "notes": [
             "ADP changes pick timing only; it does not change immutable football projection authority.",
             "FantasyPros rank_std is source dispersion and is not treated as observed pick-position SD.",
             "OP is a superflex-style proxy for multi-QB rooms; exact 2QB/team-count authority is not claimed.",
+            "Snapshots older than six hours lose timing confidence and expire after 24 hours.",
         ],
     }
-
-    next_frame = output_root / "current.next.parquet"
-    next_metadata = output_root / "current.metadata.next.json"
-    final_frame = output_root / "current.parquet"
-    final_metadata = output_root / "current.metadata.json"
-    written = Path(write_table(combined, next_frame))
     next_metadata.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    # The pair is replaced sequentially, but readers verify the frame hash from metadata. A reader
+    # that lands between the two replaces receives an integrity failure and falls back to neutral
+    # timing instead of consuming a mixed-generation snapshot.
     written.replace(final_frame)
     next_metadata.replace(final_metadata)
     return {**metadata, "path": str(final_frame), "metadata_path": str(final_metadata)}
@@ -155,8 +199,26 @@ def load_live_adp_snapshot(
         }
     try:
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        expected_sha = str(metadata.get("data_sha256") or "")
+        expected_bytes = int(metadata.get("data_bytes") or -1)
+        actual_sha = _sha256_file(frame_path)
+        actual_bytes = int(frame_path.stat().st_size)
+        if not expected_sha or expected_bytes < 0:
+            raise ValueError("live ADP metadata is missing data integrity fields")
+        if actual_sha != expected_sha or actual_bytes != expected_bytes:
+            return pd.DataFrame(), {
+                **metadata,
+                "available": False,
+                "authority": "unavailable",
+                "reason": "live_adp_snapshot_integrity_failed",
+                "expected_sha256": expected_sha,
+                "actual_sha256": actual_sha,
+                "expected_bytes": expected_bytes,
+                "actual_bytes": actual_bytes,
+                "path": str(frame_path),
+            }
         frame = read_table(frame_path)
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         return pd.DataFrame(), {
             "available": False,
             "authority": "unavailable",
@@ -178,14 +240,12 @@ def live_adp_status(root: str | Path = DEFAULT_LIVE_ADP_ROOT) -> dict[str, objec
     frame, metadata = load_live_adp_snapshot(root)
     status = dict(metadata)
     status["rows"] = int(len(frame))
-    generated = pd.to_datetime(status.get("generated_at_utc"), utc=True, errors="coerce")
-    if pd.notna(generated):
-        age = max(0.0, (pd.Timestamp.now(tz="UTC") - generated).total_seconds())
-        status["age_seconds"] = float(age)
-        status["stale"] = bool(age > 6 * 3600)
-    else:
-        status["age_seconds"] = None
-        status["stale"] = None
+    age = _snapshot_age_seconds(status)
+    status["age_seconds"] = age
+    status["stale"] = bool(age is not None and age > _STALE_SECONDS)
+    status["expired"] = bool(age is not None and age >= _EXPIRED_SECONDS)
+    freshness, _ = _freshness_confidence(status if age is not None else None)
+    status["freshness_confidence"] = freshness if age is not None else None
     return status
 
 
@@ -209,14 +269,16 @@ def attach_live_adp(
     """Attach scoring-matched point-in-time ADP without changing projection bytes.
 
     The returned ``market_adp_sd`` is deliberately a conservative proxy uncertainty used only to
-    soften the transparent survival approximation when the market format or identity match is not
-    exact. It is not presented as an observed empirical pick-position standard deviation.
+    soften the transparent survival approximation when the market format, freshness, or identity
+    match is not exact. It is not an observed empirical pick-position standard deviation.
     """
 
     out = projections.copy()
     scope = _market_scope(config)
     scoring = _scoring_code(config)
     format_confidence, format_authority, format_reasons = _format_confidence(config, scope)
+    freshness_confidence, market_age = _freshness_confidence(metadata)
+    effective_confidence = format_confidence * freshness_confidence
     base_status: dict[str, object] = {
         "available": False,
         "source": "fantasypros_adp",
@@ -225,9 +287,16 @@ def attach_live_adp(
         "requested_scope": scope,
         "format_authority": format_authority,
         "format_confidence": format_confidence,
+        "freshness_confidence": freshness_confidence,
+        "effective_market_confidence": effective_confidence,
         "format_reasons": format_reasons,
         "generated_at_utc": (metadata or {}).get("generated_at_utc"),
+        "age_seconds": market_age,
+        "stale": bool(market_age is not None and market_age > _STALE_SECONDS),
+        "expired": bool(market_age is not None and market_age >= _EXPIRED_SECONDS),
     }
+    if metadata is not None and freshness_confidence <= 0:
+        return out, {**base_status, "reason": "market_snapshot_expired"}
     if market.empty or out.empty or format_confidence <= 0:
         return out, {**base_status, "reason": "compatible_market_snapshot_unavailable"}
 
@@ -282,16 +351,18 @@ def attach_live_adp(
     out["market_adp_scope"] = scope
     out["market_adp_format_authority"] = format_authority
     out["market_adp_format_confidence"] = format_confidence
+    out["market_adp_freshness_confidence"] = freshness_confidence
+    out["market_adp_effective_confidence"] = effective_confidence
     out["market_adp_identity_confidence"] = identity_conf
     out["market_adp_identity_method"] = methods
     out["market_adp_captured_at_utc"] = captured
     out["market_adp_sd"] = [
-        _effective_adp_sd(value, format_confidence, identity)
+        _effective_adp_sd(value, effective_confidence, identity)
         if np.isfinite(value) and np.isfinite(identity)
         else np.nan
         for value, identity in zip(adp, identity_conf, strict=False)
     ]
-    out["market_adp_sd_authority"] = "conservative_format_proxy_not_observed_pick_sd"
+    out["market_adp_sd_authority"] = "conservative_format_freshness_proxy_not_observed_pick_sd"
 
     skill_positions = out["position"].astype(str).str.upper().isin(["QB", "RB", "WR", "TE"])
     eligible_player_ids = set(out.loc[skill_positions, "player_id"].astype(str))
@@ -312,5 +383,5 @@ def attach_live_adp(
                 & pd.to_numeric(resolved["identity_match_confidence"], errors="coerce").lt(0.82)
             ).sum()
         ),
-        "adp_sd_authority": "conservative_format_proxy_not_observed_pick_sd",
+        "adp_sd_authority": "conservative_format_freshness_proxy_not_observed_pick_sd",
     }
