@@ -38,7 +38,7 @@ The materializer then fails closed unless all of the following hold:
 - every extracted file matches the challenger manifest's SHA-256 and byte size;
 - the challenger target is exactly `preseason_multicontract_player_values_2026`.
 
-Only after those checks does it derive a separate `production_approved` manifest over unchanged bytes and move the local champion pointer. Re-running the same reviewed challenger is idempotent. Replacing a different existing champion requires the explicit `--replace-existing-champion` flag.
+Only after those checks does it derive a separate `production_approved` manifest over unchanged bytes and move the local champion pointer. Re-running the same reviewed challenger is idempotent. If the target already points to a different champion, the command fails **before copying candidate bytes**; replacing an existing champion requires a separately designed and reviewed storage/rollback migration rather than an in-place overwrite.
 
 The default local materialization layout is:
 
