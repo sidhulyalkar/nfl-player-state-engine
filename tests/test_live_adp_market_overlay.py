@@ -32,7 +32,9 @@ def _projections() -> pd.DataFrame:
     )
 
 
-def _market_row(*, scoring: str, scope: str, name: str, position: str, team: str, rank: float) -> dict:
+def _market_row(
+    *, scoring: str, scope: str, name: str, position: str, team: str, rank: float
+) -> dict:
     return {
         "source": "fantasypros_adp",
         "source_kind": "market",
@@ -63,6 +65,8 @@ def _market() -> pd.DataFrame:
     rows = []
     for scoring in ("PPR", "HALF"):
         for scope in ("ALL", "OP"):
+            qb_rank = (22.0 if scope == "ALL" else 3.0) + (2.0 if scoring == "HALF" else 0.0)
+            wr_rank = (4.0 if scope == "ALL" else 6.0) + (1.0 if scoring == "HALF" else 0.0)
             rows.extend(
                 [
                     _market_row(
@@ -71,7 +75,7 @@ def _market() -> pd.DataFrame:
                         name="Josh Allen",
                         position="QB",
                         team="BUF",
-                        rank=(22.0 if scope == "ALL" else 3.0) + (2.0 if scoring == "HALF" else 0.0),
+                        rank=qb_rank,
                     ),
                     _market_row(
                         scoring=scoring,
@@ -79,7 +83,7 @@ def _market() -> pd.DataFrame:
                         name="Justin Jefferson",
                         position="WR",
                         team="MIN",
-                        rank=(4.0 if scope == "ALL" else 6.0) + (1.0 if scoring == "HALF" else 0.0),
+                        rank=wr_rank,
                     ),
                 ]
             )
@@ -132,6 +136,26 @@ def test_eight_team_two_qb_uses_ppr_op_proxy_and_expands_uncertainty() -> None:
     assert by_name.loc["Josh Allen", "market_adp_sd_authority"] == (
         "conservative_format_proxy_not_observed_pick_sd"
     )
+
+
+def test_multicontract_projection_rows_share_one_market_identity() -> None:
+    base = _projections()
+    ppr = base.assign(scoring_contract_id="ppr-contract")
+    half = base.assign(scoring_contract_id="half-contract")
+    projections = pd.concat([ppr, half], ignore_index=True)
+    config = LeagueConfig(teams=12, scoring="ppr")
+
+    out, status = attach_live_adp(projections, config, _market())
+
+    allen = out.loc[out["player_id"].eq("00-0034857")]
+    jefferson = out.loc[out["player_id"].eq("00-0036322")]
+    assert len(allen) == 2
+    assert len(jefferson) == 2
+    assert set(allen["market_adp"]) == {22.0}
+    assert set(jefferson["market_adp"]) == {4.0}
+    assert status["matched_players"] == 2
+    assert status["eligible_players"] == 2
+    assert status["coverage_rate"] == 1.0
 
 
 def test_fantasypros_rank_std_is_not_used_as_pick_position_sd() -> None:
