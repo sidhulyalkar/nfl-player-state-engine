@@ -12,17 +12,31 @@ services:
       context: .
       dockerfile: Dockerfile.api
     environment:
-      PSE_PROJECTIONS_PATH: /app/artifacts/predictions/product_player_values.csv
+      PSE_PROJECTION_SOURCE_MODE: champion
+      PSE_ARTIFACT_REGISTRY_ROOT: /app/artifacts/registry
+      PSE_PRODUCTION_BUNDLE_ROOT: /app/artifacts/production/preseason_2026
+      PSE_PROJECTION_CHAMPION_TARGET: preseason_multicontract_player_values_2026
       PSE_SCHEDULES_PATH: /app/data/raw/nflverse/schedules.csv
       PSE_SCHEDULES_DATA_MODE: UNVERIFIED
       PSE_HISTORICAL_SOURCE_REPORT_ROOT: /app/artifacts/reports/historical_source_ablation_hardened
       PSE_LEAGUE_STORE: /app/data/product/leagues
+      PSE_LIVE_LEAGUE_STORE: /app/data/product/live_leagues
       PSE_CORS_ORIGINS: http://localhost:3000,http://localhost:5173
     volumes:
       - ./data:/app/data
       - ./artifacts:/app/artifacts
     ports:
       - "8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import json, urllib.request; payload=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health')); assert payload['status'] == 'ok'; assert payload['projection_source_mode'] == 'champion'; assert payload['projection_authority'] == 'production_approved'; assert payload['projection_integrity_verified'] is True"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
 
   fantasy-console:
     build: ./apps/gemini-fantasy-console
@@ -32,6 +46,7 @@ services:
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
       PORT: 3000
     depends_on:
-      - pse-api
+      pse-api:
+        condition: service_healthy
     ports:
       - "3000:3000"
