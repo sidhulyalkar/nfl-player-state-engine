@@ -53,7 +53,7 @@ def test_fantasypros_generic_api_pull_does_not_claim_2qb_or_team_count(monkeypat
     assert frame.loc[frame["player_name"].eq("Quarterback One"), "position_rank"].iloc[0] == 5
 
 
-def test_fantasypros_adp_uses_average_position_not_ordinal_rank(monkeypatch) -> None:
+def test_fantasypros_adp_prefers_scoring_specific_position_over_ecr(monkeypatch) -> None:
     client = FantasyProsClient(api_key="test-key")
 
     def fake_get(path, params):
@@ -74,7 +74,9 @@ def test_fantasypros_adp_uses_average_position_not_ordinal_rank(monkeypatch) -> 
                     "player_position_id": "QB",
                     "player_team_id": "BUF",
                     "rank_ecr": 3,
-                    "rank_ave": 4.75,
+                    "rank_adp": 6.25,
+                    "rank_adp_ppr": 4.75,
+                    "rank_ave": 5.5,
                     "pos_rank": "QB1",
                     "rank_std": 1.1,
                 }
@@ -95,6 +97,38 @@ def test_fantasypros_adp_uses_average_position_not_ordinal_rank(monkeypatch) -> 
     assert frame.loc[0, "source_kind"] == "market"
     assert frame.loc[0, "ranking_type"] == "adp"
     assert metadata["rank_semantics"] == "average_draft_position"
+
+
+def test_fantasypros_adp_accepts_average_position_alias(monkeypatch) -> None:
+    client = FantasyProsClient(api_key="test-key")
+    monkeypatch.setattr(
+        client,
+        "_get",
+        lambda _path, _params: {
+            "type": "ADP",
+            "count": 1,
+            "players": [
+                {
+                    "player_id": "fp1",
+                    "player_name": "Running Back One",
+                    "player_position_id": "RB",
+                    "player_team_id": "ATL",
+                    "rank_ecr": 2,
+                    "rank_ave": 7.4,
+                }
+            ],
+        },
+    )
+
+    frame, _metadata = client.fetch_consensus_rankings(
+        2026,
+        scoring="HALF",
+        position="ALL",
+        ranking_type="ADP",
+        experts=False,
+    )
+
+    assert frame.loc[0, "rank"] == pytest.approx(7.4)
 
 
 def test_fantasypros_adp_refuses_to_disguise_ordinal_rank_as_adp(monkeypatch) -> None:
