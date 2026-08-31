@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from player_state_engine.product.draft_day_doctor_adapter import is_real_league_summary
 from player_state_engine.product.league_connections import (
@@ -19,6 +19,8 @@ except ImportError as exc:  # pragma: no cover
 
 
 class LeagueConnectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     platform: Literal["sleeper", "espn"]
     league_id: str = Field(min_length=1, max_length=64)
     season: int = Field(default=2026, ge=2000, le=2100)
@@ -27,6 +29,8 @@ class LeagueConnectionRequest(BaseModel):
 
 
 class LeaguePortfolioExpectationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     expected_league_count: int = Field(ge=1, le=20)
 
 
