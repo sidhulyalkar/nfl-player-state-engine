@@ -36,6 +36,23 @@ def _first_present(frame: pd.DataFrame, names: tuple[str, ...]) -> pd.Series | N
     return None
 
 
+def _adp_field_candidates(scoring: str) -> tuple[str, ...]:
+    normalized = scoring.strip().upper()
+    scoring_specific = {
+        "PPR": ("rank_adp_ppr",),
+        "HALF": ("rank_adp_half", "rank_adp_half_ppr"),
+        "STD": ("rank_adp", "rank_adp_std"),
+    }.get(normalized, ())
+    return (
+        *scoring_specific,
+        "rank_ave",
+        "rank_adp",
+        "adp",
+        "average_draft_position",
+        "avg_draft_position",
+    )
+
+
 class FantasyProsClient:
     """Thin client for FantasyPros' documented public v2 API.
 
@@ -137,13 +154,10 @@ class FantasyProsClient:
             prepared["position"] = raw.get("player_position_id", raw.get("player_positions"))
             prepared["nfl_team"] = raw.get("player_team_id")
             if resolved_type == "adp":
-                # FantasyPros uses the same ranking response schema for ADP. ``rank_ecr`` is the
-                # ordinal consensus ordering, while ``rank_ave`` (or an explicit ADP alias) is the
-                # actual average market position. Refuse to turn the ordinal rank into fake ADP.
-                average_position = _first_present(
-                    raw,
-                    ("rank_ave", "adp", "average_draft_position", "avg_draft_position"),
-                )
+                # FantasyPros exposes ADP separately from ECR. Accept an explicit scoring-specific
+                # ADP field or an average-position field from the ranking response, but never turn
+                # the ordinal rank_ecr into a fabricated average draft position.
+                average_position = _first_present(raw, _adp_field_candidates(scoring))
                 if average_position is None or pd.to_numeric(
                     average_position, errors="coerce"
                 ).isna().all():
