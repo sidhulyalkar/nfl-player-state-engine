@@ -8,6 +8,8 @@ on:
       - 'scripts/materialize_multicontract_preseason_2026_candidate.py'
       - 'src/player_state_engine/product/preseason_multicontract_candidate.py'
       - 'tests/test_preseason_multicontract_candidate.py'
+      - 'src/player_state_engine/fantasy/preseason.py'
+      - 'tests/test_preseason_status_family_guards.py'
       - 'src/player_state_engine/fantasy/preseason_league_score.py'
       - 'src/player_state_engine/evaluation/uncertainty_qualification.py'
       - 'scripts/run_direct_league_score_preseason_benchmark.py'
@@ -34,12 +36,16 @@ jobs:
         run: |
           ruff check \
             src/player_state_engine/product/preseason_multicontract_candidate.py \
-            tests/test_preseason_multicontract_candidate.py
+            tests/test_preseason_multicontract_candidate.py \
+            src/player_state_engine/fantasy/preseason.py \
+            tests/test_preseason_status_family_guards.py
           python -m compileall -q \
             scripts/materialize_multicontract_preseason_2026_candidate.py \
-            src/player_state_engine/product/preseason_multicontract_candidate.py
+            src/player_state_engine/product/preseason_multicontract_candidate.py \
+            src/player_state_engine/fantasy/preseason.py
           pytest -q \
             tests/test_preseason_multicontract_candidate.py \
+            tests/test_preseason_status_family_guards.py \
             tests/test_multicontract_product_serving.py \
             tests/test_multicontract_release_readiness.py
       - name: Regenerate frozen direct-score evidence once
