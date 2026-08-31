@@ -49,6 +49,11 @@ Desktop.ini
 /data/processed/*
 /data/external/*
 /data/product/draft_market/*
+# Real fantasy league state and local portfolio expectations must never be committed.
+/data/product/leagues/*.json
+!/data/product/leagues/demo-league.json
+/data/product/live_leagues/*
+/data/product/league_portfolio.json
 /artifacts/models/*
 /artifacts/predictions/*
 /artifacts/reports/*
