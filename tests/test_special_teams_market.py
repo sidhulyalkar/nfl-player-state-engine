@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 import pandas as pd
 
+from player_state_engine.product.release_readiness import _special_teams_support
 from player_state_engine.product.special_teams_market import build_special_teams_market
 
 
@@ -125,6 +126,21 @@ def test_special_teams_board_keeps_market_authority_separate_from_model_fields()
         assert "projection_q50" not in row
         assert "vorp" not in row
         assert "season_points_q50" not in row
+
+
+def test_real_special_teams_snapshot_satisfies_release_identity_contract() -> None:
+    now = datetime(2026, 8, 29, 12, tzinfo=UTC)
+    snapshot = build_special_teams_market(
+        _rankings(),
+        _playerids(),
+        _rosters(),
+        season=2026,
+        generated_at=now,
+    )
+
+    supported = _special_teams_support(snapshot, now=now, max_age_hours=36.0)
+
+    assert supported == ("K", "DST")
 
 
 def test_kicker_board_uses_exact_identity_and_current_roster_truth() -> None:
