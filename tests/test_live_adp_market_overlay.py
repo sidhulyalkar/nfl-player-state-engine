@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -134,7 +134,7 @@ def test_eight_team_two_qb_uses_ppr_op_proxy_and_expands_uncertainty() -> None:
     assert 0.45 < float(status["format_confidence"]) < 0.55
     assert by_name.loc["Josh Allen", "market_adp_sd"] > 10.0
     assert by_name.loc["Josh Allen", "market_adp_sd_authority"] == (
-        "conservative_format_proxy_not_observed_pick_sd"
+        "conservative_format_freshness_proxy_not_observed_pick_sd"
     )
 
 
@@ -165,6 +165,21 @@ def test_fantasypros_rank_std_is_not_used_as_pick_position_sd() -> None:
     out, _status = attach_live_adp(_projections(), config, market)
 
     assert float(out.loc[out["player_name"].eq("Josh Allen"), "market_adp_sd"].iloc[0]) >= 6.0
+
+
+def test_market_older_than_24_hours_expires_to_neutral_timing() -> None:
+    config = LeagueConfig(teams=12, scoring="ppr")
+    metadata = {
+        "generated_at_utc": (datetime.now(UTC) - timedelta(hours=25)).isoformat(),
+    }
+
+    out, status = attach_live_adp(_projections(), config, _market(), metadata)
+
+    assert out["market_adp"].isna().all()
+    assert status["available"] is False
+    assert status["expired"] is True
+    assert status["freshness_confidence"] == 0.0
+    assert status["reason"] == "market_snapshot_expired"
 
 
 def test_missing_market_keeps_projection_adp_unavailable() -> None:
