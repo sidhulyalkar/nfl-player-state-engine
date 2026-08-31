@@ -49,29 +49,33 @@ export function DraftDayDoctorBanner() {
 
     async function refresh() {
       controller?.abort();
-      controller = new AbortController();
+      const requestController = new AbortController();
+      controller = requestController;
       setLoading(true);
       try {
-        const response = await fetch('/api/pse/v1/draft/doctor', { signal: controller.signal });
+        const response = await fetch('/api/pse/v1/draft/doctor', { signal: requestController.signal });
         if (!response.ok) throw new Error(`Draft-Day Doctor returned HTTP ${response.status}`);
         const payload = await response.json() as DoctorReport;
-        if (!active) return;
+        if (!active || requestController.signal.aborted) return;
         setReport(payload);
         setError(null);
       } catch (reason) {
-        if (!active || controller.signal.aborted) return;
+        if (!active || requestController.signal.aborted) return;
         setError(reason instanceof Error ? reason.message : 'Draft-Day Doctor unavailable');
       } finally {
-        if (active && !controller.signal.aborted) setLoading(false);
+        if (active && !requestController.signal.aborted) setLoading(false);
       }
     }
 
+    const handleStateRefresh = () => void refresh();
     void refresh();
     const interval = window.setInterval(() => void refresh(), 60_000);
+    window.addEventListener('pse:draft-state-refreshed', handleStateRefresh);
     return () => {
       active = false;
       controller?.abort();
       window.clearInterval(interval);
+      window.removeEventListener('pse:draft-state-refreshed', handleStateRefresh);
     };
   }, []);
 
