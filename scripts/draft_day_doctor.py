@@ -7,6 +7,7 @@ from pathlib import Path
 
 from player_state_engine.api.market_draft_routes import MarketAwareDraftBoardService
 from player_state_engine.product.draft_day_doctor import DraftDayDoctorService
+from player_state_engine.product.draft_day_doctor_adapter import DoctorDraftServiceAdapter
 from player_state_engine.product.projection_artifact_source import (
     DEFAULT_PROJECTION_PATH,
     ProjectionArtifactSource,
@@ -32,7 +33,9 @@ def main() -> None:
         # that failure authoritatively; this fallback is only a constructor path for draft_service.
         projection_path = Path(os.getenv("PSE_PROJECTIONS_PATH", str(DEFAULT_PROJECTION_PATH)))
 
-    draft_service = MarketAwareDraftBoardService(projections_path=projection_path)
+    draft_service = DoctorDraftServiceAdapter(
+        MarketAwareDraftBoardService(projections_path=projection_path)
+    )
     doctor = DraftDayDoctorService(
         projection_source=source,
         draft_service=draft_service,
