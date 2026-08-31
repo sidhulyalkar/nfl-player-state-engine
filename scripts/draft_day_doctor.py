@@ -8,6 +8,8 @@ from pathlib import Path
 from player_state_engine.api.market_draft_routes import MarketAwareDraftBoardService
 from player_state_engine.product.draft_day_doctor import DraftDayDoctorService
 from player_state_engine.product.draft_day_doctor_adapter import DoctorDraftServiceAdapter
+from player_state_engine.product.draft_portfolio_doctor import PortfolioAwareDraftDayDoctor
+from player_state_engine.product.league_connections import LeaguePortfolioExpectationStore
 from player_state_engine.product.projection_artifact_source import (
     DEFAULT_PROJECTION_PATH,
     ProjectionArtifactSource,
@@ -17,8 +19,9 @@ from player_state_engine.product.projection_artifact_source import (
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Diagnose whether the verified champion, NFL Hub, league snapshots, K/DST market, "
-            "and live ADP are operationally safe for the Draft War Room. This command is read-only."
+            "Diagnose whether the verified champion, intended real-league portfolio, NFL Hub, "
+            "K/DST market, and live ADP are operationally safe for the Draft War Room. "
+            "This command is read-only."
         )
     )
     parser.add_argument("--league-id", default=None, help="Optionally diagnose one league only.")
@@ -36,9 +39,14 @@ def main() -> None:
     draft_service = DoctorDraftServiceAdapter(
         MarketAwareDraftBoardService(projections_path=projection_path)
     )
-    doctor = DraftDayDoctorService(
+    base_doctor = DraftDayDoctorService(
         projection_source=source,
         draft_service=draft_service,
+    )
+    doctor = PortfolioAwareDraftDayDoctor(
+        base_doctor,
+        draft_service=draft_service,
+        expectation_store=LeaguePortfolioExpectationStore(),
     )
     report = doctor.report(league_id=args.league_id)
     payload = report.as_dict()
