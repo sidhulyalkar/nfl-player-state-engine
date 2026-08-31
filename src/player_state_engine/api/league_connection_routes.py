@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from player_state_engine.product.draft_day_doctor_adapter import is_real_league_summary
 from player_state_engine.product.league_connections import (
@@ -99,7 +99,21 @@ def install_league_connection_routes(
         return portfolio_payload()
 
     @app.post("/v1/draft/connections")
-    def connect_league(request: LeagueConnectionRequest) -> dict[str, object]:
+    def connect_league(payload: dict[str, object]) -> dict[str, object]:
+        allowed = set(LeagueConnectionRequest.model_fields)
+        if set(payload) - allowed:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Unsupported league connection fields. Platform credentials must remain "
+                    "server-side environment variables."
+                ),
+            )
+        try:
+            request = LeagueConnectionRequest.model_validate(payload)
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail="Invalid league connection request.") from exc
+
         try:
             result = service.connect(
                 platform=request.platform,
