@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 NON_REAL_LEAGUE_PLATFORMS = frozenset({"demo", "synthetic", "example"})
 
 
