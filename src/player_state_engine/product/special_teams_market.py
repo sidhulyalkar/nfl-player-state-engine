@@ -205,6 +205,20 @@ def build_special_teams_market(
         ignore_index=True,
     ).dropna()
     source_date = str(source_dates.max()) if not source_dates.empty else None
+    kicker_ids = (
+        kickers["player_id"].dropna().astype(str).tolist()
+        if "player_id" in kickers
+        else []
+    )
+    dst_ids = (
+        defenses["team"].dropna().astype(str).tolist()
+        if "team" in defenses
+        else []
+    )
+    if len(kicker_ids) != len(set(kicker_ids)):
+        raise ValueError("Special-teams market contains duplicate kicker GSIS identities.")
+    if len(dst_ids) != len(set(dst_ids)):
+        raise ValueError("Special-teams market contains duplicate DST team identities.")
     return {
         "schema_version": 1,
         "authority": SPECIAL_TEAMS_MARKET_AUTHORITY,
@@ -213,7 +227,11 @@ def build_special_teams_market(
         "generated_at_utc": generated.isoformat(),
         "source_date": source_date,
         "kicker_count": int(len(kickers)),
+        "kicker_identity_scheme": "gsis_id",
+        "kicker_ids": kicker_ids,
         "dst_count": int(len(defenses)),
+        "dst_identity_scheme": "team_abbr",
+        "dst_ids": dst_ids,
         "kickers": frame_records(kickers),
         "defenses": frame_records(defenses),
         "model_fields_present": False,
