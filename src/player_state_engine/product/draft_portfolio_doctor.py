@@ -39,7 +39,25 @@ class PortfolioAwareDraftDayDoctor:
 
         expected = self.expectation_store.expected_count()
         if expected is None:
-            return base
+            check = DoctorCheck(
+                code="EXPECTED_LEAGUE_PORTFOLIO_UNDECLARED",
+                status="PROVISIONAL",
+                detail=(
+                    "The intended number of real draft leagues has not been declared, so aggregate "
+                    "portfolio completeness cannot be certified."
+                ),
+                remediation="Set the intended league count in the Draft Room connector.",
+            )
+            status = "BLOCKED" if base.status == "BLOCKED" else "PROVISIONAL"
+            return replace(
+                base,
+                status=status,
+                all_requested_leagues_usable=False,
+                checks=(*base.checks, check),
+                provisional_reasons=tuple(
+                    dict.fromkeys((*base.provisional_reasons, check.code))
+                ),
+            )
 
         try:
             summaries = self.draft_service.list_leagues()
