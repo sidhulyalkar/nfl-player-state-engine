@@ -55,7 +55,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-points-column", default=None)
     parser.add_argument("--model-q10-column", default=None)
     parser.add_argument("--model-q90-column", default=None)
-    parser.add_argument("--expert-rank-column", default=None)
+    parser.add_argument(
+        "--expert-rank-column",
+        default=None,
+        help=(
+            "Comparable positional ordinal rank. FantasyPros normalized snapshots expose "
+            "position_rank; do not use overall ECR against position-based actual ranks."
+        ),
+    )
     parser.add_argument("--expert-points-column", default=None)
     parser.add_argument("--actual-points-column", default=None)
     parser.add_argument("--output-root", type=Path, default=Path("artifacts/evaluation/showcase"))
@@ -93,8 +100,8 @@ def main() -> None:
     )
     expert_rank = args.expert_rank_column or _first_column(
         expert_raw,
-        ("rank", "rank_ecr", "overall_rank", "expert_rank", "position_rank"),
-        label="expert rank column",
+        ("position_rank", "expert_position_rank", "rank_pos", "pos_rank"),
+        label="comparable expert position-rank column",
     )
     expert_points = _optional_column(
         expert_raw,
