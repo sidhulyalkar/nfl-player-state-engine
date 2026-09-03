@@ -8,6 +8,9 @@ from pathlib import Path
 import pandas as pd
 
 from player_state_engine.data.io import read_table
+from player_state_engine.evaluation.showcase_automation import (
+    load_verified_shadow_showcase_model,
+)
 from player_state_engine.evaluation.weekly_showcase import (
     SnapshotProvenance,
     build_weekly_showcase,
@@ -24,7 +27,11 @@ def _first_column(frame: pd.DataFrame, candidates: tuple[str, ...], *, label: st
     raise ValueError(f"Unable to resolve {label}. Tried: {list(candidates)}")
 
 
-def _optional_column(frame: pd.DataFrame, requested: str | None, candidates: tuple[str, ...]) -> str | None:
+def _optional_column(
+    frame: pd.DataFrame,
+    requested: str | None,
+    candidates: tuple[str, ...],
+) -> str | None:
     if requested:
         if requested not in frame.columns:
             raise ValueError(f"Requested column {requested!r} is not present.")
@@ -32,24 +39,57 @@ def _optional_column(frame: pd.DataFrame, requested: str | None, candidates: tup
     return next((column for column in candidates if column in frame.columns), None)
 
 
+def _infer_timestamp(frame: pd.DataFrame, column: str, *, label: str) -> str | None:
+    if column not in frame:
+        return None
+    values = frame[column].dropna().astype(str).str.strip()
+    values = values.loc[values.ne("")].drop_duplicates()
+    if values.empty:
+        return None
+    if len(values) != 1:
+        raise ValueError(f"{label} contains multiple capture timestamps: {values.head(5).tolist()}")
+    timestamp = pd.Timestamp(values.iloc[0])
+    if timestamp.tzinfo is None:
+        raise ValueError(f"{label} capture timestamp must be timezone-aware.")
+    return timestamp.tz_convert("UTC").isoformat()
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Build one immutable weekly model-performance artifact from frozen model, expert, "
-            "and actual-outcome snapshots. Expert point projections are optional; ordinal expert "
-            "rankings remain a valid comparison baseline."
+            "and actual-outcome snapshots. A verified Shadow Season checkpoint is the preferred "
+            "model source because it already enforces the repository's no-hindsight contract."
         )
     )
-    parser.add_argument("--model", type=Path, required=True)
+    model_group = parser.add_mutually_exclusive_group(required=True)
+    model_group.add_argument("--model", type=Path)
+    model_group.add_argument("--shadow-snapshot", type=Path)
     parser.add_argument("--expert", type=Path, required=True)
     parser.add_argument("--actuals", type=Path, required=True)
     parser.add_argument("--season", type=int, required=True)
     parser.add_argument("--week", type=int, required=True)
-    parser.add_argument("--scoring", required=True, help="Stable scoring label such as ppr or half_ppr")
-    parser.add_argument("--model-captured-at", required=True, help="Timezone-aware ISO timestamp")
-    parser.add_argument("--expert-captured-at", required=True, help="Timezone-aware ISO timestamp")
-    parser.add_argument("--actuals-captured-at", default=None, help="Timezone-aware ISO timestamp")
-    parser.add_argument("--model-source", default="player_state_engine")
+    parser.add_argument(
+        "--scoring",
+        required=True,
+        help="Stable scoring label such as ppr or half_ppr",
+    )
+    parser.add_argument(
+        "--model-captured-at",
+        default=None,
+        help="Timezone-aware ISO timestamp; required only with --model",
+    )
+    parser.add_argument(
+        "--expert-captured-at",
+        default=None,
+        help="Timezone-aware ISO timestamp; inferred from captured_at_utc when available",
+    )
+    parser.add_argument(
+        "--actuals-captured-at",
+        default=None,
+        help="Timezone-aware ISO timestamp",
+    )
+    parser.add_argument("--model-source", default=None)
     parser.add_argument("--expert-source", default="fantasypros_ecr")
     parser.add_argument("--actuals-source", default="nflverse_scored_actuals")
     parser.add_argument("--model-points-column", default=None)
@@ -65,39 +105,77 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--expert-points-column", default=None)
     parser.add_argument("--actual-points-column", default=None)
-    parser.add_argument("--output-root", type=Path, default=Path("artifacts/evaluation/showcase"))
+    parser.add_argument(
+        "--output-root",
+        type=Path,
+        default=Path("artifacts/evaluation/showcase"),
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    model_raw = read_table(args.model)
     expert_raw = read_table(args.expert)
     actuals_raw = read_table(args.actuals)
 
-    model_points = args.model_points_column or _first_column(
-        model_raw,
-        (
-            "weekly_fantasy_points_q50",
-            "fantasy_points_ppr_q50",
-            "league_fantasy_points_q50",
-            "week_q50",
-            "q50",
-            "projected_points",
-            "projection",
-        ),
-        label="model point projection column",
-    )
-    model_q10 = _optional_column(
-        model_raw,
-        args.model_q10_column,
-        ("weekly_fantasy_points_q10", "fantasy_points_ppr_q10", "league_fantasy_points_q10", "week_q10", "q10"),
-    )
-    model_q90 = _optional_column(
-        model_raw,
-        args.model_q90_column,
-        ("weekly_fantasy_points_q90", "fantasy_points_ppr_q90", "league_fantasy_points_q90", "week_q90", "q90"),
-    )
+    if args.shadow_snapshot is not None:
+        shadow = load_verified_shadow_showcase_model(
+            args.shadow_snapshot,
+            season=args.season,
+            week=args.week,
+        )
+        model_raw = shadow.frame
+        model_points = "production_q50"
+        model_q10 = "production_q10"
+        model_q90 = "production_q90"
+        model_captured_at = shadow.captured_at_utc
+        model_source = args.model_source or shadow.source
+        model_source_path = str(args.shadow_snapshot)
+    else:
+        if args.model is None:
+            raise ValueError("--model is required when --shadow-snapshot is not supplied.")
+        if not args.model_captured_at:
+            raise ValueError("--model-captured-at is required with --model.")
+        model_raw = read_table(args.model)
+        model_points = args.model_points_column or _first_column(
+            model_raw,
+            (
+                "weekly_fantasy_points_q50",
+                "fantasy_points_ppr_q50",
+                "league_fantasy_points_q50",
+                "week_q50",
+                "q50",
+                "projected_points",
+                "projection",
+            ),
+            label="model point projection column",
+        )
+        model_q10 = _optional_column(
+            model_raw,
+            args.model_q10_column,
+            (
+                "weekly_fantasy_points_q10",
+                "fantasy_points_ppr_q10",
+                "league_fantasy_points_q10",
+                "week_q10",
+                "q10",
+            ),
+        )
+        model_q90 = _optional_column(
+            model_raw,
+            args.model_q90_column,
+            (
+                "weekly_fantasy_points_q90",
+                "fantasy_points_ppr_q90",
+                "league_fantasy_points_q90",
+                "week_q90",
+                "q90",
+            ),
+        )
+        model_captured_at = args.model_captured_at
+        model_source = args.model_source or "player_state_engine"
+        model_source_path = str(args.model)
+
     expert_rank = args.expert_rank_column or _first_column(
         expert_raw,
         ("position_rank", "expert_position_rank", "rank_pos", "pos_rank"),
@@ -110,9 +188,27 @@ def main() -> None:
     )
     actual_points = args.actual_points_column or _first_column(
         actuals_raw,
-        ("fantasy_points", "fantasy_points_ppr", "league_fantasy_points", "actual_points", "actual", "points"),
+        (
+            "fantasy_points",
+            "fantasy_points_ppr",
+            "league_fantasy_points",
+            "actual_points",
+            "actual",
+            "points",
+        ),
         label="actual fantasy-point column",
     )
+
+    expert_captured_at = args.expert_captured_at or _infer_timestamp(
+        expert_raw,
+        "captured_at_utc",
+        label="expert snapshot",
+    )
+    if not expert_captured_at:
+        raise ValueError(
+            "Expert capture provenance is unavailable. Supply --expert-captured-at or a "
+            "captured_at_utc column."
+        )
 
     model = normalize_model_snapshot(
         model_raw,
@@ -136,13 +232,13 @@ def main() -> None:
         week=args.week,
         scoring=args.scoring,
         model_provenance=SnapshotProvenance(
-            source=args.model_source,
-            captured_at_utc=args.model_captured_at,
-            source_path=str(args.model),
+            source=model_source,
+            captured_at_utc=model_captured_at,
+            source_path=model_source_path,
         ),
         expert_provenance=SnapshotProvenance(
             source=args.expert_source,
-            captured_at_utc=args.expert_captured_at,
+            captured_at_utc=expert_captured_at,
             source_path=str(args.expert),
         ),
         actuals_provenance=SnapshotProvenance(
