@@ -18,6 +18,11 @@ import type {
   TradeSuggestion,
 } from '../../shared/types';
 import type { EvidenceFactoryResponse } from './evidenceTypes';
+import type {
+  ShowcaseIndexResponse,
+  ShowcaseSeasonResponse,
+  ShowcaseWeekResponse,
+} from './showcaseTypes';
 import type { ShadowSeasonResponse } from './shadowSeasonTypes';
 import type { StructuredIntelligenceResponse } from './structuredIntelligenceTypes';
 
@@ -109,6 +114,13 @@ export const api = {
     ),
   modelObservatory: (target = 'fantasy_points_ppr', method = 'quantile_engine') =>
     request<ModelObservatoryResponse>(`/v1/model/observatory${query({ target, method })}`),
+  modelShowcaseIndex: () => request<ShowcaseIndexResponse>('/v1/model/showcase'),
+  modelShowcaseSeason: (season: number) =>
+    request<ShowcaseSeasonResponse>(`/v1/model/showcase/${season}`),
+  modelShowcaseWeek: (season: number, week: number, position?: string) =>
+    request<ShowcaseWeekResponse>(
+      `/v1/model/showcase/${season}/weeks/${week}${query({ position })}`,
+    ),
   shadowEvaluation: () => request<ShadowEvaluationResponse>('/v1/model/shadow-evaluation'),
   shadowSeason: (season = 2026) =>
     request<ShadowSeasonResponse>(`/v1/model/shadow-season${query({ season })}`),
