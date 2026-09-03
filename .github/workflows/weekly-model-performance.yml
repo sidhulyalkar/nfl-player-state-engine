@@ -1,0 +1,512 @@
+name: Weekly model performance evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: Capture a model checkpoint or settle a completed week
+        required: true
+        type: choice
+        options:
+          - capture
+          - settle
+        default: capture
+      season:
+        description: NFL season
+        required: true
+        default: "2026"
+      week:
+        description: Optional explicit week; blank resolves from nflverse schedule
+        required: false
+        default: ""
+      scoring:
+        description: Fantasy scoring lane
+        required: true
+        type: choice
+        options:
+          - PPR
+          - HALF
+        default: PPR
+      league_config_path:
+        description: Exact LeagueConfig used to score actuals during settlement
+        required: true
+        default: configs/fantasy/8_team_ppr_2qb_expanded.yaml
+      checkpoint:
+        description: Shadow Season checkpoint name for capture
+        required: true
+        type: choice
+        options:
+          - WEDNESDAY
+          - FRIDAY
+          - SUNDAY_PREGAME
+          - FINAL_DECISION
+        default: WEDNESDAY
+      model_artifact_run_id:
+        description: Upstream Actions run containing the frozen weekly model artifact
+        required: false
+        default: ""
+      model_artifact_name:
+        description: Upstream Actions artifact name containing weekly projections
+        required: false
+        default: ""
+      model_relative_path:
+        description: Projection file path inside the downloaded artifact; blank requires exactly one csv/parquet
+        required: false
+        default: ""
+  workflow_call:
+    inputs:
+      phase:
+        required: false
+        type: string
+        default: capture
+      season:
+        required: false
+        type: string
+        default: "2026"
+      week:
+        required: false
+        type: string
+        default: ""
+      scoring:
+        required: false
+        type: string
+        default: PPR
+      league_config_path:
+        required: false
+        type: string
+        default: configs/fantasy/8_team_ppr_2qb_expanded.yaml
+      checkpoint:
+        required: false
+        type: string
+        default: WEDNESDAY
+      model_artifact_run_id:
+        required: false
+        type: string
+        default: ""
+      model_artifact_name:
+        required: false
+        type: string
+        default: ""
+      model_relative_path:
+        required: false
+        type: string
+        default: ""
+    secrets:
+      PSE_FANTASYPROS_API_KEY:
+        required: false
+  schedule:
+    # Preserve expert evidence before the first games of each regular-season week.
+    - cron: "17 20 * 1,9-12 3"
+    # Settle the latest completed week after Monday-night games.
+    - cron: "17 15 * 1,9-12 2"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: weekly-model-performance-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: false
+
+env:
+  PSE_FANTASYPROS_API_KEY: ${{ secrets.PSE_FANTASYPROS_API_KEY }}
+
+jobs:
+  archive-expert:
+    if: github.event_name == 'schedule' && github.event.schedule == '17 20 * 1,9-12 3'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - source_scoring: PPR
+            lane: ppr
+          - source_scoring: HALF
+            lane: half_ppr
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ranking capture runtime
+        run: python -m pip install -e '.[intelligence]'
+
+      - name: Resolve upcoming regular-season week
+        id: resolve
+        shell: bash
+        run: |
+          set +e
+          python scripts/resolve_showcase_week.py \
+            --season 2026 \
+            --phase capture \
+            --github-output "$GITHUB_OUTPUT"
+          status=$?
+          set -e
+          if [[ "$status" -ne 0 ]]; then
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "No upcoming 2026 regular-season week; expert archive is a no-op."
+          else
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check FantasyPros credential
+        if: steps.resolve.outputs.eligible == 'true'
+        id: credential
+        shell: bash
+        run: |
+          if [[ -n "$PSE_FANTASYPROS_API_KEY" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "PSE_FANTASYPROS_API_KEY is not configured; preserving a clean no-op."
+          fi
+
+      - name: Freeze weekly FantasyPros ECR
+        if: steps.credential.outputs.available == 'true'
+        run: |
+          mkdir -p frozen-expert
+          python scripts/fetch_fantasypros_rankings.py \
+            --season 2026 \
+            --week "${{ steps.resolve.outputs.week }}" \
+            --position ALL \
+            --scoring "${{ matrix.source_scoring }}" \
+            --output-root frozen-expert
+
+      - name: Upload frozen expert evidence
+        if: steps.credential.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-expert-ecr-2026-w${{ steps.resolve.outputs.week }}-${{ matrix.lane }}
+          retention-days: 120
+          if-no-files-found: error
+          path: frozen-expert/
+
+  capture:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.phase == 'capture') ||
+      (github.event_name == 'workflow_call' && inputs.phase == 'capture')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install capture runtime
+        run: python -m pip install -e '.[intelligence]'
+
+      - name: Validate upstream model artifact contract
+        shell: bash
+        run: |
+          if [[ -z "${{ inputs.model_artifact_run_id }}" || -z "${{ inputs.model_artifact_name }}" ]]; then
+            echo "Capture requires model_artifact_run_id and model_artifact_name." >&2
+            exit 1
+          fi
+
+      - name: Resolve evaluation week
+        id: resolve
+        run: |
+          args=(--season "${{ inputs.season }}" --phase capture --github-output "$GITHUB_OUTPUT")
+          if [[ -n "${{ inputs.week }}" ]]; then args+=(--week "${{ inputs.week }}"); fi
+          python scripts/resolve_showcase_week.py "${args[@]}"
+
+      - name: Download exact upstream model artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.model_artifact_name }}
+          run-id: ${{ inputs.model_artifact_run_id }}
+          github-token: ${{ github.token }}
+          path: recovered/model
+
+      - name: Resolve one projection file and artifact availability
+        id: model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          requested="${{ inputs.model_relative_path }}"
+          if [[ -n "$requested" ]]; then
+            model_path="recovered/model/$requested"
+            [[ -f "$model_path" ]] || { echo "Missing model path: $model_path" >&2; exit 1; }
+          else
+            mapfile -t candidates < <(find recovered/model -type f \( -name '*.parquet' -o -name '*.csv' \) | sort)
+            if [[ "${#candidates[@]}" -ne 1 ]]; then
+              printf 'Expected exactly one csv/parquet model file, found %s:\n' "${#candidates[@]}" >&2
+              printf '%s\n' "${candidates[@]}" >&2
+              exit 1
+            fi
+            model_path="${candidates[0]}"
+          fi
+          echo "path=$model_path" >> "$GITHUB_OUTPUT"
+          created_at=$(gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/${{ inputs.model_artifact_run_id }}/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.name == "${{ inputs.model_artifact_name }}") | .created_at' \
+            | head -n 1)
+          [[ -n "$created_at" ]] || { echo "Unable to resolve upstream artifact created_at." >&2; exit 1; }
+          echo "available_at=$created_at" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve scoring lane
+        id: lane
+        shell: bash
+        run: |
+          case "${{ inputs.scoring }}" in
+            PPR) echo "label=ppr" >> "$GITHUB_OUTPUT" ;;
+            HALF) echo "label=half_ppr" >> "$GITHUB_OUTPUT" ;;
+            *) echo "Unsupported scoring lane: ${{ inputs.scoring }}" >&2; exit 1 ;;
+          esac
+
+      - name: Resolve or capture frozen expert ECR
+        id: expert
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mkdir -p recovered/expert capture
+          if [[ -n "$PSE_FANTASYPROS_API_KEY" ]]; then
+            python scripts/fetch_fantasypros_rankings.py \
+              --season "${{ inputs.season }}" \
+              --week "${{ steps.resolve.outputs.week }}" \
+              --position ALL \
+              --scoring "${{ inputs.scoring }}" \
+              --output-root recovered/expert
+          else
+            name="weekly-expert-ecr-${{ inputs.season }}-w${{ steps.resolve.outputs.week }}-${{ steps.lane.outputs.label }}"
+            artifact_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
+              --jq ".artifacts | map(select(.name == \"$name\" and .expired == false)) | sort_by(.created_at) | last | .id // empty")
+            [[ -n "$artifact_id" ]] || {
+              echo "No FantasyPros key and no retained expert artifact named $name." >&2
+              exit 1
+            }
+            gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > expert.zip
+            unzip -q expert.zip -d recovered/expert
+          fi
+          mapfile -t expert_files < <(find recovered/expert -type f -name '*.parquet' | sort)
+          [[ "${#expert_files[@]}" -eq 1 ]] || {
+            echo "Expected exactly one expert parquet, found ${#expert_files[@]}." >&2
+            exit 1
+          }
+          cp "${expert_files[0]}" capture/expert.parquet
+          captured=$(python - <<'PY'
+          import pandas as pd
+          frame = pd.read_parquet('capture/expert.parquet')
+          values = frame['captured_at_utc'].dropna().astype(str).str.strip().drop_duplicates()
+          if len(values) != 1:
+              raise SystemExit(f'Expected one expert captured_at_utc, got {values.tolist()}')
+          value = pd.Timestamp(values.iloc[0])
+          if value.tzinfo is None:
+              raise SystemExit('Expert captured_at_utc must be timezone-aware')
+          print(value.tz_convert('UTC').isoformat())
+          PY
+          )
+          echo "captured_at=$captured" >> "$GITHUB_OUTPUT"
+
+      - name: Freeze one no-hindsight shadow checkpoint
+        id: shadow
+        shell: bash
+        run: |
+          cutoff=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          expert_sha=$(sha256sum capture/expert.parquet | awk '{print $1}')
+          cat > capture/source_manifest.json <<JSON
+          {
+            "sources": [
+              {
+                "name": "fantasypros_ecr",
+                "available_at": "${{ steps.expert.outputs.captured_at }}",
+                "sha256": "$expert_sha",
+                "path": "capture/expert.parquet"
+              }
+            ]
+          }
+          JSON
+          python scripts/record_shadow_checkpoint.py \
+            --projections "${{ steps.model.outputs.path }}" \
+            --season "${{ inputs.season }}" \
+            --week "${{ steps.resolve.outputs.week }}" \
+            --checkpoint "${{ inputs.checkpoint }}" \
+            --prediction-cutoff "$cutoff" \
+            --projection-available-at "${{ steps.model.outputs.available_at }}" \
+            --source-manifest capture/source_manifest.json \
+            > capture/shadow_record.json
+          snapshot_path=$(python - <<'PY'
+          import json
+          print(json.load(open('capture/shadow_record.json', encoding='utf-8'))['path'])
+          PY
+          )
+          cp "$snapshot_path" capture/shadow_snapshot.json
+          echo "prediction_cutoff=$cutoff" >> "$GITHUB_OUTPUT"
+
+      - name: Write capture chain manifest
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          def sha(path: str) -> str:
+              return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+          shadow = json.loads(Path('capture/shadow_snapshot.json').read_text(encoding='utf-8'))
+          payload = {
+              'authority': 'evaluation_capture_only',
+              'may_change_production_decisions': False,
+              'season': int('${{ inputs.season }}'),
+              'week': int('${{ steps.resolve.outputs.week }}'),
+              'scoring': '${{ steps.lane.outputs.label }}',
+              'checkpoint': '${{ inputs.checkpoint }}',
+              'shadow_snapshot_id': shadow['snapshot_id'],
+              'shadow_content_sha256': shadow['content_sha256'],
+              'expert_sha256': sha('capture/expert.parquet'),
+              'upstream_model_run_id': '${{ inputs.model_artifact_run_id }}',
+              'upstream_model_artifact': '${{ inputs.model_artifact_name }}',
+              'prediction_cutoff': '${{ steps.shadow.outputs.prediction_cutoff }}',
+          }
+          Path('capture/capture_manifest.json').write_text(
+              json.dumps(payload, indent=2, sort_keys=True), encoding='utf-8'
+          )
+          PY
+
+      - name: Upload immutable weekly capture chain
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-showcase-capture-${{ inputs.season }}-w${{ steps.resolve.outputs.week }}-${{ steps.lane.outputs.label }}
+          retention-days: 120
+          if-no-files-found: error
+          path: capture/
+
+  settle:
+    if: >-
+      (github.event_name == 'schedule' && github.event.schedule == '17 15 * 1,9-12 2') ||
+      (github.event_name == 'workflow_dispatch' && inputs.phase == 'settle') ||
+      (github.event_name == 'workflow_call' && inputs.phase == 'settle')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - source_scoring: PPR
+            lane: ppr
+            league_config: configs/fantasy/8_team_ppr_2qb_expanded.yaml
+          - source_scoring: HALF
+            lane: half_ppr
+            league_config: configs/fantasy/12_team_half_ppr_median.yaml
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install settlement runtime
+        run: python -m pip install -e '.[intelligence]'
+
+      - name: Decide whether this lane is active
+        id: active
+        shell: bash
+        run: |
+          active=true
+          if [[ "${{ github.event_name }}" != "schedule" ]]; then
+            if [[ "${{ inputs.scoring }}" != "${{ matrix.source_scoring }}" ]]; then active=false; fi
+          fi
+          echo "active=$active" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve completed week
+        if: steps.active.outputs.active == 'true'
+        id: resolve
+        shell: bash
+        run: |
+          args=(--season "${{ inputs.season || '2026' }}" --phase settle --github-output "$GITHUB_OUTPUT")
+          if [[ -n "${{ inputs.week }}" ]]; then args+=(--week "${{ inputs.week }}"); fi
+          set +e
+          python scripts/resolve_showcase_week.py "${args[@]}"
+          status=$?
+          set -e
+          if [[ "$status" -ne 0 ]]; then
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Recover latest immutable capture chain
+        if: steps.resolve.outputs.eligible == 'true'
+        id: capture
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          season="${{ inputs.season || '2026' }}"
+          name="weekly-showcase-capture-${season}-w${{ steps.resolve.outputs.week }}-${{ matrix.lane }}"
+          artifact_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
+            --jq ".artifacts | map(select(.name == \"$name\" and .expired == false)) | sort_by(.created_at) | last | .id // empty")
+          if [[ -z "$artifact_id" ]]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "No retained capture artifact named $name; settlement lane is a clean no-op."
+            exit 0
+          fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          mkdir -p recovered/capture
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > capture.zip
+          unzip -q capture.zip -d recovered/capture
+          test -f recovered/capture/shadow_snapshot.json
+          test -f recovered/capture/expert.parquet
+
+      - name: Fetch completed nflverse player-week source
+        if: steps.capture.outputs.available == 'true'
+        run: |
+          mkdir -p settlement
+          python scripts/fetch_nflverse_weekly_stats.py \
+            --season "${{ inputs.season || '2026' }}" \
+            --week "${{ steps.resolve.outputs.week }}" \
+            --output settlement/nflverse_week.csv \
+            --manifest settlement/nflverse_manifest.json
+
+      - name: Score actuals under exact league contract
+        if: steps.capture.outputs.available == 'true'
+        run: |
+          config="${{ matrix.league_config }}"
+          if [[ "${{ github.event_name }}" != "schedule" && -n "${{ inputs.league_config_path }}" ]]; then
+            config="${{ inputs.league_config_path }}"
+          fi
+          python scripts/build_weekly_actuals.py \
+            --stats settlement/nflverse_week.csv \
+            --league-config "$config" \
+            --season "${{ inputs.season || '2026' }}" \
+            --week "${{ steps.resolve.outputs.week }}" \
+            --output settlement/actuals.parquet \
+            | tee settlement/actuals_build.txt
+
+      - name: Build content-addressed model performance artifact
+        if: steps.capture.outputs.available == 'true'
+        run: |
+          captured=$(python - <<'PY'
+          import json
+          print(json.load(open('settlement/nflverse_manifest.json', encoding='utf-8'))['captured_at_utc'])
+          PY
+          )
+          python scripts/build_weekly_showcase.py \
+            --shadow-snapshot recovered/capture/shadow_snapshot.json \
+            --expert recovered/capture/expert.parquet \
+            --actuals settlement/actuals.parquet \
+            --season "${{ inputs.season || '2026' }}" \
+            --week "${{ steps.resolve.outputs.week }}" \
+            --scoring "${{ matrix.lane }}" \
+            --actuals-captured-at "$captured" \
+            --output-root artifacts/evaluation/showcase \
+            > settlement/showcase_manifest.json
+
+      - name: Upload completed weekly evaluation evidence
+        if: steps.capture.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-showcase-evaluation-${{ inputs.season || '2026' }}-w${{ steps.resolve.outputs.week }}-${{ matrix.lane }}
+          retention-days: 120
+          if-no-files-found: error
+          path: |
+            recovered/capture/capture_manifest.json
+            recovered/capture/shadow_snapshot.json
+            recovered/capture/expert.parquet
+            settlement/
+            artifacts/evaluation/showcase/
