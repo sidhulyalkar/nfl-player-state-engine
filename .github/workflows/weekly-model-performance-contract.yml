@@ -1,0 +1,64 @@
+name: Weekly model performance contract
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/weekly-model-performance.yml"
+      - ".github/workflows/weekly-model-performance-contract.yml"
+      - "src/player_state_engine/evaluation/showcase_automation.py"
+      - "src/player_state_engine/evaluation/weekly_showcase.py"
+      - "scripts/build_weekly_showcase.py"
+      - "scripts/build_weekly_actuals.py"
+      - "scripts/fetch_fantasypros_rankings.py"
+      - "scripts/fetch_nflverse_weekly_stats.py"
+      - "scripts/resolve_showcase_week.py"
+      - "tests/test_showcase_automation.py"
+      - "tests/test_weekly_showcase.py"
+      - "docs/product/model_performance_showcase.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weekly-model-performance-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install exact contract runtime
+        run: python -m pip install -e '.[dev,intelligence]'
+
+      - name: Lint and compile automation surface
+        run: |
+          ruff check \
+            src/player_state_engine/evaluation/showcase_automation.py \
+            scripts/build_weekly_showcase.py \
+            scripts/fetch_nflverse_weekly_stats.py \
+            scripts/resolve_showcase_week.py \
+            tests/test_showcase_automation.py \
+            tests/test_weekly_showcase.py
+          python -m compileall -q \
+            src/player_state_engine/evaluation/showcase_automation.py \
+            scripts/build_weekly_showcase.py \
+            scripts/fetch_nflverse_weekly_stats.py \
+            scripts/resolve_showcase_week.py \
+            tests/test_showcase_automation.py
+
+      - name: Exercise CLI contracts
+        run: |
+          python scripts/build_weekly_showcase.py --help >/dev/null
+          python scripts/fetch_nflverse_weekly_stats.py --help >/dev/null
+          python scripts/resolve_showcase_week.py --help >/dev/null
+
+      - name: Run focused automation and evaluator tests
+        run: pytest -q tests/test_showcase_automation.py tests/test_weekly_showcase.py tests/test_showcase_routes.py
