@@ -58,6 +58,9 @@ Desktop.ini
 /artifacts/predictions/*
 /artifacts/reports/*
 /artifacts/experiments/*
+# Weekly model-vs-expert scoreboards are generated, timestamped evidence. Preserve them in durable
+# artifact storage rather than source control; code and schemas live in the repository.
+/artifacts/evaluation/*
 !/data/**/.gitkeep
 !/artifacts/**/.gitkeep
 

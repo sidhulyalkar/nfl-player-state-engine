@@ -6,12 +6,13 @@ import { DraftLaunchPanel } from './components/DraftLaunchPanel';
 import { IntelligencePortal } from './components/IntelligencePortal';
 import { LeagueOnboardingPanel } from './components/LeagueOnboardingPanel';
 import { ModelObservatoryPortal } from './components/ModelObservatoryPortal';
+import { ModelShowcasePortal } from './components/ModelShowcasePortal';
 import { NflHubPortal } from './components/NflHubPortal';
 import { PortfolioPortal } from './components/PortfolioPortal';
 import './workspace.css';
 import './shadow-workspace.css';
 
-type Surface = 'draft' | 'nfl' | 'intelligence' | 'portfolio' | 'league' | 'model';
+type Surface = 'draft' | 'nfl' | 'intelligence' | 'portfolio' | 'league' | 'showcase' | 'model';
 
 type WorkspaceRoute = {
   surface: Surface;
@@ -25,6 +26,7 @@ const surfaces: Array<{ key: Surface; label: string; description: string }> = [
   { key: 'intelligence', label: 'Player Intelligence', description: 'Full player dossiers' },
   { key: 'portfolio', label: 'Portfolio', description: 'Cross-league exposure' },
   { key: 'league', label: 'League OS', description: 'Trades, waivers, lineup' },
+  { key: 'showcase', label: 'Performance', description: 'Model vs experts' },
   { key: 'model', label: 'Model Observatory', description: 'Calibration and evidence' },
 ];
 
@@ -75,6 +77,7 @@ export default function OperationalApp() {
       {route.surface === 'intelligence' && <IntelligencePortal initialLeagueId={route.leagueId} initialPlayerId={route.playerId}/>} 
       {route.surface === 'portfolio' && <PortfolioPortal/>}
       {route.surface === 'league' && <div className="operational-console"><App/></div>}
+      {route.surface === 'showcase' && <ModelShowcasePortal/>}
       {route.surface === 'model' && <ModelObservatoryPortal onOpenLeagueOS={() => navigate('league')}/>} 
     </div>
   </div>;

@@ -20,6 +20,7 @@ from player_state_engine.api.market_draft_routes import install_market_draft_rou
 from player_state_engine.api.nfl_hub_routes import install_nfl_hub_routes
 from player_state_engine.api.ranking_routes import install_ranking_routes
 from player_state_engine.api.shadow_season_routes import install_shadow_season_routes
+from player_state_engine.api.showcase_routes import install_showcase_routes
 from player_state_engine.api.structured_intelligence_routes import (
     install_structured_intelligence_routes,
 )
@@ -86,6 +87,10 @@ def _install_projection_integrity_guard(
     Services are installed against one exact resolved path. If a champion pointer changes while
     the process is running, fail closed and require a restart so every route is rebuilt around one
     coherent artifact identity rather than mixing old service state with a new champion.
+
+    Frozen showcase routes are deliberately exempt: they are evaluation-only artifacts with an
+    explicit no-decision-authority contract and remain inspectable even if the live champion is
+    unavailable or undergoing operator repair.
     """
 
     if source.mode != "champion":
@@ -94,7 +99,12 @@ def _install_projection_integrity_guard(
     @app.middleware("http")
     async def verified_projection_guard(request: Request, call_next: Callable[..., Any]):
         path = request.url.path
-        if path == "/health" or path.startswith("/docs") or path.startswith("/openapi"):
+        if (
+            path == "/health"
+            or path.startswith("/docs")
+            or path.startswith("/openapi")
+            or path.startswith("/v1/model/showcase")
+        ):
             return await call_next(request)
         try:
             snapshot = source.load()
@@ -128,6 +138,7 @@ def create_app(**kwargs: Any) -> FastAPI:
         "live_adp_root",
         "special_teams_market_path",
         "league_portfolio_path",
+        "model_showcase_root",
     }
     base_kwargs = {key: value for key, value in kwargs.items() if key not in operational_only}
 
@@ -225,6 +236,10 @@ def create_app(**kwargs: Any) -> FastAPI:
         registry_path=kwargs.get("game_intelligence_registry"),
         benchmark_root=kwargs.get("game_intelligence_benchmark_root"),
     )
+    app.state.model_showcase = install_showcase_routes(
+        app,
+        root=kwargs.get("model_showcase_root"),
+    )
     _install_projection_integrity_guard(
         app,
         projection_source,
@@ -239,10 +254,10 @@ def create_app(**kwargs: Any) -> FastAPI:
         "external ADP timing, NFL Hub state-change intelligence, player intelligence, cross-league "
         "portfolio exposure, Player State Graph shadow comparison and sensitivity, frozen Evidence "
         "Factory, immutable 2026 live shadow-season evidence, structured intelligence evidence "
-        "ledger, model observatory, ranking calibration, guarded draft reliability, guarded "
-        "game-intelligence simulation, expanding frozen replay, factorial attribution, simulated-state "
-        "opportunity, drive-volume, possession-transition, fourth-down decision, and terminal-family "
-        "research surfaces."
+        "ledger, model observatory, read-only weekly model-versus-expert showcase evidence, ranking "
+        "calibration, guarded draft reliability, guarded game-intelligence simulation, expanding "
+        "frozen replay, factorial attribution, simulated-state opportunity, drive-volume, "
+        "possession-transition, fourth-down decision, and terminal-family research surfaces."
     )
     return app
 
