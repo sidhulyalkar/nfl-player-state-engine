@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, ArrowLeft, CheckCircle2, CircleAlert, Pause, Play, RotateCcw } from 'lucide-react';
 import '../gameday-lab.css';
+import { FootballField3D, type Field3DTrail } from './FootballField3D';
+import { trackingFocus } from './football3dMath';
 
 export interface TrackedEntity {
   nfl_id: string | null;
@@ -84,6 +86,7 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
   const [time,setTime]=useState(0);
   const [running,setRunning]=useState(true);
   const [camera,setCamera]=useState<Angle>('broadcast');
+  const [renderMode,setRenderMode]=useState<'3d'|'2d'>('3d');
   const [trails,setTrails]=useState(true);
   const [labels,setLabels]=useState(true);
   const [showNearest,setShowNearest]=useState(true);
@@ -91,6 +94,26 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
   const duration=replay.frames[replay.frames.length-1].t_seconds_nominal;
   const currentIndex=activeFrame(replay.frames,time);
   const frame=replay.frames[currentIndex];
+  const fieldFocus=useMemo(()=>trackingFocus(replay.frames[0].players),[replay]);
+  const scenePlayers=useMemo(()=>frame.players.filter(p=>p.nfl_id).map(p=>({
+    id:p.nfl_id!,x:p.x,y:p.y,jersey:p.jersey,name:p.name,team:p.team,
+    side:p.side==='offense'||p.side==='defense'?p.side:null,
+  })),[frame]);
+  const sceneTrails=useMemo(()=>{
+    const out:Field3DTrail[]=[];
+    const startFrame=Math.max(1,currentIndex-30);
+    for(let k=startFrame;k<=currentIndex;k++){
+      const prior=replay.frames[k-1],next=replay.frames[k];
+      if(!prior||next.frame_id!==prior.frame_id+1)continue;
+      const index=new Map(prior.players.filter(p=>p.nfl_id).map(p=>[p.nfl_id!,p]));
+      for(const p of next.players){
+        const before=p.nfl_id?index.get(p.nfl_id):null;
+        if(!before||!p.nfl_id)continue;
+        out.push({id:p.nfl_id,from:[before.x,before.y],to:[p.x,p.y],side:p.side==='offense'||p.side==='defense'?p.side:null});
+      }
+    }
+    return out;
+  },[currentIndex,replay]);
   const recordedEvents=useMemo(()=>replay.frames.flatMap(f=>f.events.map(label=>({t:f.t_seconds_nominal,label,frame_id:f.frame_id}))),[replay]);
   useEffect(()=>{
     if(!running)return;
@@ -138,8 +161,8 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
       <section className="gameday-main">
         <div className="gameday-history-meta"><span><CheckCircle2 size={14}/> Recorded x/y coordinates</span><span>{replay.frame_count} frames</span><span>{replay.missing_frame_count} missing frames</span><span>Direction: {replay.play_direction ?? 'unknown'}</span></div>
         <div className="gameday-field-shell">
-          <div className="gameday-toolbar"><strong>Source positions only · no inferred coverage</strong><select aria-label="Historical replay camera" value={camera} onChange={e=>setCamera(e.target.value as Angle)}><option value="broadcast">Broadcast angle</option><option value="all22">All-22 perspective</option><option value="overhead">Overhead</option></select></div>
-          <svg className="gameday-field" viewBox="0 0 1040 590" role="img" aria-label="Recorded historical player tracking in a projected field">
+          <div className="gameday-toolbar"><strong>Source positions only · no inferred coverage</strong><div className="gameday-display-options"><button aria-label="Use three dimensional recorded field" aria-pressed={renderMode==='3d'} className={renderMode==='3d'?'selected':''} onClick={()=>setRenderMode('3d')}>3D Field</button><button aria-label="Use two dimensional fallback field" aria-pressed={renderMode==='2d'} className={renderMode==='2d'?'selected':''} onClick={()=>setRenderMode('2d')}>2D Field</button><select aria-label="Historical replay camera" value={camera} onChange={e=>setCamera(e.target.value as Angle)}><option value="broadcast">Broadcast angle</option><option value="all22">All-22 perspective</option><option value="overhead">Overhead</option></select></div></div>
+          {renderMode==='3d' ? <FootballField3D key={replay.game_id+':'+replay.play_id} players={scenePlayers} ball={frame.ball?{x:frame.ball.x,y:frame.ball.y}:null} trails={sceneTrails} selectedId={focus} onSelect={setFocus} preset={camera} focus={fieldFocus} showLabels={labels} showTrails={trails} showNearest={showNearest} onUnsupported={()=>setRenderMode('2d')} /> : <svg className="gameday-field" viewBox="0 0 1040 590" role="img" aria-label="Recorded historical player tracking in a projected field">
             <rect width="1040" height="590" fill="#0b1420"/>
             <polygon points={quad(0,120,camera)} fill="#17473b" stroke="#a3d8ba" strokeWidth="2"/>
             <polygon points={quad(0,10,camera)} fill="#4ea9ac" opacity=".25"/>
@@ -170,7 +193,7 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
             {frame.ball&&(()=>{const at=point(frame.ball.x,frame.ball.y,camera);return <circle cx={at.x} cy={at.y} r="5.3" fill="#ffd28c" stroke="#fff5dc" strokeWidth="1.5"/>;})()}
             <text x="33" y="45" fill="#e8f4f6" fontSize="12" letterSpacing="1.5">SOURCE FRAMES · {frame.frame_id}</text>
             <text x="33" y="65" fill="#a3bbbf" fontSize="11">Ball elevation unavailable; movement is NOT interpolated.</text>
-          </svg>
+          </svg>}
         </div>
         <div className="gameday-controlbar"><div className="gameday-player-controls"><button onClick={()=>{if(time>=duration)setTime(0);setRunning(!running);}} aria-label={running?'Pause':'Play'}>{running?<Pause size={18}/>:<Play size={18}/>}</button><button onClick={()=>{setTime(0);setRunning(true);}} aria-label="Restart"><RotateCcw size={17}/></button><span>{time.toFixed(1)} / {duration.toFixed(1)}s</span></div><input type="range" aria-label="Historical frame scrubber" min="0" max={duration} step=".1" value={time} onChange={e=>{setTime(Number(e.target.value));setRunning(false);}}/></div>
         <div className="gameday-overlays"><span>Recorded data layers</span><button onClick={()=>setTrails(!trails)} aria-pressed={trails} className={trails?'enabled':''}>Observed trails</button><button onClick={()=>setLabels(!labels)} aria-pressed={labels} className={labels?'enabled':''}>Jersey labels</button><button onClick={()=>setShowNearest(!showNearest)} aria-pressed={showNearest} className={showNearest?'enabled':''}>Nearest opponent</button></div>
