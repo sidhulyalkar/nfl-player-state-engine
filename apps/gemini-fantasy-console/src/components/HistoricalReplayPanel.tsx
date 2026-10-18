@@ -1,0 +1,172 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Activity, ArrowLeft, CheckCircle2, CircleAlert, Pause, Play, RotateCcw } from 'lucide-react';
+import '../gameday-lab.css';
+
+export interface TrackedEntity {
+  nfl_id: string | null;
+  is_ball: boolean;
+  team: string | null;
+  side: string | null;
+  name: string | null;
+  jersey: string | null;
+  x: number;
+  y: number;
+  z: null;
+  speed_yards_per_s: number | null;
+}
+export interface HistoricalFrame {
+  frame_id: number;
+  t_seconds_nominal: number;
+  players: TrackedEntity[];
+  ball: TrackedEntity | null;
+  events: string[];
+}
+export interface HistoricalReplay {
+  data_mode: 'HISTORICAL_RESEARCH';
+  tracking_fidelity: 'RECORDED_FRAMES';
+  game_id: string;
+  play_id: string;
+  source: string;
+  source_file_sha256: string;
+  source_license_identifier: string;
+  play_direction: string | null;
+  frame_count: number;
+  missing_frame_count: number;
+  frame_coverage: number;
+  frames: HistoricalFrame[];
+}
+export function parseHistoricalReplay(value: unknown): HistoricalReplay {
+  if (!value || typeof value !== 'object') throw new Error('Replay JSON must be an object.');
+  const o = value as Partial<HistoricalReplay>;
+  if (o.data_mode !== 'HISTORICAL_RESEARCH' || o.tracking_fidelity !== 'RECORDED_FRAMES') {
+    throw new Error('Only research-labeled recorded tracking files can be imported.');
+  }
+  if (!Array.isArray(o.frames) || !o.frames.length || o.frames.length > 25000) {
+    throw new Error('Replay must include 1 to 25,000 recorded frames.');
+  }
+  if (typeof o.game_id !== 'string' || typeof o.play_id !== 'string' || typeof o.source_file_sha256 !== 'string' || o.source_file_sha256.length !== 64) {
+    throw new Error('Replay identity and source SHA-256 are required.');
+  }
+  if (o.frame_count !== o.frames.length) throw new Error('Recorded frame count does not match the payload.');
+  for (let i=0;i<o.frames.length;i++) {
+    const f = o.frames[i];
+    if (!f || !Number.isInteger(f.frame_id) || !Number.isFinite(f.t_seconds_nominal) || f.t_seconds_nominal < 0 || !Array.isArray(f.players) || f.players.length > 30 || !Array.isArray(f.events)) {
+      throw new Error('Invalid recorded frame structure.');
+    }
+    if (i>0 && (f.frame_id <= o.frames[i-1].frame_id || f.t_seconds_nominal < o.frames[i-1].t_seconds_nominal)) {
+      throw new Error('Frames must have increasing source IDs and monotonic timestamps.');
+    }
+    for (const p of [...f.players,...(f.ball?[f.ball]:[])]) {
+      if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y) || p.x<0 || p.x>120 || p.y<0 || p.y>53.3) {
+        throw new Error('Tracked entity is missing field-space coordinates.');
+      }
+    }
+  }
+  return o as HistoricalReplay;
+}
+type Angle = 'broadcast' | 'all22' | 'overhead';
+function point(x:number,y:number,camera:Angle){
+  const a=x-60, b=y-26.65;
+  if(camera==='overhead')return {x:520+a*7,y:295+b*7.8};
+  if(camera==='all22')return {x:520+a*6.1+b*1.1,y:288+b*5.6-a*.8};
+  return {x:520+a*5.5+b*2.2,y:285+b*4.1-a*1.8};
+}
+function quad(x0:number,x1:number,mode:Angle){
+  return [point(x0,0,mode),point(x1,0,mode),point(x1,53.3,mode),point(x0,53.3,mode)]
+    .map(p=>p.x.toFixed(1)+','+p.y.toFixed(1)).join(' ');
+}
+function activeFrame(frames:HistoricalFrame[],t:number){
+  let lo=0, hi=frames.length-1;
+  while(lo<hi){const mid=Math.ceil((lo+hi)/2);if(frames[mid].t_seconds_nominal<=t)lo=mid;else hi=mid-1;}
+  return lo;
+}
+export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;onBack:()=>void}) {
+  const [time,setTime]=useState(0);
+  const [running,setRunning]=useState(true);
+  const [camera,setCamera]=useState<Angle>('broadcast');
+  const [trails,setTrails]=useState(true);
+  const [labels,setLabels]=useState(true);
+  const [focus,setFocus]=useState<string|null>(null);
+  const duration=replay.frames[replay.frames.length-1].t_seconds_nominal;
+  const currentIndex=activeFrame(replay.frames,time);
+  const frame=replay.frames[currentIndex];
+  const recordedEvents=useMemo(()=>replay.frames.flatMap(f=>f.events.map(label=>({t:f.t_seconds_nominal,label,frame_id:f.frame_id}))),[replay]);
+  useEffect(()=>{
+    if(!running)return;
+    let handle=0;let last=0;
+    const step=(now:number)=>{if(last)setTime(v=>Math.min(duration,v+(now-last)/1000));last=now;handle=requestAnimationFrame(step);};
+    handle=requestAnimationFrame(step);
+    return ()=>cancelAnimationFrame(handle);
+  },[running,duration]);
+  useEffect(()=>{if(running&&time>=duration)setRunning(false);},[time,duration,running]);
+  const focused=frame.players.find(p=>p.nfl_id===focus);
+  const start=Math.max(0,currentIndex-30);
+  const trailSegments=useMemo(()=>{
+    const result:Array<{key:string;path:string;color:string}>=[];
+    if(!trails)return result;
+    const ids=frame.players.map(p=>p.nfl_id).filter((v):v is string=>!!v);
+    for(const id of ids){
+      const player=frame.players.find(p=>p.nfl_id===id)!;
+      let coords:string[]=[];
+      let prev:number|null=null;
+      for(let k=start;k<=currentIndex;k++){
+        const f=replay.frames[k];
+        const p=f.players.find(item=>item.nfl_id===id);
+        if(!p){if(coords.length>1)result.push({key:id+'-'+k,path:coords.join(' '),color:player.side==='offense'?'#8ac7ef':'#f2a2a2'});coords=[];prev=null;continue;}
+        const xy=point(p.x,p.y,camera);
+        const command=(prev===null || f.frame_id!==prev+1?'M':'L')+xy.x.toFixed(1)+' '+xy.y.toFixed(1);
+        coords.push(command);prev=f.frame_id;
+      }
+      if(coords.length>1)result.push({key:id+'-final',path:coords.join(' '),color:player.side==='offense'?'#8ac7ef':'#f2a2a2'});
+    }
+    return result;
+  },[frame,replay,start,currentIndex,trails,camera]);
+  return <main className="gameday-page">
+    <header className="gameday-head">
+      <div><div className="gameday-kicker"><Activity size={15}/> FOURTH DOWN LAB / HISTORICAL TRACKING</div><h1>Recorded movement, not reconstructed guesses.</h1><p>Game {replay.game_id} · play {replay.play_id} · NFL Big Data Bowl research import</p></div>
+      <div className="gameday-history-actions"><button onClick={onBack}><ArrowLeft size={15}/> Return to demo</button><div className="gameday-source"><span className="gameday-source-dot"/><div><strong>Historical research only</strong><small>Not live · rights not independently verified</small></div></div></div>
+    </header>
+    <div className="gameday-layout">
+      <section className="gameday-main">
+        <div className="gameday-history-meta"><span><CheckCircle2 size={14}/> Recorded x/y coordinates</span><span>{replay.frame_count} frames</span><span>{replay.missing_frame_count} missing frames</span><span>Direction: {replay.play_direction ?? 'unknown'}</span></div>
+        <div className="gameday-field-shell">
+          <div className="gameday-toolbar"><strong>Source positions only · no inferred coverage</strong><select aria-label="Historical replay camera" value={camera} onChange={e=>setCamera(e.target.value as Angle)}><option value="broadcast">Broadcast angle</option><option value="all22">All-22 perspective</option><option value="overhead">Overhead</option></select></div>
+          <svg className="gameday-field" viewBox="0 0 1040 590" role="img" aria-label="Recorded historical player tracking in a projected field">
+            <rect width="1040" height="590" fill="#0b1420"/>
+            <polygon points={quad(0,120,camera)} fill="#17473b" stroke="#a3d8ba" strokeWidth="2"/>
+            <polygon points={quad(0,10,camera)} fill="#4ea9ac" opacity=".25"/>
+            <polygon points={quad(110,120,camera)} fill="#4ea9ac" opacity=".25"/>
+            {Array.from({length:21},(_,i)=>i*5+10).map(x=>{
+              const a=point(x,0,camera),b=point(x,53.3,camera);
+              return <line key={x} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#d6f1e3" strokeWidth={x%10===0?1.5:.8} opacity=".3"/>;
+            })}
+            {trailSegments.map(l=><path key={l.key} d={l.path} stroke={l.color} strokeWidth="2.5" fill="none" opacity=".65"/>)}
+            {frame.players.map((p,i)=>{
+              const at=point(p.x,p.y,camera);
+              const color=p.side==='offense'?'#57adf1':p.side==='defense'?'#f18f8f':'#b9c9d2';
+              return <g key={p.nfl_id??'unknown-'+i} role="button" tabIndex={0} style={{cursor:'pointer'}} onClick={()=>setFocus(p.nfl_id)} onKeyDown={e=>{if(e.key==='Enter')setFocus(p.nfl_id);}}>
+                <ellipse cx={at.x+2} cy={at.y+5} rx="11" ry="6" fill="#071f1f" opacity=".5"/>
+                {focus&&focus===p.nfl_id&&<circle cx={at.x} cy={at.y} r="17" stroke="#f4cd79" fill="none" strokeWidth="2"/>}
+                <circle cx={at.x} cy={at.y} r="11" stroke="#e8f5f7" strokeWidth="1.5" fill={color}/>
+                {labels&&<text x={at.x} y={at.y+3.5} fill="#082030" fontSize="9" fontWeight="900" textAnchor="middle">{p.jersey??'•'}</text>}
+              </g>;
+            })}
+            {frame.ball&&(()=>{const at=point(frame.ball.x,frame.ball.y,camera);return <circle cx={at.x} cy={at.y} r="5.3" fill="#ffd28c" stroke="#fff5dc" strokeWidth="1.5"/>;})()}
+            <text x="33" y="45" fill="#e8f4f6" fontSize="12" letterSpacing="1.5">SOURCE FRAMES · {frame.frame_id}</text>
+            <text x="33" y="65" fill="#a3bbbf" fontSize="11">Ball elevation unavailable; movement is NOT interpolated.</text>
+          </svg>
+        </div>
+        <div className="gameday-controlbar"><div className="gameday-player-controls"><button onClick={()=>{if(time>=duration)setTime(0);setRunning(!running);}} aria-label={running?'Pause':'Play'}>{running?<Pause size={18}/>:<Play size={18}/>}</button><button onClick={()=>{setTime(0);setRunning(true);}} aria-label="Restart"><RotateCcw size={17}/></button><span>{time.toFixed(1)} / {duration.toFixed(1)}s</span></div><input type="range" aria-label="Historical frame scrubber" min="0" max={duration} step=".1" value={time} onChange={e=>{setTime(Number(e.target.value));setRunning(false);}}/></div>
+        <div className="gameday-overlays"><span>Recorded data layers</span><button onClick={()=>setTrails(!trails)} aria-pressed={trails} className={trails?'enabled':''}>Observed trails</button><button onClick={()=>setLabels(!labels)} aria-pressed={labels} className={labels?'enabled':''}>Jersey labels</button></div>
+        <div className="gameday-lower">
+          <div className="gameday-panel"><div className="gameday-section-name"><CircleAlert size={16}/> RESEARCH DATA BOUNDARY</div><h2>Not a live game feed</h2><p>Local contest frames are displayed without estimating formations, coverage, coaches' intent, player assignments, or ball height. Gaps in frames remain gaps.</p><div className="gameday-evidence">Data use requires independent source licensing and attribution review before any public product deployment.</div></div>
+          <div className="gameday-panel"><div className="gameday-section-name">SELECTED OBSERVATION</div><div className="gameday-fact"><span>Entity</span><strong>{focused?.name??focused?.nfl_id??'Select a player'}</strong></div><div className="gameday-fact"><span>Team / side</span><strong>{focused?.team??'unavailable'} / {focused?.side??'unknown'}</strong></div><div className="gameday-fact"><span>Position</span><strong>{focused?focused.x.toFixed(2)+' x '+focused.y.toFixed(2)+' yd':'—'}</strong></div><div className="gameday-fact"><span>Speed</span><strong>{focused?.speed_yards_per_s==null?'unavailable':focused.speed_yards_per_s.toFixed(1)+' yd/s'}</strong></div></div>
+        </div>
+      </section>
+      <aside className="gameday-sidebar">
+        <div className="gameday-panel"><div className="gameday-aside-heading"><div><Activity size={17}/><h2>Source events</h2></div></div><p className="gameday-muted">Only labels supplied by the original tracking CSV.</p><div className="gameday-event-list">{recordedEvents.length?recordedEvents.slice(0,50).map((m,i)=><button key={i} className={time>=m.t?'seen':''} onClick={()=>{setTime(m.t);setRunning(false);}}><span className="gameday-event-time">{m.t.toFixed(1)}s</span><div><strong>{m.label}</strong><small>Recorded frame {m.frame_id}</small></div></button>):<p>No annotated events available.</p>}</div></div>
+        <div className="gameday-panel"><div className="gameday-aside-heading"><div><CircleAlert size={17}/><h2>Coverage and evidence</h2></div></div><div className="gameday-fact"><span>Frame coverage</span><strong>{(replay.frame_coverage*100).toFixed(1)}%</strong></div><div className="gameday-fact"><span>Source</span><strong>{replay.source}</strong></div><div className="gameday-fact"><span>License declaration</span><strong>{replay.source_license_identifier}</strong></div><div className="gameday-fact"><span>Game</span><strong>{replay.game_id}/{replay.play_id}</strong></div><p>Data are user supplied, not independently authenticated. No player grades or coaching classifications are generated.</p></div>
+      </aside>
+    </div>
+  </main>;
+}
