@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Activity, ArrowLeft, CheckCircle2, CircleAlert, Pause, Play, RotateCcw } from 'lucide-react';
 import '../gameday-lab.css';
 import { FootballField3D, type Field3DPlayer, type Field3DTrail } from './FootballField3D';
-import { trackingFocus } from './football3dMath';
+import { trackingFocus, sourceSnapIndex, observedTrailSegments } from './football3dMath';
 
 export interface TrackedEntity {
   nfl_id: string | null;
@@ -93,7 +93,7 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
   const [showSnap,setShowSnap]=useState(true);
   const [focus,setFocus]=useState<string|null>(null);
   const duration=replay.frames[replay.frames.length-1].t_seconds_nominal;
-  const snapFrame=useMemo(()=>replay.frames.find(f=>f.events.some(e=>['ball_snap','snap_direct','snap'].includes(e.toLowerCase())))??null,[replay]);
+  const snapFrame=useMemo(()=>{const i=sourceSnapIndex(replay.frames);return i<0?null:replay.frames[i];},[replay]);
   const snapPlayers=useMemo<Field3DPlayer[]>(()=>snapFrame?snapFrame.players.filter(p=>p.nfl_id).map(p=>({
     id:p.nfl_id!,x:p.x,y:p.y,jersey:p.jersey,name:p.name,team:p.team,
     side:p.side==='offense'||p.side==='defense'?p.side:null,
@@ -105,21 +105,7 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
     id:p.nfl_id!,x:p.x,y:p.y,jersey:p.jersey,name:p.name,team:p.team,
     side:p.side==='offense'||p.side==='defense'?p.side:null,
   })),[frame]);
-  const sceneTrails=useMemo(()=>{
-    const out:Field3DTrail[]=[];
-    const startFrame=Math.max(1,currentIndex-30);
-    for(let k=startFrame;k<=currentIndex;k++){
-      const prior=replay.frames[k-1],next=replay.frames[k];
-      if(!prior||next.frame_id!==prior.frame_id+1)continue;
-      const index=new Map(prior.players.filter(p=>p.nfl_id).map(p=>[p.nfl_id!,p]));
-      for(const p of next.players){
-        const before=p.nfl_id?index.get(p.nfl_id):null;
-        if(!before||!p.nfl_id)continue;
-        out.push({id:p.nfl_id,from:[before.x,before.y],to:[p.x,p.y],side:p.side==='offense'||p.side==='defense'?p.side:null});
-      }
-    }
-    return out;
-  },[currentIndex,replay]);
+  const sceneTrails=useMemo<Field3DTrail[]>(()=>observedTrailSegments(replay.frames,currentIndex),[currentIndex,replay]);
   const recordedEvents=useMemo(()=>replay.frames.flatMap(f=>f.events.map(label=>({t:f.t_seconds_nominal,label,frame_id:f.frame_id}))),[replay]);
   useEffect(()=>{
     if(!running)return;
