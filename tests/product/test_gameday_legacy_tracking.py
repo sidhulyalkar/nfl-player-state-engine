@@ -75,7 +75,8 @@ def test_original_bdb_does_not_infer_possession(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(("field", "value", "match"), [
     ("x", "122", "Out-of-bounds"),
-    ("x", "nan", "non-finite"),
+    ("x", "nan", "Out-of-bounds"),
+    ("x", "inf", "non-finite"),
     ("team", "CHI", "Invalid home/away"),
     ("frame.id", "0", "positive"),
 ])
