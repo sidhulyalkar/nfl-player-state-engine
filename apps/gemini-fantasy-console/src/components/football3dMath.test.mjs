@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   fieldPoint, defaultOrbit, orbitCamera, projectToScreen, lensUniforms,
-  trackingFocus, trackingDistance, norm, cross, dot, clamp,
+  trackingFocus, trackingDistance, sourceSnapIndex, observedTrailSegments, norm, cross, dot, clamp,
 } from './football3dMath.ts';
 
 test('real NFL yards map to centered world coordinates without rescaling', () => {
@@ -52,4 +52,23 @@ test('Euclidean separation is grounded in yards, not a coverage inference', () =
   assert.equal(trackingDistance({x:30,y:30},{x:30,y:30}),0);
   assert.equal(clamp(360,40,260),260);
   assert.deepEqual(norm(cross([1,0,0],[0,1,0])),[0,0,1]);
+});
+
+test('only source-tagged snap frames become alignment anchors',()=>{
+  assert.equal(sourceSnapIndex([{events:['pass_forward']},{events:[]},{events:['BALL_SNAP']}]),2);
+  assert.equal(sourceSnapIndex([{events:['pass_forward']},{events:[]}]),-1);
+});
+test('recorded trails do not bridge missing frames or absent player identity',()=>{
+  const frames=[
+    {frame_id:1,players:[{nfl_id:'WR',x:40,y:10,side:'offense'},{nfl_id:'CB',x:44,y:10,side:'defense'}]},
+    {frame_id:2,players:[{nfl_id:'WR',x:40.2,y:11,side:'offense'},{nfl_id:'CB',x:43.8,y:11,side:'defense'}]},
+    {frame_id:4,players:[{nfl_id:'WR',x:45,y:13,side:'offense'}]},
+    {frame_id:5,players:[{nfl_id:'WR',x:46,y:14,side:'offense'},{nfl_id:'OTHER',x:47,y:13,side:'defense'}]},
+  ];
+  const result=observedTrailSegments(frames,3);
+  assert.equal(result.length,3);
+  assert.deepEqual(result.map(p=>p.id),['WR','CB','WR']);
+  assert.deepEqual(result[2].from,[45,13]);
+  assert.deepEqual(result[2].to,[46,14]);
+  assert.ok(!result.some(p=>p.from[0]===40.2&&p.to[0]===45));
 });
