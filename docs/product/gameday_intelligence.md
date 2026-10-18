@@ -1,6 +1,6 @@
 # GameDay Intelligence: product and research specification
 
-Status: **first vertical slice on feat/gameday-intelligence-lab** (illustrative UI only; NOT live ingestion, NOT verified tracking, NOT validated grading).
+Status: **initial GameDay UI and user-supplied historical research replay import on feat/gameday-intelligence-lab**. No live NFL ingestion, no independent license verification, no validated ratings.
 
 ## 1. Product intent
 
@@ -22,7 +22,9 @@ Build on:
 - Authoritative projection, league and decision logic: FastAPI Player State Engine
 - Immutable, point-in-time and source-authority design principles in AGENTS.md
 
-The added GameDayLab component is a **deterministic synthetic teaching surface**: three play types, 22 position markers, replay scrubber, alternate projected camera views, routes, movement, point events, and evidence warnings. It is a projected SVG field, NOT a Three.js geometry engine or measured NFL replay. Names, scoreboard and event outcomes are fictional. Do not wire its invented frames or results into forecasts, API snapshots, or grades.
+GameDayLab contains a **deterministic synthetic teaching surface**: three play types, 22 position markers, replay scrubber, alternate projected camera views, routes, movement, point events, and evidence warnings. It is a projected SVG field, NOT a Three.js geometry engine or measured NFL replay. Names, scoreboard and event outcomes are fictional. Do not wire its invented frames or results into forecasts, API snapshots, or grades.
+
+An adjacent **HistoricalReplayPanel** renders authorized, locally supplied Big Data Bowl 2025 recorded coordinates in the same workspace, with observed trails, frame-gap reporting, IDs, a scrubber and event tags. This is a separate `HISTORICAL_RESEARCH` mode, not the simulated football play. The JSON upload remains local to the browser; it is not pushed to a server.
 
 ## 3. Data sources / access
 
@@ -192,12 +194,30 @@ Models:
 
 ## 10. Execution sequence
 
-0. **Implemented this branch**: GameDay UI shell and deterministic illustrative plays, with workspace navigation.
-1. Build typed replay schema, sample Big Data Bowl importer, field coordinate golden tests, provenance badges.
-2. Implement a real historical licensed/authorized tracking replay and frame-level confidence checks.
+0. **Implemented this branch**: GameDay UI shell, three deterministic illustrative plays, historical BDB 2025 CSV normalizer, browser-local research JSON upload, recorded x/y playback and source-rights gates.
+1. Refine typed replay schema, field coordinate golden screenshots, positional calibration, source coverage tests and provenance badges.
+2. Exercise a real historical authorized tracking file (not just synthetic importer fixtures), audit motion, player IDs and per-frame coverage.
 3. Add live PBP provider adapter under explicit licensed terms, notifications and multi-game command center.
 4. Replace projected SVG with full Three.js camera/field/player system, retaining fallback.
 5. Pilot role-specific play contribution benchmarks on charted data and only then surface validated 1–10 provisional grades.
 6. Connect change signals to Sleeper/other league snapshots, rest-of-week distributions and fantasy decision deltas.
 
 The source license review, provider credentials, streaming host, licensed tracking access, and real grading evidence are dependencies. This branch supplies none of those, and must not be described as a live NFL solution.
+
+## 11. Using the historical local replay (implemented)
+
+Get a local `tracking_week_N.csv` from the Big Data Bowl 2025 contest subject to its access/rights terms. Review license and permitted use. No dataset or player positions are redistributed in this repository.
+
+```bash
+python scripts/import_bdb_tracking.py \
+  --csv /path/to/tracking_week_1.csv \
+  --game-id YOUR_GAME_ID --play-id YOUR_PLAY_ID \
+  --possession-team YOUR_OFFENSE_ABBR \
+  --license-id "reviewed-source-terms" \
+  --acknowledge-source-terms \
+  --output /tmp/recorded-play.json
+```
+
+Open the modelling console, select **GameDay Lab**, and choose **Load historical replay JSON**. Select `/tmp/recorded-play.json`. The imported tracking frames, recorded events, source checksum, game/play IDs and missing-frame count will be displayed. Playback does not invent missing x/y positions or ball elevation. No coaching intent or player ratings are inferred.
+
+The adapter currently targets only the **2025 BDB full tracking** camelCase schema, not the **2026 BDB prediction** pre-throw/post-throw segmented schema. Adapting the latter requires a separate explicit frame-offset and temporal synchronization protocol. This import does not train the Player State Engine or license a commercial product.
