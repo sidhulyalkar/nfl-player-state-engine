@@ -90,7 +90,7 @@ export function trackingFocus(points: readonly {x:number;y:number}[]): Vec3 {
   if (!points.length) return [0,0,0];
   const xs=points.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.y));
   if (!xs.length) return [0,0,0];
-  const sum = xs.reduce((v,p)=>[v[0]+p.x,v[1]+p.y] as const,[0,0] as const);
+  const sum = xs.reduce<[number,number]>((v,p)=>[v[0]+p.x,v[1]+p.y],[0,0]);
   return [clamp(sum[0]/xs.length - 60,-40,40),0,clamp(sum[1]/xs.length - FIELD_WIDTH/2,-15,15)];
 }
 export function trackingDistance(a:{x:number;y:number},b:{x:number;y:number}):number {
