@@ -13,8 +13,7 @@ import json
 import os
 import tempfile
 import threading
-import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
