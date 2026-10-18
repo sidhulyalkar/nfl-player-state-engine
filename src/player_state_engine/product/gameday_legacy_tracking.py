@@ -21,6 +21,12 @@ REQUIRED_COLUMNS = {"gameId", "playId", "nflId", "frame.id", "x", "y", "team"}
 SOURCE = "NFL Football Operations Big Data Bowl 2019 example (2017 tracking)"
 
 
+def _maybe_number(value: str | None) -> float | None:
+    if value is None or str(value).strip().lower() in {"", "na", "n/a", "nan", "null", "none"}:
+        return None
+    return _optional_number(value)
+
+
 def import_bdb_2019_example(
     csv_path: str | Path,
     *,
@@ -78,8 +84,8 @@ def import_bdb_2019_example(
                 raise ValueError("Duplicate identity within a recorded frame.")
             frame_seen.add(unique)
 
-            x = _optional_number(row["x"])
-            y = _optional_number(row["y"])
+            x = _maybe_number(row["x"])
+            y = _maybe_number(row["y"])
             if (
                 x is None or y is None
                 or not 0 <= x <= FIELD_LENGTH_YARDS
@@ -108,10 +114,10 @@ def import_bdb_2019_example(
                 "x": x,
                 "y": y,
                 "z": None,
-                "speed_yards_per_s": _optional_number(row.get("s")),
-                "acceleration_yards_per_s2": _optional_number(row.get("a")),
-                "orientation_deg": _optional_number(row.get("o")),
-                "movement_dir_deg": _optional_number(row.get("dir")),
+                "speed_yards_per_s": _maybe_number(row.get("s")),
+                "acceleration_yards_per_s2": _maybe_number(row.get("a")),
+                "orientation_deg": _maybe_number(row.get("o")),
+                "movement_dir_deg": _maybe_number(row.get("dir")),
                 "observed": True,
             }
             frame_entities.setdefault(frame_id, []).append(entity)
