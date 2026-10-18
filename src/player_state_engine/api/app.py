@@ -16,6 +16,7 @@ from player_state_engine.product.league_picture import (
     league_power_rankings,
     roster_needs,
 )
+from player_state_engine.api.sunday_board_routes import install_sunday_board_routes
 from player_state_engine.product.nfl_state import build_nfl_state
 from player_state_engine.product.provenance import (
     frame_records,
@@ -391,6 +392,7 @@ def create_app(
             )
         return response
 
+    install_sunday_board_routes(app)
     return app
 
 
