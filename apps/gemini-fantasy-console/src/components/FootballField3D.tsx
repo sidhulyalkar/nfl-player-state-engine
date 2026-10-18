@@ -259,10 +259,10 @@ class Renderer {
     gl.clearColor(.035,.07,.11,1);
     gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
     gl.useProgram(this.program);
-    gl.uniform3fv(this.eye,camera.eye);
-    gl.uniform3fv(this.right,camera.right);
-    gl.uniform3fv(this.up,camera.up);
-    gl.uniform3fv(this.forward,camera.forward);
+    gl.uniform3fv(this.eye,new Float32Array(camera.eye));
+    gl.uniform3fv(this.right,new Float32Array(camera.right));
+    gl.uniform3fv(this.up,new Float32Array(camera.up));
+    gl.uniform3fv(this.forward,new Float32Array(camera.forward));
     gl.uniform4fv(this.lens,lensUniforms(camera));
     this.bind(this.turf);
     gl.drawArrays(gl.TRIANGLES,0,this.turfCount);
