@@ -34,6 +34,8 @@ interface Props {
   showLabels?: boolean;
   showTrails?: boolean;
   showNearest?: boolean;
+  snapPlayers?: readonly Field3DPlayer[];
+  showSnap?: boolean;
   synthetic?: boolean;
   onUnsupported?: () => void;
 }
@@ -151,6 +153,12 @@ function buildActors(p:Props):Float32Array {
       if(!a||!b||Math.hypot(a[0]-b[0],a[2]-b[2])>9)continue;
       const color=seg.side==='offense'?OFFENSE:seg.side==='defense'?DEFENSE:UNKNOWN;
       m.line(a[0],a[2],b[0],b[2],.24,.09,color);
+    }
+  }
+  if(p.showSnap && p.snapPlayers?.length){
+    for(const observed of p.snapPlayers){
+      const pos=safeField(observed.x,observed.y,.13);
+      if(pos)m.ring(pos[0],pos[2],1.03,.11,.13,[.78,.83,.86]);
     }
   }
   const focused=p.players.find(x=>x.id===p.selectedId&&x.side);
@@ -325,7 +333,7 @@ export function FootballField3D(props:Props) {
     if(renderer&&canvas&&overlay)renderer.draw(orbitRef.current,propsRef.current,canvas,overlay);
   },[]);
   useEffect(()=>{setOrbit(defaultOrbit(props.preset,props.focus));},[props.preset,props.focus]);
-  useEffect(()=>{draw();},[draw,orbit,props.players,props.ball,props.trails,props.selectedId,props.showTrails,props.showLabels,props.showNearest]);
+  useEffect(()=>{draw();},[draw,orbit,props.players,props.ball,props.trails,props.selectedId,props.showTrails,props.showLabels,props.showNearest,props.snapPlayers,props.showSnap]);
   useEffect(()=>{
     const canvas=canvasRef.current;
     if(!canvas)return;
