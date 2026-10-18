@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, ArrowLeft, CheckCircle2, CircleAlert, Pause, Play, RotateCcw } from 'lucide-react';
 import '../gameday-lab.css';
-import { FootballField3D, type Field3DTrail } from './FootballField3D';
+import { FootballField3D, type Field3DPlayer, type Field3DTrail } from './FootballField3D';
 import { trackingFocus } from './football3dMath';
 
 export interface TrackedEntity {
@@ -95,7 +95,7 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
   const currentIndex=activeFrame(replay.frames,time);
   const frame=replay.frames[currentIndex];
   const fieldFocus=useMemo(()=>trackingFocus(replay.frames[0].players),[replay]);
-  const scenePlayers=useMemo(()=>frame.players.filter(p=>p.nfl_id).map(p=>({
+  const scenePlayers=useMemo<Field3DPlayer[]>(()=>frame.players.filter(p=>p.nfl_id).map(p=>({
     id:p.nfl_id!,x:p.x,y:p.y,jersey:p.jersey,name:p.name,team:p.team,
     side:p.side==='offense'||p.side==='defense'?p.side:null,
   })),[frame]);
