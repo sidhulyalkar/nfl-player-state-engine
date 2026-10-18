@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import { Activity, Bell, ChevronRight, CircleAlert, Maximize2, Pause, Play, RotateCcw, Shield, SlidersHorizontal, Target, Zap } from 'lucide-react';
 import '../gameday-lab.css';
+import { HistoricalReplayPanel, parseHistoricalReplay, type HistoricalReplay } from './HistoricalReplayPanel';
 
 /**
  * Illustrative data only. Production tracking adapters must carry a separate
@@ -192,6 +193,22 @@ function Field({ play, time, camera, overlays, onPlayer }: {
   </svg>;
 }
 export function GameDayLab() {
+  const [historical,setHistorical] = useState<HistoricalReplay|null>(null);
+  const [importError,setImportError] = useState<string|null>(null);
+  async function onReplayFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    event.target.value = '';
+    try {
+      if (file.size > 25_000_000) throw new Error('Replay JSON exceeds the 25 MB safety limit.');
+      const replay = parseHistoricalReplay(JSON.parse(await file.text()) as unknown);
+      setImportError(null);
+      setHistorical(replay);
+      setPlaying(false);
+    } catch (reason) {
+      setImportError(reason instanceof Error ? reason.message : 'Invalid replay file');
+    }
+  }
   const [index,setIndex] = useState(0);
   const [time,setTime] = useState(0);
   const [playing,setPlaying] = useState(true);
@@ -218,11 +235,12 @@ export function GameDayLab() {
   const selectPlay=(i:number)=>{setIndex(i);setTime(0);setPlaying(true);setSelected(i===1?'rb':i===2?'qb':'wr1');};
   const toggle=(v:Overlay)=>setOverlays(old=>{const next=new Set(old);if(next.has(v))next.delete(v);else next.add(v);return next;});
   const focused=roster.find(p=>p.id===selected)!;
-  return <main className="gameday-page">
+  return historical ? <HistoricalReplayPanel replay={historical} onBack={()=>{setHistorical(null);setTime(0);setPlaying(true);}}/> : <main className="gameday-page">
     <header className="gameday-head">
       <div><div className="gameday-kicker"><Activity size={15}/> FOURTH DOWN LAB / GAMEDAY</div><h1>See the game beneath the game.</h1><p>Replay the formation. Explore the decisions. Understand the contributions.</p></div>
-      <div className="gameday-source"><span className="gameday-source-dot"/><div><strong>Synthetic demonstration</strong><small>Not a live game or licensed tracking feed</small></div></div>
+      <div className="gameday-history-actions"><label className="gameday-history-upload">Load historical replay JSON<input type="file" accept=".json,application/json" onChange={event=>{void onReplayFile(event);}}/></label><div className="gameday-source"><span className="gameday-source-dot"/><div><strong>Synthetic demonstration</strong><small>Not a live game or licensed tracking feed</small></div></div></div>
     </header>
+    {importError && <div className="gameday-import-error" role="alert">{importError}</div>}
     <div className="gameday-layout">
       <section className="gameday-main">
         <div className="gameday-scoreline"><div><span className="gameday-team-mark">O</span><div><strong>{play.offense}</strong><small>OFFENSE</small></div><b>21</b></div><div className="gameday-situation"><span>DEMO PLAY</span><strong>{play.down}</strong><small>Q3 · 08:42 · ILLUSTRATIVE SCORE</small></div><div><b>17</b><div><strong>{play.defense}</strong><small>DEFENSE</small></div><span className="gameday-team-mark secondary">F</span></div></div>
