@@ -16,6 +16,12 @@ Branch: feat/gameday-webgl-field, stacked on feat/free-bdb-tracking-playlab (PR 
   frame pairs only.
 - Snapshots can show movement trails, team colors, and a geometric nearest
   opponent line for roles with source-confirmed offense and defense sides.
+- **Snap formation:** only if a recorded frame has an explicit ball_snap, snap,
+  or snap_direct source event, the user can jump directly to it, overlay ghost
+  rings at its recorded player positions, and inspect selected-player straight-
+  line displacement since snap. No phantom presnap alignment is created when
+  the source omits a snap event. These rings do not classify defensive coverage.
+- Pure frame-join tests ensure movement trails never bridge missing frame IDs.
 - No ball height is inferred from 2D tracking. Ball is drawn on/near the ground
   and labeled **height unknown**, NOT on an invented throw trajectory.
 - WebGL2 unavailable/context loss -> return to existing working SVG 2D mode.
