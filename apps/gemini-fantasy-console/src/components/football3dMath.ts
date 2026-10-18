@@ -96,3 +96,47 @@ export function trackingFocus(points: readonly {x:number;y:number}[]): Vec3 {
 export function trackingDistance(a:{x:number;y:number},b:{x:number;y:number}):number {
   return Math.hypot(a.x-b.x,a.y-b.y);
 }
+
+/** A snap alignment exists only if an explicit source event marks it. */
+export function sourceSnapIndex(frames: readonly {events:readonly string[]}[]): number {
+  return frames.findIndex(f=>f.events.some(e=>['ball_snap','snap','snap_direct'].includes(e.toLowerCase())));
+}
+interface TrackingObservation {
+  nfl_id:string|null;
+  x:number;
+  y:number;
+  side:string|null;
+}
+export interface RecordedTrackFrame {
+  frame_id:number;
+  players: readonly TrackingObservation[];
+}
+export interface ObservedSegment {
+  id:string;
+  from: readonly [number,number];
+  to: readonly [number,number];
+  side:'offense'|'defense'|null;
+}
+/** Exact recorded adjacent-frame positions only. No interpolation or extrapolation. */
+export function observedTrailSegments(
+  frames:readonly RecordedTrackFrame[],atIndex:number,lookback=30,
+):ObservedSegment[]{
+  const result:ObservedSegment[]=[];
+  const end=Math.min(atIndex,frames.length-1);
+  for(let k=Math.max(1,end-lookback);k<=end;k++){
+    const before=frames[k-1],after=frames[k];
+    if(!before||!after||after.frame_id!==before.frame_id+1)continue;
+    const previous=new Map(before.players.filter(p=>p.nfl_id).map(p=>[p.nfl_id!,p]));
+    for(const p of after.players){
+      if(!p.nfl_id)continue;
+      const src=previous.get(p.nfl_id);
+      if(!src)continue;
+      if(![src.x,src.y,p.x,p.y].every(Number.isFinite))continue;
+      result.push({
+        id:p.nfl_id,from:[src.x,src.y],to:[p.x,p.y],
+        side:p.side==='offense'||p.side==='defense'?p.side:null,
+      });
+    }
+  }
+  return result;
+}
