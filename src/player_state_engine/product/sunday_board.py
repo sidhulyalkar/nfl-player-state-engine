@@ -103,7 +103,7 @@ def refresh_schedule(
         except (FileNotFoundError, ValueError, OSError):
             meta = {}
         last = _timestamp(meta.get("fetched_at_utc"))
-        if csv_path.exists() and last and (current - last).total_seconds() < MIN_REFRESH_SECONDS:
+        if csv_path.exists() and last and 0 <= (current - last).total_seconds() < MIN_REFRESH_SECONDS:
             return {"refreshed": False, "throttled": True, "error": None}
         try:
             payload = (fetcher or _download_public_schedule)()
@@ -124,7 +124,7 @@ def _score(value: str | None) -> int | None:
     if value is None or str(value).strip() in {"", "NA", "NaN"}:
         return None
     try:
-        n = int(float(value))
+        n = int(value)
     except (ValueError, TypeError):
         return None
     return n if 0 <= n < 200 else None
@@ -234,6 +234,8 @@ def build_sunday_board(
     age = max(0., (current - fetched).total_seconds()) if fetched else None
     checksum = hashlib.sha256(raw).hexdigest()
     integrity = bool(meta.get("sha256") == checksum)
+    if not integrity:
+        raise ValueError("Public schedule cache integrity check failed; refresh required.")
     normalized = normalize_schedule(rows, season=season, week=week, now=current)
     return {
         "schema_version": 1,
