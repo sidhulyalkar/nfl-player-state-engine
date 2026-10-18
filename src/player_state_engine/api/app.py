@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from player_state_engine.api.sunday_board_routes import install_sunday_board_routes
 from player_state_engine.data.io import read_table
 from player_state_engine.fantasy.decision_board import DecisionType, build_decision_board
 from player_state_engine.fantasy.decisions import optimize_lineup, rank_waiver_candidates
@@ -16,7 +17,6 @@ from player_state_engine.product.league_picture import (
     league_power_rankings,
     roster_needs,
 )
-from player_state_engine.api.sunday_board_routes import install_sunday_board_routes
 from player_state_engine.product.nfl_state import build_nfl_state
 from player_state_engine.product.provenance import (
     frame_records,
