@@ -85,3 +85,13 @@
 .gameday-footer {font-size:10px;color:#688194;letter-spacing:.1em;margin-top:23px;text-align:center;}
 @media(max-width:1160px){.gameday-layout{grid-template-columns:1fr}.gameday-sidebar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));}.gameday-sidebar>.gameday-panel{min-width:0}}
 @media(max-width:700px){.gameday-head{align-items:flex-start;flex-direction:column}.gameday-scoreline{padding:12px;gap:5px}.gameday-scoreline>div{gap:5px}.gameday-team-mark{width:28px;height:28px}.gameday-scoreline b{font-size:20px}.gameday-scoreline strong{font-size:10px}.gameday-situation small{display:none!important}.gameday-toolbar{top:6px;left:6px;right:6px}.gameday-toolbar strong{font-size:9px;padding:6px}.gameday-toolbar select{font-size:10px;max-width:138px}.gameday-event-pill{font-size:10px;padding:8px;bottom:8px;left:8px}.gameday-lower,.gameday-sidebar{grid-template-columns:1fr}.gameday-lower>.gameday-panel:first-child{border-right:0;border-bottom:1px solid var(--gd-edge)}.gameday-controlbar{gap:7px;padding:11px 7px}.gameday-player-controls{gap:3px}.gameday-player-controls button{width:28px;height:28px}.gameday-controlbar select{padding:5px;font-size:10px}.gameday-controlbar input[type=range]{width:60px}.gameday-panel{padding:15px}}
+
+.gameday-history-actions {display:flex;align-items:center;gap:12px;}
+.gameday-history-actions>button,.gameday-history-upload {display:inline-flex;align-items:center;gap:7px;cursor:pointer;background:#182f3e;color:#aee9d6;border:1px solid #325c61;border-radius:9px;padding:12px 14px;font-size:12px;white-space:nowrap;}
+.gameday-history-upload input {position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;}
+.gameday-history-upload:focus-within {outline:2px solid #8ee3ca;outline-offset:2px;}
+.gameday-import-error {margin-bottom:15px;border:1px solid rgba(237,141,126,.5);background:#372628;color:#ffcfca;padding:12px 16px;border-radius:8px;font-size:12px;}
+.gameday-history-meta {display:flex;align-items:center;flex-wrap:wrap;gap:14px;padding:17px 20px;font-size:12px;color:#b1ccd5;}
+.gameday-history-meta span {display:inline-flex;align-items:center;gap:6px;}
+.gameday-history-meta svg {color:#65e7c1;}
+@media(max-width:850px){.gameday-history-actions{align-items:flex-start;flex-direction:column;}.gameday-history-actions>.gameday-source{width:100%;}}
