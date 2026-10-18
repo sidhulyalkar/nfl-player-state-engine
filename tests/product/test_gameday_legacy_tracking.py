@@ -108,3 +108,12 @@ def test_original_tracking_missing_play_fails_closed(tmp_path: Path) -> None:
             path, game_id="2017090700", play_id="9999",
             license_acknowledged=True, license_identifier="reviewed",
         )
+
+def test_original_tracking_missing_optional_numbers_are_not_invented(tmp_path: Path) -> None:
+    data = _rows()
+    data[0]["s"] = "NA"
+    data[0]["o"] = "NA"
+    replay = _convert(_write(tmp_path / "sample.csv", data))
+    entity = replay["frames"][0]["players"][0]
+    assert entity["speed_yards_per_s"] is None
+    assert entity["orientation_deg"] is None
