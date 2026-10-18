@@ -9,7 +9,10 @@ test('real NFL yards map to centered world coordinates without rescaling', () =>
   assert.deepEqual(fieldPoint(0,0),[-60,0,-26.65]);
   assert.deepEqual(fieldPoint(60,26.65),[0,0,0]);
   assert.deepEqual(fieldPoint(120,53.3),[60,0,26.65]);
-  assert.deepEqual(fieldPoint(50,20,1.6),[-10,1.6,-6.649999999999999].map((x)=>Number(x.toFixed(9))));
+  const point=fieldPoint(50,20,1.6);
+  assert.equal(point[0],-10);
+  assert.equal(point[1],1.6);
+  assert.ok(Math.abs(point[2]+6.65)<1e-9);
 });
 test('invalid tracking points fail closed rather than appearing on field', () => {
   for (const args of [[-1,12],[120.01,12],[20,53.31],[NaN,1],[1,Infinity]]) {
@@ -40,7 +43,8 @@ test('camera rejects degenerate aspect ratios and behind-camera points', () => {
 });
 test('focus uses observed positions and caps camera target; never invents scrimmage', () => {
   assert.deepEqual(trackingFocus([]),[0,0,0]);
-  assert.deepEqual(trackingFocus([{x:50,y:23},{x:70,y:30.3}]),[0,0,0]);
+  const center=trackingFocus([{x:50,y:23},{x:70,y:30.3}]);
+  assert.ok(center.every((v)=>Math.abs(v)<1e-9));
   assert.deepEqual(trackingFocus([{x:120,y:53.3}]),[40,0,15]);
 });
 test('Euclidean separation is grounded in yards, not a coverage inference', () => {
