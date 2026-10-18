@@ -8,11 +8,12 @@ import { LeagueOnboardingPanel } from './components/LeagueOnboardingPanel';
 import { ModelObservatoryPortal } from './components/ModelObservatoryPortal';
 import { ModelShowcasePortal } from './components/ModelShowcasePortal';
 import { NflHubPortal } from './components/NflHubPortal';
+import { GameDayLab } from './components/GameDayLab';
 import { PortfolioPortal } from './components/PortfolioPortal';
 import './workspace.css';
 import './shadow-workspace.css';
 
-type Surface = 'draft' | 'nfl' | 'intelligence' | 'portfolio' | 'league' | 'showcase' | 'model';
+type Surface = 'draft' | 'gameday' | 'nfl' | 'intelligence' | 'portfolio' | 'league' | 'showcase' | 'model';
 
 type WorkspaceRoute = {
   surface: Surface;
@@ -22,6 +23,7 @@ type WorkspaceRoute = {
 
 const surfaces: Array<{ key: Surface; label: string; description: string }> = [
   { key: 'draft', label: 'Draft Room', description: 'Live pick decisions' },
+  { key: 'gameday', label: 'GameDay Lab', description: 'Replay and football IQ' },
   { key: 'nfl', label: 'NFL Hub', description: 'What changed + impact' },
   { key: 'intelligence', label: 'Player Intelligence', description: 'Full player dossiers' },
   { key: 'portfolio', label: 'Portfolio', description: 'Cross-league exposure' },
@@ -73,6 +75,7 @@ export default function OperationalApp() {
     </nav>
     <div className="workspace-surface">
       {route.surface === 'draft' && <><LeagueOnboardingPanel/><DraftLaunchPanel/><DraftDayDoctorBanner/><DraftDecisionConsole onOpenConsole={() => navigate('league')} /></>}
+      {route.surface === 'gameday' && <GameDayLab/>}
       {route.surface === 'nfl' && <NflHubPortal/>}
       {route.surface === 'intelligence' && <IntelligencePortal initialLeagueId={route.leagueId} initialPlayerId={route.playerId}/>} 
       {route.surface === 'portfolio' && <PortfolioPortal/>}
