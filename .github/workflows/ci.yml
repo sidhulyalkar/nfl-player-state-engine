@@ -276,3 +276,5 @@ jobs:
           ROLLUP_VERSION="$(node -p "require('rollup/package.json').version")"
           npm install --no-save --package-lock=false "@rollup/rollup-linux-x64-gnu@$ROLLUP_VERSION"
       - run: npm run build
+      - name: Test WebGL football field coordinate and camera invariants
+        run: npm run test:field3d
