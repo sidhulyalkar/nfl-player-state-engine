@@ -160,7 +160,7 @@ function Field({ play, time, camera, overlays, onPlayer }: {
     <polygon points={fieldQuad(110,120,camera)} fill="#ff9c6a" opacity=".13"/>
     {Array.from({length:21},(_,i)=>i*5+10).map((x)=>{
       const a=project(x,0,0,camera);const b=project(x,53.3,0,camera);
-      return <g key={x}><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#dcefe8" opacity={x%10===0?.36:.14} strokeWidth={x%10===0?1.4:.8}/></g>;
+      return <g key={x}><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#dcefe8" opacity={x % 10 === 0 ? .36 : .14} strokeWidth={x % 10 === 0 ? 1.4 : .8}/></g>;
     })}
     {[10,20,30,40,50,60,70,80,90,100,110].map((x)=>{
       const p=project(x,26.65,0,camera);
@@ -168,7 +168,7 @@ function Field({ play, time, camera, overlays, onPlayer }: {
     })}
     {(()=>{const a=project(49,0,0,camera);const b=project(49,53.3,0,camera);return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#7eeac9" strokeWidth="3" strokeDasharray="7 5"/>;})()}
     {overlays.has('routes') && roster.filter((p)=>p.side==='offense' && ['WR','TE','RB'].includes(p.role)).map((p)=>
-      <path key={'route'+p.id} d={projectionPath(p,play.kind,camera)} stroke={p.id===selectedCarrier?'#f6cb6b':'#98b6fb'} strokeWidth={p.id===selectedCarrier?3:1.7} fill="none" strokeDasharray="7 7" opacity={p.id===selectedCarrier?.95:.48}/>
+      <path key={'route'+p.id} d={projectionPath(p,play.kind,camera)} stroke={p.id===selectedCarrier?'#f6cb6b':'#98b6fb'} strokeWidth={p.id===selectedCarrier?3:1.7} fill="none" strokeDasharray="7 7" opacity={p.id === selectedCarrier ? .95 : .48}/>
     )}
     {overlays.has('coverage') && roster.filter((p)=>p.side==='defense').map((p)=>
       <path key={'coverage'+p.id} d={projectionPath(p,play.kind,camera)} stroke="#f48e8e" strokeWidth="1.5" opacity=".35" strokeDasharray="3 6" fill="none"/>
@@ -229,7 +229,7 @@ export function GameDayLab() {
         <div className="gameday-field-shell">
           <div className="gameday-toolbar"><strong><Maximize2 size={14}/> Interactive 3D projection</strong><div><select aria-label="Camera angle" value={camera} onChange={e=>setCamera(e.target.value as Camera)}><option value="broadcast">Broadcast angle</option><option value="all22">All-22 perspective</option><option value="overhead">Overhead</option></select></div></div>
           <Field play={play} time={time} camera={camera} overlays={overlays} onPlayer={setSelected}/>
-          {currentMoment&&<div className={'gameday-event-pill '+(currentMoment.type==='result'?'impact':'')}><Zap size={15}/><span><strong>{currentMoment.label}</strong> {currentMoment.detail}</span></div>}
+          {!quiet && currentMoment && <div className={'gameday-event-pill '+(currentMoment.type==='result'?'impact':'')}><Zap size={15}/><span><strong>{currentMoment.label}</strong> {currentMoment.detail}</span></div>}
         </div>
         <div className="gameday-controlbar"><div className="gameday-player-controls"><button aria-label={playing?'Pause replay':'Play replay'} onClick={()=>{if(time>=play.duration)setTime(0);setPlaying(!playing);}}>{playing?<Pause size={18}/>:<Play size={18}/>}</button><button aria-label="Restart replay" onClick={()=>{setTime(0);setPlaying(true);}}><RotateCcw size={17}/></button><span>{time.toFixed(1)}s / {play.duration.toFixed(1)}s</span></div><input aria-label="Replay timeline" type="range" min="0" max={play.duration} step=".05" value={time} onChange={e=>{setTime(Number(e.target.value));setPlaying(false);}}/><select aria-label="Playback speed" value={speed} onChange={e=>setSpeed(Number(e.target.value))}><option value=".5">0.5×</option><option value="1">1×</option><option value="2">2×</option></select></div>
         <div className="gameday-overlays"><span><SlidersHorizontal size={15}/> Tactical layers</span>{(['routes','coverage','labels'] as Overlay[]).map(o=><button key={o} className={overlays.has(o)?'enabled':''} onClick={()=>toggle(o)} aria-pressed={overlays.has(o)}>{o==='routes'?'Offensive routes':o==='coverage'?'Defensive movement':'Player labels'}</button>)}</div>
