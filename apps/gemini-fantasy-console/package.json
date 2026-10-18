@@ -11,7 +11,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "server": "tsx server/index.ts",
-    "start": "node dist-server/server/index.js --production"
+    "start": "node dist-server/server/index.js --production",
+    "test:field3d": "node --experimental-strip-types --test src/components/football3dMath.test.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.0.0",
