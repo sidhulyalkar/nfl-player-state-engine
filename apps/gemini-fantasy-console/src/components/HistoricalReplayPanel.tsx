@@ -62,12 +62,25 @@ export function parseHistoricalReplay(value: unknown): HistoricalReplay {
     if (i>0 && (f.frame_id <= o.frames[i-1].frame_id || f.t_seconds_nominal < o.frames[i-1].t_seconds_nominal)) {
       throw new Error('Frames must have increasing source IDs and monotonic timestamps.');
     }
+    if (f.events.some(e=>typeof e!=='string' || e.length>128))throw new Error('Invalid source event labels.');
+    const observedIds=new Set<string>();
     for (const p of [...f.players,...(f.ball?[f.ball]:[])]) {
+      if (p.nfl_id != null && (typeof p.nfl_id!=='string' || !p.nfl_id))throw new Error('Invalid tracking player identity.');
+      if (p.nfl_id) {
+        if (observedIds.has(p.nfl_id))throw new Error('Duplicate tracked identity in recorded frame.');
+        observedIds.add(p.nfl_id);
+      }
+      for (const field of ['speed_yards_per_s','acceleration_yards_per_s2','orientation_deg','movement_dir_deg'] as const) {
+        const n=p[field];
+        if (n!=null && (typeof n!=='number' || !Number.isFinite(n)))throw new Error('Invalid numeric tracking observation: '+field);
+      }
       if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y) || p.x<0 || p.x>120 || p.y<0 || p.y>53.3) {
         throw new Error('Tracked entity is missing field-space coordinates.');
       }
     }
   }
+  if (typeof o.source!=='string' || !o.source.trim() || typeof o.source_license_identifier!=='string')throw new Error('Tracking source attribution is required.');
+  if (typeof o.frame_coverage!=='number' || !Number.isFinite(o.frame_coverage) || o.frame_coverage<=0 || o.frame_coverage>1)throw new Error('Invalid tracking coverage metadata.');
   return o as HistoricalReplay;
 }
 type Angle = 'broadcast' | 'all22' | 'overhead';
@@ -218,7 +231,7 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
               <option value="">Select a tracked player</option>
               {frame.players.filter(p=>p.nfl_id).map(p=><option key={p.nfl_id} value={p.nfl_id!}>{p.name??p.nfl_id} {p.jersey?'#'+p.jersey:''} {p.team?'('+p.team+')':''}</option>)}
             </select>
-          </label><div className="gameday-fact"><span>Entity</span><strong>{focused?.name??focused?.nfl_id??'Select a player'}</strong></div><div className="gameday-fact"><span>Team / side</span><strong>{focused?.team??'unavailable'} / {focused?.side??'unknown'}</strong></div><div className="gameday-fact"><span>Position</span><strong>{focused?focused.x.toFixed(2)+' x '+focused.y.toFixed(2)+' yd':'—'}</strong></div><div className="gameday-fact"><span>Speed</span><strong>{focused?.speed_yards_per_s==null?'unavailable':focused.speed_yards_per_s.toFixed(1)+' yd/s'}</strong></div>
+          </label><div className="gameday-fact"><span>Entity</span><strong>{focused?.name??focused?.nfl_id??'Select a player'}</strong></div><div className="gameday-fact"><span>Team / side</span><strong>{focused?.team??'unavailable'} / {focused?.side??'unknown'}</strong></div><div className="gameday-fact"><span>Position</span><strong>{focused?focused.x.toFixed(2)+' x '+focused.y.toFixed(2)+' yd':'—'}</strong></div>
           <div className="gameday-fact"><span>Straight-line displacement from snap</span><strong>{straightFromSnap==null?'Unavailable':straightFromSnap.toFixed(2)+' yd'}</strong></div><div className="gameday-fact"><span>Source-reported speed</span><strong>{focused?.speed_yards_per_s==null?'Unavailable':focused.speed_yards_per_s.toFixed(2)+' yd/s'}</strong></div>
           <div className="gameday-fact"><span>Adjacent-frame speed</span><strong>{currentMotion?currentMotion.computed_speed_yards_per_second.toFixed(2)+' yd/s':'Insufficient consecutive frames'}</strong></div>
           <div className="gameday-fact"><span>Source-reported acceleration</span><strong>{focused?.acceleration_yards_per_s2==null?'Unavailable':focused.acceleration_yards_per_s2.toFixed(2)+' yd/s²'}</strong></div>
