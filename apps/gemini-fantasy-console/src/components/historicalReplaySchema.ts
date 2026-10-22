@@ -44,7 +44,7 @@ export function parseHistoricalReplay(value: unknown): HistoricalReplay {
   if (!Array.isArray(o.frames) || !o.frames.length || o.frames.length > 25000) {
     throw new Error('Replay must include 1 to 25,000 recorded frames.');
   }
-  if (typeof o.game_id !== 'string' || typeof o.play_id !== 'string' || typeof o.source_file_sha256 !== 'string' || o.source_file_sha256.length !== 64) {
+  if (typeof o.game_id !== 'string' || typeof o.play_id !== 'string' || typeof o.source_file_sha256 !== 'string' || !/^[a-fA-F0-9]{64}$/.test(o.source_file_sha256)) {
     throw new Error('Replay identity and source SHA-256 are required.');
   }
   if (o.frame_count !== o.frames.length) throw new Error('Recorded frame count does not match the payload.');
@@ -57,6 +57,8 @@ export function parseHistoricalReplay(value: unknown): HistoricalReplay {
       throw new Error('Frames must have increasing source IDs and monotonic timestamps.');
     }
     if (f.events.some(e=>typeof e!=='string' || e.length>128))throw new Error('Invalid source event labels.');
+    if (f.ball && (f.ball.nfl_id!==null || f.ball.is_ball!==true))throw new Error('Ball identity is not consistent with source semantics.');
+    if (f.players.some(p=>p && (p.is_ball===true || p.nfl_id==null)))throw new Error('Recorded player identities cannot be ball identities.');
     const observedIds=new Set<string>();
     for (const p of [...f.players,...(f.ball?[f.ball]:[])]) {
       if (!p || typeof p!=='object')throw new Error('Invalid tracked entity object.');
@@ -74,6 +76,8 @@ export function parseHistoricalReplay(value: unknown): HistoricalReplay {
       }
     }
   }
+  const span=o.frames[o.frames.length-1].frame_id-o.frames[0].frame_id+1;
+  if (o.missing_frame_count!==span-o.frames.length || Math.abs(o.frame_coverage!-o.frames.length/span)>1e-5)throw new Error('Tracking coverage metadata disagrees with frame IDs.');
   if (typeof o.source!=='string' || !o.source.trim() || typeof o.source_license_identifier!=='string')throw new Error('Tracking source attribution is required.');
   if (typeof o.frame_coverage!=='number' || !Number.isFinite(o.frame_coverage) || o.frame_coverage<=0 || o.frame_coverage>1)throw new Error('Invalid tracking coverage metadata.');
   return o as HistoricalReplay;
