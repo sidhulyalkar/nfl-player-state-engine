@@ -65,6 +65,7 @@ export function parseHistoricalReplay(value: unknown): HistoricalReplay {
     if (f.events.some(e=>typeof e!=='string' || e.length>128))throw new Error('Invalid source event labels.');
     const observedIds=new Set<string>();
     for (const p of [...f.players,...(f.ball?[f.ball]:[])]) {
+      if (!p || typeof p!=='object')throw new Error('Invalid tracked entity object.');
       if (p.nfl_id != null && (typeof p.nfl_id!=='string' || !p.nfl_id))throw new Error('Invalid tracking player identity.');
       if (p.nfl_id) {
         if (observedIds.has(p.nfl_id))throw new Error('Duplicate tracked identity in recorded frame.');
