@@ -12,6 +12,7 @@ function valid() {
     source_license_identifier:'reviewed-source-terms',
     source_file_sha256:'a'.repeat(64),
     frame_count:2,
+    missing_frame_count:0,
     frame_coverage:1,
     frames:[
       {frame_id:1,t_seconds_nominal:0,events:['ball_snap'],players:[
@@ -57,4 +58,16 @@ test('reject bad frame timing, boundaries and coverage metadata',()=>{
   assert.throws(()=>parseHistoricalReplay(b),/field-space coordinates/);
   const c=valid();c.frame_coverage=1.25;
   assert.throws(()=>parseHistoricalReplay(c),/coverage/);
+});
+
+test('coverage must match missing frames and exact recorded frame IDs',()=>{
+  const x=valid();x.frames[1].frame_id=3;x.frames[1].t_seconds_nominal=.2;
+  assert.throws(()=>parseHistoricalReplay(x),/coverage metadata disagrees/);
+  x.missing_frame_count=1;x.frame_coverage=2/3;
+  assert.equal(parseHistoricalReplay(x).missing_frame_count,1);
+});
+test('ball and player identities cannot be swapped by an import payload',()=>{
+  const x=valid();
+  x.frames[0].ball={nfl_id:'42',is_ball:true,x:40,y:10};
+  assert.throws(()=>parseHistoricalReplay(x),/Ball identity/);
 });
