@@ -42,7 +42,7 @@ test('reject nonfinite and nonnumeric speed and acceleration before rendering',(
     assert.throws(()=>parseHistoricalReplay(x),/Invalid numeric tracking observation/);
   }
   const bad=valid();
-  bad.frames[1].players[0].acceleration_yards_per_s='rapid';
+  bad.frames[1].players[0].acceleration_yards_per_s2='rapid';
   assert.throws(()=>parseHistoricalReplay(bad),/Invalid numeric tracking observation/);
 });
 test('reject duplicate player identities and missing entities',()=>{
