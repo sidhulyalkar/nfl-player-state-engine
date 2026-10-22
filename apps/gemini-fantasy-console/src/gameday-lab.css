@@ -95,3 +95,25 @@
 .gameday-history-meta span {display:inline-flex;align-items:center;gap:6px;}
 .gameday-history-meta svg {color:#65e7c1;}
 @media(max-width:850px){.gameday-history-actions{align-items:flex-start;flex-direction:column;}.gameday-history-actions>.gameday-source{width:100%;}}
+
+.gameday-observation-select-label {
+  display: grid;
+  gap: 7px;
+  margin: 14px 0 7px;
+  color: #aac4d0;
+  font-size: 11px;
+}
+.gameday-observation-select {
+  min-width: 0;
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid #426575;
+  border-radius: 8px;
+  background: #142735;
+  color: #e5f4f7;
+  font-size: 12px;
+}
+.gameday-observation-select:focus-visible {
+  outline: 2px solid #85e1c6;
+  outline-offset: 2px;
+}

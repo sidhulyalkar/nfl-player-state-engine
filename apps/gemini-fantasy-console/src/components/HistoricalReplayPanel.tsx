@@ -86,6 +86,7 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
   const [camera,setCamera]=useState<Angle>('broadcast');
   const [trails,setTrails]=useState(true);
   const [labels,setLabels]=useState(true);
+  const [showNearest,setShowNearest]=useState(true);
   const [focus,setFocus]=useState<string|null>(null);
   const duration=replay.frames[replay.frames.length-1].t_seconds_nominal;
   const currentIndex=activeFrame(replay.frames,time);
@@ -100,7 +101,14 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
   },[running,duration]);
   useEffect(()=>{if(running&&time>=duration)setRunning(false);},[time,duration,running]);
   const focused=frame.players.find(p=>p.nfl_id===focus);
+  const nearest=focused && focused.side && (focused.side==='offense' || focused.side==='defense')
+    ? frame.players.filter(p=>p.side && p.side!==focused.side)
+      .map(p=>({player:p,distance:Math.hypot(p.x-focused.x,p.y-focused.y)}))
+      .sort((a,b)=>a.distance-b.distance)[0]
+    : undefined;
   const start=Math.max(0,currentIndex-30);
+  const focusedPoint=focused?point(focused.x,focused.y,camera):null;
+  const nearestPoint=nearest?point(nearest.player.x,nearest.player.y,camera):null;
   const trailSegments=useMemo(()=>{
     const result:Array<{key:string;path:string;color:string}>=[];
     if(!trails)return result;
@@ -123,7 +131,7 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
   },[frame,replay,start,currentIndex,trails,camera]);
   return <main className="gameday-page">
     <header className="gameday-head">
-      <div><div className="gameday-kicker"><Activity size={15}/> FOURTH DOWN LAB / HISTORICAL TRACKING</div><h1>Recorded movement, not reconstructed guesses.</h1><p>Game {replay.game_id} · play {replay.play_id} · NFL Big Data Bowl research import</p></div>
+      <div><div className="gameday-kicker"><Activity size={15}/> FOURTH DOWN LAB / HISTORICAL TRACKING</div><h1>Recorded movement, not reconstructed guesses.</h1><p>Game {replay.game_id} · play {replay.play_id} · recorded historical tracking</p></div>
       <div className="gameday-history-actions"><button onClick={onBack}><ArrowLeft size={15}/> Return to demo</button><div className="gameday-source"><span className="gameday-source-dot"/><div><strong>Historical research only</strong><small>Not live · rights not independently verified</small></div></div></div>
     </header>
     <div className="gameday-layout">
@@ -141,6 +149,14 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
               return <line key={x} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#d6f1e3" strokeWidth={x%10===0?1.5:.8} opacity=".3"/>;
             })}
             {trailSegments.map(l=><path key={l.key} d={l.path} stroke={l.color} strokeWidth="2.5" fill="none" opacity=".65"/>)}
+            {showNearest && focusedPoint && nearestPoint && nearest && <g aria-label="Recorded nearest-opponent distance">
+              <line x1={focusedPoint.x} y1={focusedPoint.y} x2={nearestPoint.x} y2={nearestPoint.y} stroke="#ffde94" strokeWidth="2.8" strokeDasharray="5 4"/>
+              <circle cx={nearestPoint.x} cy={nearestPoint.y} r="17" fill="none" stroke="#ffde94" strokeWidth="2" opacity=".85"/>
+              <g transform={'translate('+((focusedPoint.x+nearestPoint.x)/2)+','+((focusedPoint.y+nearestPoint.y)/2-10)+')'}>
+                <rect x="-35" y="-13" width="70" height="23" rx="7" fill="#0b2530" stroke="#c8a979"/>
+                <text x="0" y="2" fill="#ffe2a0" fontSize="11" fontWeight="800" textAnchor="middle">{nearest.distance.toFixed(1)} yd</text>
+              </g>
+            </g>}
             {frame.players.map((p,i)=>{
               const at=point(p.x,p.y,camera);
               const color=p.side==='offense'?'#57adf1':p.side==='defense'?'#f18f8f':'#b9c9d2';
@@ -157,10 +173,19 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
           </svg>
         </div>
         <div className="gameday-controlbar"><div className="gameday-player-controls"><button onClick={()=>{if(time>=duration)setTime(0);setRunning(!running);}} aria-label={running?'Pause':'Play'}>{running?<Pause size={18}/>:<Play size={18}/>}</button><button onClick={()=>{setTime(0);setRunning(true);}} aria-label="Restart"><RotateCcw size={17}/></button><span>{time.toFixed(1)} / {duration.toFixed(1)}s</span></div><input type="range" aria-label="Historical frame scrubber" min="0" max={duration} step=".1" value={time} onChange={e=>{setTime(Number(e.target.value));setRunning(false);}}/></div>
-        <div className="gameday-overlays"><span>Recorded data layers</span><button onClick={()=>setTrails(!trails)} aria-pressed={trails} className={trails?'enabled':''}>Observed trails</button><button onClick={()=>setLabels(!labels)} aria-pressed={labels} className={labels?'enabled':''}>Jersey labels</button></div>
+        <div className="gameday-overlays"><span>Recorded data layers</span><button onClick={()=>setTrails(!trails)} aria-pressed={trails} className={trails?'enabled':''}>Observed trails</button><button onClick={()=>setLabels(!labels)} aria-pressed={labels} className={labels?'enabled':''}>Jersey labels</button><button onClick={()=>setShowNearest(!showNearest)} aria-pressed={showNearest} className={showNearest?'enabled':''}>Nearest opponent</button></div>
         <div className="gameday-lower">
           <div className="gameday-panel"><div className="gameday-section-name"><CircleAlert size={16}/> RESEARCH DATA BOUNDARY</div><h2>Not a live game feed</h2><p>Local contest frames are displayed without estimating formations, coverage, coaches' intent, player assignments, or ball height. Gaps in frames remain gaps.</p><div className="gameday-evidence">Data use requires independent source licensing and attribution review before any public product deployment.</div></div>
-          <div className="gameday-panel"><div className="gameday-section-name">SELECTED OBSERVATION</div><div className="gameday-fact"><span>Entity</span><strong>{focused?.name??focused?.nfl_id??'Select a player'}</strong></div><div className="gameday-fact"><span>Team / side</span><strong>{focused?.team??'unavailable'} / {focused?.side??'unknown'}</strong></div><div className="gameday-fact"><span>Position</span><strong>{focused?focused.x.toFixed(2)+' x '+focused.y.toFixed(2)+' yd':'—'}</strong></div><div className="gameday-fact"><span>Speed</span><strong>{focused?.speed_yards_per_s==null?'unavailable':focused.speed_yards_per_s.toFixed(1)+' yd/s'}</strong></div></div>
+          <div className="gameday-panel"><div className="gameday-section-name">SELECTED OBSERVATION</div>
+          <label className="gameday-observation-select-label">Inspect player
+            <select className="gameday-observation-select" aria-label="Inspect tracked player" value={focus??''} onChange={e=>setFocus(e.target.value||null)}>
+              <option value="">Select a tracked player</option>
+              {frame.players.filter(p=>p.nfl_id).map(p=><option key={p.nfl_id} value={p.nfl_id!}>{p.name??p.nfl_id} {p.jersey?'#'+p.jersey:''} {p.team?'('+p.team+')':''}</option>)}
+            </select>
+          </label><div className="gameday-fact"><span>Entity</span><strong>{focused?.name??focused?.nfl_id??'Select a player'}</strong></div><div className="gameday-fact"><span>Team / side</span><strong>{focused?.team??'unavailable'} / {focused?.side??'unknown'}</strong></div><div className="gameday-fact"><span>Position</span><strong>{focused?focused.x.toFixed(2)+' x '+focused.y.toFixed(2)+' yd':'—'}</strong></div><div className="gameday-fact"><span>Speed</span><strong>{focused?.speed_yards_per_s==null?'unavailable':focused.speed_yards_per_s.toFixed(1)+' yd/s'}</strong></div>
+          <div className="gameday-fact"><span>Nearest recorded opponent</span><strong>{nearest?nearest.distance.toFixed(2)+' yd':'Unavailable'}</strong></div>
+          <div className="gameday-fact"><span>Opponent identity</span><strong>{nearest?(nearest.player.name??nearest.player.nfl_id??'Unknown'):'Unavailable'}</strong></div>
+          <p>Nearest opponent is geometric distance at a single recorded frame, not a coverage responsibility, matchup assignment, or player performance grade. Requires verified team possession labels.</p></div>
         </div>
       </section>
       <aside className="gameday-sidebar">
