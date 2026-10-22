@@ -59,3 +59,28 @@ export function observedDistance(frames: readonly MotionFrame[], playerId: strin
   }
   return { yards, observed_pairs:pairs, complete: pairs===Math.max(0,Math.min(through,frames.length-1)) };
 }
+
+export interface FormationFootprint {
+  count: number;
+  width_yards: number;
+  depth_yards: number;
+  centroid_x: number;
+  centroid_y: number;
+}
+/** Axis-aligned source geometry, not a named formation or inferred assignment. */
+export function formationFootprint(
+  players: readonly (MotionSample & {side?: string|null})[],
+  side: 'offense'|'defense',
+): FormationFootprint | null {
+  const present=players.filter(p=>p.side===side && VALID(p));
+  if (!present.length) return null;
+  const xs=present.map(p=>p.x);
+  const ys=present.map(p=>p.y);
+  return {
+    count:present.length,
+    width_yards:Math.max(...ys)-Math.min(...ys),
+    depth_yards:Math.max(...xs)-Math.min(...xs),
+    centroid_x:xs.reduce((a,b)=>a+b,0)/present.length,
+    centroid_y:ys.reduce((a,b)=>a+b,0)/present.length,
+  };
+}
