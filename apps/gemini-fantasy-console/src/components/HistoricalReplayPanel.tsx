@@ -3,7 +3,7 @@ import { Activity, ArrowLeft, CheckCircle2, CircleAlert, Pause, Play, RotateCcw 
 import '../gameday-lab.css';
 import { FootballField3D, type Field3DPlayer, type Field3DTrail } from './FootballField3D';
 import { trackingFocus, sourceSnapIndex, observedTrailSegments } from './football3dMath';
-import { motionAtFrame, observedDistance } from './trackingMotion';
+import { motionAtFrame, observedDistance, formationFootprint } from './trackingMotion';
 
 import { type HistoricalFrame, type HistoricalReplay } from './historicalReplaySchema';
 export { parseHistoricalReplay } from './historicalReplaySchema';
@@ -45,6 +45,10 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
   const frame=replay.frames[currentIndex];
   const measuredMotion=useMemo(()=>motionAtFrame(replay.frames,currentIndex),[replay,currentIndex]);
   const currentMotion=measuredMotion.find(p=>p.nfl_id===focus);
+  const offenseNow=useMemo(()=>formationFootprint(frame.players,'offense'),[frame]);
+  const defenseNow=useMemo(()=>formationFootprint(frame.players,'defense'),[frame]);
+  const offenseAtSnap=useMemo(()=>snapFrame?formationFootprint(snapFrame.players,'offense'):null,[snapFrame]);
+  const defenseAtSnap=useMemo(()=>snapFrame?formationFootprint(snapFrame.players,'defense'):null,[snapFrame]);
   const traveled=useMemo(()=>focus?observedDistance(replay.frames,focus,currentIndex):null,[replay,focus,currentIndex]);
   const fieldFocus=useMemo(()=>trackingFocus(replay.frames[0].players),[replay]);
   const scenePlayers=useMemo<Field3DPlayer[]>(()=>frame.players.filter(p=>p.nfl_id).map(p=>({
@@ -167,6 +171,16 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
         </div>
       </section>
       <aside className="gameday-sidebar">
+        <div className="gameday-panel">
+          <div className="gameday-aside-heading"><div><Activity size={17}/><h2>Formation geometry</h2></div></div>
+          <p className="gameday-muted">Measured team spacing. No coverage or play-call inference.</p>
+          <div className="gameday-fact"><span>Offense at snap</span><strong>{offenseAtSnap?offenseAtSnap.count+' players · '+offenseAtSnap.width_yards.toFixed(1)+' yd wide':'No verified snap alignment'}</strong></div>
+          <div className="gameday-fact"><span>Offense now</span><strong>{offenseNow?offenseNow.count+' players · '+offenseNow.width_yards.toFixed(1)+' yd wide':'Team labels unavailable'}</strong></div>
+          <div className="gameday-fact"><span>Defense at snap</span><strong>{defenseAtSnap?defenseAtSnap.count+' players · '+defenseAtSnap.width_yards.toFixed(1)+' yd wide':'No verified snap alignment'}</strong></div>
+          <div className="gameday-fact"><span>Defense now</span><strong>{defenseNow?defenseNow.count+' players · '+defenseNow.width_yards.toFixed(1)+' yd wide':'Team labels unavailable'}</strong></div>
+          <div className="gameday-fact"><span>Offensive depth now</span><strong>{offenseNow?offenseNow.depth_yards.toFixed(1)+' yd':'Unavailable'}</strong></div>
+          <p>Width is the measured sideline-to-sideline extent (max y minus min y); depth is max x minus min x. These depend on recorded players and independently verified team sides, not a named offensive formation.</p>
+        </div>
         <div className="gameday-panel"><div className="gameday-aside-heading"><div><Activity size={17}/><h2>Source events</h2></div></div><p className="gameday-muted">Only labels supplied by the original tracking CSV.</p><div className="gameday-event-list">{recordedEvents.length?recordedEvents.slice(0,50).map((m,i)=><button key={i} className={time>=m.t?'seen':''} onClick={()=>{setTime(m.t);setRunning(false);}}><span className="gameday-event-time">{m.t.toFixed(1)}s</span><div><strong>{m.label}</strong><small>Recorded frame {m.frame_id}</small></div></button>):<p>No annotated events available.</p>}</div></div>
         <div className="gameday-panel"><div className="gameday-aside-heading"><div><CircleAlert size={17}/><h2>Coverage and evidence</h2></div></div><div className="gameday-fact"><span>Frame coverage</span><strong>{(replay.frame_coverage*100).toFixed(1)}%</strong></div><div className="gameday-fact"><span>Source</span><strong>{replay.source}</strong></div><div className="gameday-fact"><span>License declaration</span><strong>{replay.source_license_identifier}</strong></div><div className="gameday-fact"><span>Game</span><strong>{replay.game_id}/{replay.play_id}</strong></div><p>Data are user supplied, not independently authenticated. No player grades or coaching classifications are generated.</p></div>
       </aside>
