@@ -114,3 +114,20 @@ def test_row_safety_cap(tmp_path: Path) -> None:
     path = _write_csv(tmp_path / "tracking.csv", _rows())
     with pytest.raises(ValueError, match="safety limit"):
         _import(path, max_selected_rows=2)
+
+
+def test_kaggle_na_ball_and_optional_measurements(tmp_path: Path) -> None:
+    rows = _rows()
+    rows[2]["nflId"] = "NA"
+    rows[2]["club"] = "football"
+    rows[0]["s"] = "NA"
+    rows[0]["o"] = "NA"
+    rows[0]["event"] = "NA"
+    path = _write_csv(tmp_path / "tracking.csv", rows)
+    replay = _import(path, possession_team="ABC")
+    f = replay["frames"][0]
+    assert f["ball"]["is_ball"] is True
+    assert f["ball"]["side"] is None
+    assert f["players"][0]["speed_yards_per_s"] is None
+    assert f["players"][0]["orientation_deg"] is None
+    assert f["events"] == []
