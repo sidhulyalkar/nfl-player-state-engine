@@ -1,6 +1,6 @@
 # 3D Play Lab: lightweight WebGL2 field (initial operational implementation)
 
-Branch: feat/gameday-webgl-field, stacked on feat/free-bdb-tracking-playlab (PR #90).
+Branch: feat/playlab-3d-integrated (PR #92), now based directly on main after PRs #89 and #90 merged. Original stacked PR #91 superseded.
 
 ## Shipped capabilities
 
@@ -27,8 +27,18 @@ Branch: feat/gameday-webgl-field, stacked on feat/free-bdb-tracking-playlab (PR 
 - WebGL2 unavailable/context loss -> return to existing working SVG 2D mode.
 - The pre-existing demo scenarios have an explicitly labeled 3D **illustration**
   mode. They do not become licensed NFL plays by being in WebGL.
-- Pure camera math is independently tested in Node 22; frontend CI now runs
-  the geometry/camera test suite after the TypeScript/Vite production build.
+- Pure camera math, historical input schema and gap-safe motion helpers are independently
+  tested in Node; frontend CI runs the geometry, tracking and replay-contract
+  test suites after the TypeScript/Vite production build.
+- **Measured movement vectors** are derived only from two temporally and numerically
+  adjacent recorded frames, and have separate labels from source-reported speed.
+  Optional acceleration is shown only when present in the source.
+- **Observed team footprint** reports width (max y minus min y) and depth
+  (max x minus min x), both in yards, for source-confirmed offense/defense sides.
+  These are geometry, not an automated personnel or coverage classification.
+- Source-file imports fail closed on duplicate NFL IDs, malformed numeric measurements,
+  invalid source labels or corrupt frame identifiers. Kaggle-style NA identifiers
+  for the ball and absent optional speeds/orientations are handled separately.
 
 ## Usage
 
@@ -45,6 +55,10 @@ Branch: feat/gameday-webgl-field, stacked on feat/free-bdb-tracking-playlab (PR 
 ## Source and engineering boundaries
 
 - Historical source is user-supplied, never publicly hosted by this patch.
+- Fetching the complete official public 2017 sample was not possible from the
+  available runtime; actual file playback, screenshot and cross-browser
+  validation remain unverified. Passing synthetic/fixture tests is not the same
+  as validating an NFL replay against its source footage.
 - Exact coach calls and defensive coverage assignments are not observable
   from x/y alone, and no fabricated tactical labels are generated.
 - Direct WebGL2 avoids new npm dependencies, keeps the RedZone Companion
