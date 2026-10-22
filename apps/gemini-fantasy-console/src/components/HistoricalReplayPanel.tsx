@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, ArrowLeft, CheckCircle2, CircleAlert, Pause, Play, RotateCcw } from 'lucide-react';
 import '../gameday-lab.css';
+import { FootballField3D, type Field3DPlayer, type Field3DTrail } from './FootballField3D';
+import { trackingFocus, sourceSnapIndex, observedTrailSegments } from './football3dMath';
 
 export interface TrackedEntity {
   nfl_id: string | null;
@@ -84,13 +86,26 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
   const [time,setTime]=useState(0);
   const [running,setRunning]=useState(true);
   const [camera,setCamera]=useState<Angle>('broadcast');
+  const [renderMode,setRenderMode]=useState<'3d'|'2d'>('3d');
   const [trails,setTrails]=useState(true);
   const [labels,setLabels]=useState(true);
   const [showNearest,setShowNearest]=useState(true);
+  const [showSnap,setShowSnap]=useState(true);
   const [focus,setFocus]=useState<string|null>(null);
   const duration=replay.frames[replay.frames.length-1].t_seconds_nominal;
+  const snapFrame=useMemo(()=>{const i=sourceSnapIndex(replay.frames);return i<0?null:replay.frames[i];},[replay]);
+  const snapPlayers=useMemo<Field3DPlayer[]>(()=>snapFrame?snapFrame.players.filter(p=>p.nfl_id).map(p=>({
+    id:p.nfl_id!,x:p.x,y:p.y,jersey:p.jersey,name:p.name,team:p.team,
+    side:p.side==='offense'||p.side==='defense'?p.side:null,
+  })):[],[snapFrame]);
   const currentIndex=activeFrame(replay.frames,time);
   const frame=replay.frames[currentIndex];
+  const fieldFocus=useMemo(()=>trackingFocus(replay.frames[0].players),[replay]);
+  const scenePlayers=useMemo<Field3DPlayer[]>(()=>frame.players.filter(p=>p.nfl_id).map(p=>({
+    id:p.nfl_id!,x:p.x,y:p.y,jersey:p.jersey,name:p.name,team:p.team,
+    side:p.side==='offense'||p.side==='defense'?p.side:null,
+  })),[frame]);
+  const sceneTrails=useMemo<Field3DTrail[]>(()=>observedTrailSegments(replay.frames,currentIndex),[currentIndex,replay]);
   const recordedEvents=useMemo(()=>replay.frames.flatMap(f=>f.events.map(label=>({t:f.t_seconds_nominal,label,frame_id:f.frame_id}))),[replay]);
   useEffect(()=>{
     if(!running)return;
@@ -101,6 +116,8 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
   },[running,duration]);
   useEffect(()=>{if(running&&time>=duration)setRunning(false);},[time,duration,running]);
   const focused=frame.players.find(p=>p.nfl_id===focus);
+  const atSnap=focused&&snapFrame?snapFrame.players.find(p=>p.nfl_id===focused.nfl_id):null;
+  const straightFromSnap=focused&&atSnap?Math.hypot(focused.x-atSnap.x,focused.y-atSnap.y):null;
   const nearest=focused && focused.side && (focused.side==='offense' || focused.side==='defense')
     ? frame.players.filter(p=>p.side && p.side!==focused.side)
       .map(p=>({player:p,distance:Math.hypot(p.x-focused.x,p.y-focused.y)}))
@@ -138,8 +155,8 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
       <section className="gameday-main">
         <div className="gameday-history-meta"><span><CheckCircle2 size={14}/> Recorded x/y coordinates</span><span>{replay.frame_count} frames</span><span>{replay.missing_frame_count} missing frames</span><span>Direction: {replay.play_direction ?? 'unknown'}</span></div>
         <div className="gameday-field-shell">
-          <div className="gameday-toolbar"><strong>Source positions only · no inferred coverage</strong><select aria-label="Historical replay camera" value={camera} onChange={e=>setCamera(e.target.value as Angle)}><option value="broadcast">Broadcast angle</option><option value="all22">All-22 perspective</option><option value="overhead">Overhead</option></select></div>
-          <svg className="gameday-field" viewBox="0 0 1040 590" role="img" aria-label="Recorded historical player tracking in a projected field">
+          <div className="gameday-toolbar"><strong>Source positions only · no inferred coverage</strong><div className="gameday-display-options"><button aria-label="Use three dimensional recorded field" aria-pressed={renderMode==='3d'} className={renderMode==='3d'?'selected':''} onClick={()=>setRenderMode('3d')}>3D Field</button><button aria-label="Use two dimensional fallback field" aria-pressed={renderMode==='2d'} className={renderMode==='2d'?'selected':''} onClick={()=>setRenderMode('2d')}>2D Field</button><select aria-label="Historical replay camera" value={camera} onChange={e=>setCamera(e.target.value as Angle)}><option value="broadcast">Broadcast angle</option><option value="all22">All-22 perspective</option><option value="overhead">Overhead</option></select></div></div>
+          {renderMode==='3d' ? <FootballField3D key={replay.game_id+':'+replay.play_id} players={scenePlayers} ball={frame.ball?{x:frame.ball.x,y:frame.ball.y}:null} trails={sceneTrails} selectedId={focus} onSelect={setFocus} preset={camera} focus={fieldFocus} showLabels={labels} showTrails={trails} showNearest={showNearest} snapPlayers={snapPlayers} showSnap={showSnap} onUnsupported={()=>setRenderMode('2d')} /> : <svg className="gameday-field" viewBox="0 0 1040 590" role="img" aria-label="Recorded historical player tracking in a projected field">
             <rect width="1040" height="590" fill="#0b1420"/>
             <polygon points={quad(0,120,camera)} fill="#17473b" stroke="#a3d8ba" strokeWidth="2"/>
             <polygon points={quad(0,10,camera)} fill="#4ea9ac" opacity=".25"/>
@@ -148,6 +165,7 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
               const a=point(x,0,camera),b=point(x,53.3,camera);
               return <line key={x} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#d6f1e3" strokeWidth={x%10===0?1.5:.8} opacity=".3"/>;
             })}
+            {showSnap && snapFrame && snapPlayers.map(p=>{const at=point(p.x,p.y,camera);return <circle key={'snap-'+p.id} cx={at.x} cy={at.y} r="10" fill="none" stroke="#d9e6e9" strokeDasharray="3 3" strokeWidth="1.7" opacity=".75"/>;})}
             {trailSegments.map(l=><path key={l.key} d={l.path} stroke={l.color} strokeWidth="2.5" fill="none" opacity=".65"/>)}
             {showNearest && focusedPoint && nearestPoint && nearest && <g aria-label="Recorded nearest-opponent distance">
               <line x1={focusedPoint.x} y1={focusedPoint.y} x2={nearestPoint.x} y2={nearestPoint.y} stroke="#ffde94" strokeWidth="2.8" strokeDasharray="5 4"/>
@@ -170,10 +188,10 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
             {frame.ball&&(()=>{const at=point(frame.ball.x,frame.ball.y,camera);return <circle cx={at.x} cy={at.y} r="5.3" fill="#ffd28c" stroke="#fff5dc" strokeWidth="1.5"/>;})()}
             <text x="33" y="45" fill="#e8f4f6" fontSize="12" letterSpacing="1.5">SOURCE FRAMES · {frame.frame_id}</text>
             <text x="33" y="65" fill="#a3bbbf" fontSize="11">Ball elevation unavailable; movement is NOT interpolated.</text>
-          </svg>
+          </svg>}
         </div>
         <div className="gameday-controlbar"><div className="gameday-player-controls"><button onClick={()=>{if(time>=duration)setTime(0);setRunning(!running);}} aria-label={running?'Pause':'Play'}>{running?<Pause size={18}/>:<Play size={18}/>}</button><button onClick={()=>{setTime(0);setRunning(true);}} aria-label="Restart"><RotateCcw size={17}/></button><span>{time.toFixed(1)} / {duration.toFixed(1)}s</span></div><input type="range" aria-label="Historical frame scrubber" min="0" max={duration} step=".1" value={time} onChange={e=>{setTime(Number(e.target.value));setRunning(false);}}/></div>
-        <div className="gameday-overlays"><span>Recorded data layers</span><button onClick={()=>setTrails(!trails)} aria-pressed={trails} className={trails?'enabled':''}>Observed trails</button><button onClick={()=>setLabels(!labels)} aria-pressed={labels} className={labels?'enabled':''}>Jersey labels</button><button onClick={()=>setShowNearest(!showNearest)} aria-pressed={showNearest} className={showNearest?'enabled':''}>Nearest opponent</button></div>
+        <div className="gameday-overlays"><span>Recorded data layers</span><button onClick={()=>setTrails(!trails)} aria-pressed={trails} className={trails?'enabled':''}>Observed trails</button><button onClick={()=>setLabels(!labels)} aria-pressed={labels} className={labels?'enabled':''}>Jersey labels</button>{snapFrame && <><button onClick={()=>setShowSnap(!showSnap)} aria-pressed={showSnap} className={showSnap?'enabled':''}>Snap alignment</button><button onClick={()=>{setTime(snapFrame.t_seconds_nominal);setRunning(false);}}>Jump to snap</button></>}<button onClick={()=>setShowNearest(!showNearest)} aria-pressed={showNearest} className={showNearest?'enabled':''}>Nearest opponent</button></div>
         <div className="gameday-lower">
           <div className="gameday-panel"><div className="gameday-section-name"><CircleAlert size={16}/> RESEARCH DATA BOUNDARY</div><h2>Not a live game feed</h2><p>Local contest frames are displayed without estimating formations, coverage, coaches' intent, player assignments, or ball height. Gaps in frames remain gaps.</p><div className="gameday-evidence">Data use requires independent source licensing and attribution review before any public product deployment.</div></div>
           <div className="gameday-panel"><div className="gameday-section-name">SELECTED OBSERVATION</div>
@@ -183,9 +201,9 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
               {frame.players.filter(p=>p.nfl_id).map(p=><option key={p.nfl_id} value={p.nfl_id!}>{p.name??p.nfl_id} {p.jersey?'#'+p.jersey:''} {p.team?'('+p.team+')':''}</option>)}
             </select>
           </label><div className="gameday-fact"><span>Entity</span><strong>{focused?.name??focused?.nfl_id??'Select a player'}</strong></div><div className="gameday-fact"><span>Team / side</span><strong>{focused?.team??'unavailable'} / {focused?.side??'unknown'}</strong></div><div className="gameday-fact"><span>Position</span><strong>{focused?focused.x.toFixed(2)+' x '+focused.y.toFixed(2)+' yd':'—'}</strong></div><div className="gameday-fact"><span>Speed</span><strong>{focused?.speed_yards_per_s==null?'unavailable':focused.speed_yards_per_s.toFixed(1)+' yd/s'}</strong></div>
-          <div className="gameday-fact"><span>Nearest recorded opponent</span><strong>{nearest?nearest.distance.toFixed(2)+' yd':'Unavailable'}</strong></div>
+          <div className="gameday-fact"><span>Straight-line displacement from snap</span><strong>{straightFromSnap==null?'Unavailable':straightFromSnap.toFixed(2)+' yd'}</strong></div><div className="gameday-fact"><span>Nearest recorded opponent</span><strong>{nearest?nearest.distance.toFixed(2)+' yd':'Unavailable'}</strong></div>
           <div className="gameday-fact"><span>Opponent identity</span><strong>{nearest?(nearest.player.name??nearest.player.nfl_id??'Unknown'):'Unavailable'}</strong></div>
-          <p>Nearest opponent is geometric distance at a single recorded frame, not a coverage responsibility, matchup assignment, or player performance grade. Requires verified team possession labels.</p></div>
+          <p>Snap ghosts display only players recorded at the source-labeled snap event. Straight-line displacement is not total distance run. Nearest opponent is geometric distance at a single recorded frame, not a coverage responsibility, matchup assignment, or player performance grade. Requires verified team possession labels.</p></div>
         </div>
       </section>
       <aside className="gameday-sidebar">
