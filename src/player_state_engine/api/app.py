@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from player_state_engine.api.sunday_board_routes import install_sunday_board_routes
 from player_state_engine.data.io import read_table
 from player_state_engine.fantasy.decision_board import DecisionType, build_decision_board
 from player_state_engine.fantasy.decisions import optimize_lineup, rank_waiver_candidates
@@ -391,6 +392,7 @@ def create_app(
             )
         return response
 
+    install_sunday_board_routes(app)
     return app
 
 
