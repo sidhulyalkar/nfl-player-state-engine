@@ -17,6 +17,7 @@ export interface Field3DPlayer {
   y: number;
 }
 export interface Field3DBall { x: number; y: number; }
+export interface Field3DMotion { id: string; dx: number; dy: number; speed: number; }
 export interface Field3DTrail {
   id: string;
   from: readonly [number,number];
@@ -34,6 +35,8 @@ interface Props {
   showLabels?: boolean;
   showTrails?: boolean;
   showNearest?: boolean;
+  showMotion?: boolean;
+  motion?: readonly Field3DMotion[];
   snapPlayers?: readonly Field3DPlayer[];
   showSnap?: boolean;
   synthetic?: boolean;
@@ -153,6 +156,26 @@ function buildActors(p:Props):Float32Array {
       if(!a||!b||Math.hypot(a[0]-b[0],a[2]-b[2])>9)continue;
       const color=seg.side==='offense'?OFFENSE:seg.side==='defense'?DEFENSE:UNKNOWN;
       m.line(a[0],a[2],b[0],b[2],.24,.09,color);
+    }
+  }
+  if(p.showMotion && p.motion?.length){
+    const current=new Map(p.players.map(player=>[player.id,player]));
+    for(const vector of p.motion){
+      const player=current.get(vector.id);
+      if(!player || !Number.isFinite(vector.speed) || vector.speed < .5)continue;
+      const d=Math.hypot(vector.dx,vector.dy);
+      if(!Number.isFinite(d) || d<.005)continue;
+      const start=safeField(player.x,player.y,.18);
+      const end=safeField(player.x+vector.dx/d*Math.min(3,Math.max(.8,vector.speed*.24)),player.y+vector.dy/d*Math.min(3,Math.max(.8,vector.speed*.24)),.18);
+      if(!start||!end)continue;
+      const color=player.id===p.selectedId?SELECT:player.side==='offense'?OFFENSE:player.side==='defense'?DEFENSE:UNKNOWN;
+      m.line(start[0],start[2],end[0],end[2],.19,.2,color);
+      const vx=end[0]-start[0],vz=end[2]-start[2],len=Math.hypot(vx,vz);
+      if(len>.1){
+        const ux=vx/len,uz=vz/len;
+        m.triangle([end[0],.24,end[2]],[end[0]-ux*.65-uz*.36,.24,end[2]-uz*.65+ux*.36],
+          [end[0]-ux*.65+uz*.36,.24,end[2]-uz*.65-ux*.36],color);
+      }
     }
   }
   if(p.showSnap && p.snapPlayers?.length){
@@ -333,7 +356,7 @@ export function FootballField3D(props:Props) {
     if(renderer&&canvas&&overlay)renderer.draw(orbitRef.current,propsRef.current,canvas,overlay);
   },[]);
   useEffect(()=>{setOrbit(defaultOrbit(props.preset,props.focus));},[props.preset,props.focus]);
-  useEffect(()=>{draw();},[draw,orbit,props.players,props.ball,props.trails,props.selectedId,props.showTrails,props.showLabels,props.showNearest,props.snapPlayers,props.showSnap]);
+  useEffect(()=>{draw();},[draw,orbit,props.players,props.ball,props.trails,props.selectedId,props.showTrails,props.showLabels,props.showNearest,props.showMotion,props.motion,props.snapPlayers,props.showSnap]);
   useEffect(()=>{
     const canvas=canvasRef.current;
     if(!canvas)return;
