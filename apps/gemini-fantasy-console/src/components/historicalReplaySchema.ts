@@ -78,7 +78,7 @@ export function parseHistoricalReplay(value: unknown): HistoricalReplay {
   }
   const span=o.frames[o.frames.length-1].frame_id-o.frames[0].frame_id+1;
   if (o.missing_frame_count!==span-o.frames.length || Math.abs(o.frame_coverage!-o.frames.length/span)>1e-5)throw new Error('Tracking coverage metadata disagrees with frame IDs.');
-  if (typeof o.source!=='string' || !o.source.trim() || typeof o.source_license_identifier!=='string')throw new Error('Tracking source attribution is required.');
+  if (typeof o.source!=='string' || !o.source.trim() || typeof o.source_license_identifier!=='string' || !o.source_license_identifier.trim())throw new Error('Tracking source attribution is required.');
   if (typeof o.frame_coverage!=='number' || !Number.isFinite(o.frame_coverage) || o.frame_coverage<=0 || o.frame_coverage>1)throw new Error('Invalid tracking coverage metadata.');
   return o as HistoricalReplay;
 }
