@@ -180,7 +180,7 @@ For actual draft use, add the strict data-plane and multicontract release checks
 
 ## Optional AI-agent code search: XERJ pilot
 
-The experimental local-first XERJ integration is a **developer-only** source retrieval layer. It stages a hashed, committed-source-only corpus outside the checkout, indexes under the isolated `nfl-pse` namespace, and evaluates 20 fixed file-retrieval tasks. It does not change Python model authority, projection serving, scoring, or the production API. See [`docs/tools/xerj_pilot.md`](docs/tools/xerj_pilot.md) for secure local setup, dry-run-first indexing, MCP hookup, benchmark gates, and limitations.
+The experimental local-first XERJ integration is a **developer-only** source retrieval layer. It stages a hashed, committed-source-only corpus outside the checkout, indexes under the isolated `nfl-pse-clean` namespace, and evaluates two independent 20-task suites: exact-symbol and natural-language source navigation, with a strong local `rg` comparator. The original `nfl-pse` index is exploratory and may contain benchmark labels. It does not change Python model authority, projection serving, scoring, or the production API. See [`docs/tools/xerj_pilot.md`](docs/tools/xerj_pilot.md) for secure local setup, dry-run-first indexing, MCP hookup, benchmark gates, and limitations.
 
 ```
 python scripts/xerj_pilot.py prepare
