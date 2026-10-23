@@ -9,8 +9,9 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from player_state_engine.product.gameday_legacy_tracking import import_bdb_2019_example
 
