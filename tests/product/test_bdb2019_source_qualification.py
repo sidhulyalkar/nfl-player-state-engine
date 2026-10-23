@@ -182,3 +182,31 @@ def test_explicit_terms_declaration_required(tmp_path: Path) -> None:
         qualify_bdb2019_play(
             path, expectations=expected, license_acknowledged=True, license_identifier=""
         )
+
+
+def test_off_field_player_keeps_play_events_and_reports_exclusion(
+    tmp_path: Path,
+) -> None:
+    path, _ = fixture_source(tmp_path)
+    tracking = path / SOURCE_FILES["tracking"][0]
+    with tracking.open("r", encoding="utf-8", newline="") as stream:
+        reader = csv.DictReader(stream)
+        columns = list(reader.fieldnames or ())
+        rows = list(reader)
+    rows[3]["y"] = "-0.59"
+    rows[3]["event"] = "touchdown"
+    rows[4]["x"] = "NA"
+    rows[2]["team"] = "ball"
+    rows[5]["team"] = "ball"
+    _csv(tracking, columns, rows)
+    report, replay = _qualify(path, _rehashed(path))
+    assert replay["frames"][1]["events"] == ["touchdown"]
+    assert replay["frames"][1]["players"] == []
+    assert replay["frames"][1]["ball"] is not None
+    quality = report["tracking"]["position_quality"]
+    assert quality["omitted_total_position_rows"] == 2
+    assert quality["omitted_missing_position_rows"] == 1
+    assert quality["omitted_off_field_position_rows"] == 1
+    assert quality["affected_source_frame_ids"] == [3]
+    assert any("not clamped or interpolated" in w for w in report["warnings"])
+    assert report["source_video_alignment_verified"] is False
