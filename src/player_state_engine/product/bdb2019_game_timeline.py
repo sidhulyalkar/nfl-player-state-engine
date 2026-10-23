@@ -125,10 +125,10 @@ def build_bdb2019_game_timeline(
         possession = row["possessionTeam"].strip()
         if possession not in {home, away}:
             raise ValueError(f"Unverified possession side on play {pid}.")
-        clock = _optional_text(row.get("gameClock"), 12)
+        clock = _optional_text(row.get("GameClock"), 12)
         if clock and not CLOCK.fullmatch(clock):
             raise ValueError(f"Malformed official game clock on play {pid}.")
-        # playId is a documented source identifier, NOT an inferred drive boundary.
+        # This side/number represents charted line of scrimmage, not coordinates.\n        line_side = _optional_text(row.get("yardlineSide"), 8)\n        line_number = row.get("yardlineNumber")\n        if bool(line_side) != bool(line_number and line_number.strip()):\n            raise ValueError(f"Incomplete charted yardline on play {pid}.")\n        if line_side and line_side not in {home, away}:\n            raise ValueError(f"Invalid charted yardline side on play {pid}.")\n        yardline = _integer(line_number, "yardlineNumber", low=0, high=50) if line_side else None\n        # playId is a documented source identifier, NOT an inferred drive boundary.
         entries.append({
             "game_id": SOURCE_GAME_ID,
             "play_id": pid,
@@ -137,7 +137,7 @@ def build_bdb2019_game_timeline(
             "yards_to_go": _integer(row.get("yardsToGo"), "yardsToGo", low=0, high=100),
             "possession_team": possession,
             "offense_side": "home" if possession == home else "away",
-            "game_clock_charted": clock,
+            "game_clock_charted": clock,\n            "yardline_side_charted": line_side,\n            "yardline_number_charted": yardline,
             "description_charted": _optional_text(row.get("playDescription")),
             "formation_charted": _optional_text(row.get("offenseFormation"), 120),
             "personnel_charted": _optional_text(row.get("personnel.offense"), 120),
