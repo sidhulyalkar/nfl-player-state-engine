@@ -22,6 +22,7 @@ jobs:
         run: |
           ruff check src tests \
             scripts/qualify_bdb2019_example.py \
+            scripts/build_bdb2019_play_catalog.py \
             scripts/acquire_game_intelligence_sources.py \
             scripts/build_game_intelligence.py \
             scripts/build_draft_survival_observations.py \
