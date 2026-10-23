@@ -200,3 +200,36 @@ must not partially alter the session.
 No server upload, permanent storage or licensed live NFL feed is involved.
 Refreshing the browser clears the session. Do not interpret the label
 "Research playlist" as a dataset attestation or license approval.
+
+
+## Whole-game play atlas from the verified 31 MB source
+
+The optional metadata-only catalog generator scans the entire pinned NFL
+tracking CSV in one pass, keeping source positions out of its JSON output:
+
+    python scripts/build_bdb2019_play_catalog.py \
+      --csv data/external/bdb2019-private/tracking_gameId_2017090700.csv \
+      --output /tmp/pse-bdb2019-qualification/2017090700-play-catalog.json \
+      --license-id "ACTUAL_SOURCE_TERMS_IDENTIFIER_YOU_REVIEWED" \
+      --acknowledge-source-terms
+
+The official pinned 2017 game currently contains **316,025 source rows
+across 177 plays**. Of those, **60 plays** have at least one nonrenderable
+on-field position, totaling **1,830** excluded source observations. These
+are independent recorded position-quality measures; none are repaired,
+clamped, used to train a model or represented as missing whole frames.
+
+In GameDay Lab, select **Load play catalog JSON**. Search source event names
+(e.g. touchdown, punt, ball_snap) or play IDs; filter by observation quality
+and sort by play length. The browser reads **only metadata**, not the 31 MB
+source file. When a matching historical replay JSON was already loaded into
+the research session, a play has an **Open recorded replay** control.
+Matching requires game ID, play ID, source SHA-256, frame count, source frame
+gaps, and source-row counts when available. Otherwise the catalog shows
+that the play's actual per-frame JSON must be imported before inspection.
+
+The catalog's declared hash is checked structurally by the browser; it is
+NOT cryptographically recomputed there against the 31 MB original source.
+The local Python generator requires the original pinned Git object bytes
+before declaring its source. Never publish raw tracking as a demo asset or
+label catalog-only summaries as reconstructed NFL player coordinates.

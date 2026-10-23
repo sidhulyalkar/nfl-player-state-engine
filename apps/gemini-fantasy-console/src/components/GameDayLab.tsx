@@ -4,6 +4,8 @@ import '../gameday-lab.css';
 import { HistoricalReplayPanel, parseHistoricalReplay, type HistoricalReplay } from './HistoricalReplayPanel';
 import { FootballField3D, type Field3DTrail } from './FootballField3D';
 import { MAX_REPLAY_FILE_BYTES, MAX_REPLAY_IMPORT_BYTES, MAX_REPLAY_LIBRARY, mergeReplayLibrary, replayKey, replayLabel, selectReplay } from './historicalReplayLibrary';
+import { parsePlayCatalog, type PlayCatalog } from './historicalPlayCatalog';
+import { HistoricalPlayCatalogPanel } from './HistoricalPlayCatalogPanel';
 
 /**
  * Illustrative data only. Production tracking adapters must carry a separate
@@ -200,6 +202,22 @@ export function GameDayLab() {
   const [replayLibrary,setReplayLibrary] = useState<HistoricalReplay[]>([]);
   const [importError,setImportError] = useState<string|null>(null);
   const [importing,setImporting] = useState(false);
+  const [playCatalog,setPlayCatalog] = useState<PlayCatalog|null>(null);
+  const [catalogError,setCatalogError] = useState<string|null>(null);
+  async function onCatalogFile(event: ChangeEvent<HTMLInputElement>) {
+    const file=event.target.files?.[0];
+    event.target.value='';
+    if(!file)return;
+    try{
+      if(file.size>2_000_000)throw new Error('A position-free source catalog must be under 2 MB.');
+      const loaded=parsePlayCatalog(JSON.parse(await file.text()) as unknown);
+      setPlayCatalog(loaded);
+      setCatalogError(null);
+    }catch(reason){
+      setCatalogError(reason instanceof Error?reason.message:'Invalid source catalog JSON.');
+    }
+  }
+
   async function onReplayFile(event: ChangeEvent<HTMLInputElement>) {
     const files=Array.from(event.target.files??[]);
     event.target.value='';
@@ -293,9 +311,12 @@ export function GameDayLab() {
   return historical ? <HistoricalReplayPanel key={replayKey(historical)} replay={historical} library={replayLibrary} onSelect={key=>setHistorical(selectReplay(replayLibrary,key))} onImportFiles={onReplayFile} importing={importing} importError={importError} onBack={()=>{setHistorical(null);setTime(0);setPlaying(true);}}/> : <main className="gameday-page">
     <header className="gameday-head">
       <div><div className="gameday-kicker"><Activity size={15}/> FOURTH DOWN LAB / GAMEDAY</div><h1>See the game beneath the game.</h1><p>Replay the formation. Explore the decisions. Understand the contributions.</p></div>
-      <div className="gameday-history-actions"><label className="gameday-history-upload">{importing?'Importing replay files…':'Load historical replay JSON(s)'}<input type="file" multiple disabled={importing} accept=".json,application/json" onChange={event=>{void onReplayFile(event);}}/></label>{replayLibrary.length>0&&<label className="gameday-library-picker">Loaded plays<select aria-label="Choose saved historical replay" value="" onChange={e=>setHistorical(selectReplay(replayLibrary,e.target.value))}><option value="" disabled>Select a play ({replayLibrary.length})</option>{replayLibrary.map(p=><option key={replayKey(p)} value={replayKey(p)}>{replayLabel(p)}</option>)}</select></label>}<div className="gameday-source"><span className="gameday-source-dot"/><div><strong>Synthetic demonstration</strong><small>Not a live game or licensed tracking feed</small></div></div></div>
+      <div className="gameday-history-actions"><label className="gameday-history-upload">{importing?'Importing replay files…':'Load historical replay JSON(s)'}<input type="file" multiple disabled={importing} accept=".json,application/json" onChange={event=>{void onReplayFile(event);}}/></label><label className="gameday-history-upload">Load play catalog JSON<input type="file" accept=".json,application/json" onChange={event=>{void onCatalogFile(event);}}/></label>{replayLibrary.length>0&&<label className="gameday-library-picker">Loaded plays<select aria-label="Choose saved historical replay" value="" onChange={e=>setHistorical(selectReplay(replayLibrary,e.target.value))}><option value="" disabled>Select a play ({replayLibrary.length})</option>{replayLibrary.map(p=><option key={replayKey(p)} value={replayKey(p)}>{replayLabel(p)}</option>)}</select></label>}<div className="gameday-source"><span className="gameday-source-dot"/><div><strong>Synthetic demonstration</strong><small>Not a live game or licensed tracking feed</small></div></div></div>
     </header>
     {importError && <div className="gameday-import-error" role="alert">{importError}</div>}
+    {catalogError && <div className="gameday-import-error" role="alert">{catalogError}</div>}
+    {playCatalog&&<HistoricalPlayCatalogPanel catalog={playCatalog} library={replayLibrary}
+      onOpen={setHistorical} onClose={()=>setPlayCatalog(null)}/>}
     <div className="gameday-layout">
       <section className="gameday-main">
         <div className="gameday-scoreline"><div><span className="gameday-team-mark">O</span><div><strong>{play.offense}</strong><small>OFFENSE</small></div><b>21</b></div><div className="gameday-situation"><span>DEMO PLAY</span><strong>{play.down}</strong><small>Q3 · 08:42 · ILLUSTRATIVE SCORE</small></div><div><b>17</b><div><strong>{play.defense}</strong><small>DEFENSE</small></div><span className="gameday-team-mark secondary">F</span></div></div>

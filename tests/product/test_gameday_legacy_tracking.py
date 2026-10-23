@@ -162,3 +162,29 @@ def test_unknown_position_policy_rejected(tmp_path: Path) -> None:
             _write(tmp_path / "badpolicy.csv", _rows()),
             position_policy="clamp_outside_coords",
         )
+
+
+def test_audited_missing_coordinate_cannot_hide_invalid_player_team(
+    tmp_path: Path,
+) -> None:
+    data = _rows()
+    data[0]["x"] = "NA"
+    data[0]["team"] = "ball"
+    with pytest.raises(ValueError, match="Player must identify home or away"):
+        _convert(
+            _write(tmp_path / "bad_hidden_player.csv", data),
+            position_policy="omit_off_field_with_audit",
+        )
+
+
+def test_audited_missing_coordinate_cannot_hide_bad_ball_label(
+    tmp_path: Path,
+) -> None:
+    data = _rows()
+    data[2]["x"] = "NA"
+    data[2]["team"] = "away"
+    with pytest.raises(ValueError, match="Ball row must not carry"):
+        _convert(
+            _write(tmp_path / "bad_hidden_ball.csv", data),
+            position_policy="omit_off_field_with_audit",
+        )

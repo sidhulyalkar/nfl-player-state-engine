@@ -157,8 +157,8 @@ try {
   const switchedBack=await evalPage("(()=>{const selector=document.querySelector('select[aria-label=\"Select loaded historical play\"]');if(!selector)return false;selector.selectedIndex=0;selector.dispatchEvent(new Event('change',{bubbles:true}));return true})()",sid);
   assert.equal(switchedBack,true);
   await until("document.querySelector('.gameday-head')?.textContent?.includes('CI_TEST_PLAY')",sid,'switching to first recorded play');
-  // Playback starts automatically after a play switch. Reset explicitly to
-  // inspect the first recorded sample deterministically on a busy CI runner.
+  // Source frames advance immediately on a play switch. Pause and reset
+  // before demanding the 0.0s first observation on shared CI runners.
   const resetAfterSwap=await evalPage("(()=>{const b=document.querySelector('button[aria-label=\"Reset replay\"]');b?.click();return !!b})()",sid);
   assert.equal(resetAfterSwap,true);
   await until("document.querySelector('.gameday-player-controls')?.textContent?.includes('frame 1')",sid,'switched replay reset control');
@@ -170,6 +170,41 @@ try {
   assert.equal(reopened,true);
   await until("document.querySelector('.gameday-head')?.textContent?.includes('CI_NEXT_PLAY')",sid,'reopen saved play without file input');
   console.log('PASS: two synthetic recorded plays imported and switched in-memory without data replacement.');
+
+  // Catalog is separate metadata-only user data. Confirm event search and
+  // opening the exact matching play without fetching private positions.
+  const backForCatalog=await evalPage("(()=>{const b=[...document.querySelectorAll('button')].find(v=>v.textContent?.includes('Return to demo'));b?.click();return !!b})()",sid);
+  assert.equal(backForCatalog,true);
+  await until("document.querySelector('.gameday-head h1')?.textContent?.includes('See the game beneath the game')",sid,'catalog demo view');
+  const summaryPlay=(play_id,events)=>({
+    game_id:'CI_TEST_GAME',play_id,source_rows:6,recorded_frames:3,
+    missing_frame_ids:2,coverage_ratio:3/5,first_frame_id:1,last_frame_id:5,
+    duration_seconds_nominal:.4,unique_players:2,max_players_per_frame:2,
+    ball_recorded_frames:0,source_events:events,
+    unrenderable_position_rows:1,off_field_rows:1,missing_xy_rows:0,
+    affected_source_frame_ids:[5],
+  });
+  const catalog={
+    schema_version:1,data_mode:'HISTORICAL_RESEARCH_METADATA_ONLY',
+    game_id:'CI_TEST_GAME',source:'CI GENERATED METADATA; NOT NFL',
+    source_sha256:'c'.repeat(64),source_bytes:1000,source_rows:12,
+    play_count:2,positions_included:false,source_video_alignment_verified:false,
+    plays:[summaryPlay('CI_TEST_PLAY',{ball_snap:[1]}),
+      summaryPlay('CI_NEXT_PLAY',{touchdown:[5]})],
+  };
+  const catalogImported=await evalPage("(()=>{const inputs=[...document.querySelectorAll('input[type=file][accept*=\"json\"]')];const input=inputs[1];if(!input)return false;const metadata="+JSON.stringify(catalog)+";const dt=new DataTransfer();dt.items.add(new File([JSON.stringify(metadata)],'ci-catalog.json',{type:'application/json'}));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));return true})()",sid);
+  assert.equal(catalogImported,true,'Metadata-only catalog file input missing');
+  await until("document.querySelector('.gameday-catalog')?.textContent?.includes('Recorded game play atlas')",sid,'catalog UI');
+  assert.equal(await evalPage("document.querySelectorAll('.gameday-catalog-play').length",sid),2,'catalog needs both tracked plays');
+  const searched=await evalPage("(()=>{const input=document.querySelector('input[aria-label=\"Search recorded plays and events\"]');if(!input)return false;const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;setter.call(input,'touchdown');input.dispatchEvent(new Event('input',{bubbles:true}));return true})()",sid);
+  assert.equal(searched,true,'Catalog event search missing');
+  await until("document.querySelector('.gameday-catalog-count')?.textContent?.includes('1 source plays match')",sid,'filtered touchdown');
+  assert.equal(await evalPage("document.querySelectorAll('.gameday-catalog-play').length",sid),1);
+  const openedFromCatalog=await evalPage("(()=>{const b=[...document.querySelectorAll('.gameday-catalog-play button')].find(v=>v.textContent?.includes('Open recorded replay'));b?.click();return !!b})()",sid);
+  assert.equal(openedFromCatalog,true);
+  await until("document.querySelector('.gameday-head')?.textContent?.includes('CI_NEXT_PLAY')",sid,'catalog-selected actual session replay');
+  console.log('PASS: position-free catalog imported, searched by recorded event, matching replay opened.');
+
 
   console.log('PASS: real WebGL2 + 2D switch + synthetic CI replay import + recorded frame stepping + travel disclosure.');
 
