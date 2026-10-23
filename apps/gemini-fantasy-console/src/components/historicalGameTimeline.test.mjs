@@ -21,11 +21,11 @@ function makeTimeline(){
     tracking_source_sha256:HEX,plays_source_sha256:'b'.repeat(64),
     games_source_sha256:'c'.repeat(64),source_commit:null,play_count:2,plays:[
       {game_id:'2017090700',play_id:'4',quarter:1,down:1,yards_to_go:8,
-        possession_team:'NE',offense_side:'home',game_clock_charted:'09:28',
+        possession_team:'NE',offense_side:'home',game_clock_charted:'09:28',yardline_side_charted:'NE',yardline_number_charted:25,
         description_charted:'Verified source description',formation_charted:'SHOTGUN',
         personnel_charted:null,source_tracking_rows:4},
       {game_id:'2017090700',play_id:'12',quarter:2,down:3,yards_to_go:8,
-        possession_team:'KC',offense_side:'away',game_clock_charted:null,
+        possession_team:'KC',offense_side:'away',game_clock_charted:null,yardline_side_charted:null,yardline_number_charted:null,
         description_charted:null,formation_charted:null,
         personnel_charted:'1 RB, 3 WR, 1 TE',source_tracking_rows:6},
     ]};
