@@ -95,7 +95,53 @@ try {
   const click3D=await evalPage("(()=>{const b=[...document.querySelectorAll('.gameday-display-options button')].find(x=>x.textContent?.includes('3D Field'));b?.click();return !!b})()",sid);
   assert.equal(click3D,true);
   await until("!!document.querySelector('.field3d-stage canvas')",sid,'WebGL remount');
-  console.log('PASS: WebGL2 stage + provenance label + 2D fallback + 3D remount');
+  // CI fixture is GENERATED, NOT an NFL observation. It exists solely to
+  // exercise the file input, strict research schema, timeline and WebGL mount.
+  const player=(id,side,x,y)=>({
+    nfl_id:id,is_ball:false,team:side==='offense'?'away':'home',side,
+    name:side==='offense'?'CI receiver':'CI defender',jersey:side==='offense'?'81':'24',
+    x,y,z:null,speed_yards_per_s:null,acceleration_yards_per_s2:null,
+    orientation_deg:null,movement_dir_deg:null,
+  });
+  const fixture={
+    schema_version:1,data_mode:'HISTORICAL_RESEARCH',
+    tracking_fidelity:'RECORDED_FRAMES',
+    source:'CI GENERATED FIXTURE; NOT AN ACTUAL NFL PLAY',
+    source_license_identifier:'internal-test-fixture-only',
+    source_file_sha256:'c'.repeat(64),
+    game_id:'CI_TEST_GAME',play_id:'CI_TEST_PLAY',
+    frame_count:3,missing_frame_count:2,frame_coverage:3/5,play_direction:null,
+    frames:[
+      {frame_id:1,t_seconds_nominal:0,events:['ball_snap'],players:[
+        player('CI_WR','offense',55,23),player('CI_DB','defense',56,26),
+      ],ball:null},
+      {frame_id:2,t_seconds_nominal:.1,events:[],players:[
+        player('CI_WR','offense',55.35,23.2),player('CI_DB','defense',56.1,26.1),
+      ],ball:null},
+      {frame_id:5,t_seconds_nominal:.4,events:[],players:[
+        player('CI_WR','offense',59.1,26),player('CI_DB','defense',58.0,26),
+      ],ball:null},
+    ],
+  };
+  const fileAdded=await evalPage("(()=>{const input=document.querySelector('input[type=file][accept*=\"json\"]');if(!input)return false;const fixture="+JSON.stringify(fixture)+";const dt=new DataTransfer();dt.items.add(new File([JSON.stringify(fixture)],'ci-generated-tracking.json',{type:'application/json'}));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));return true})()",sid);
+  assert.equal(fileAdded,true,'Historical replay file input missing');
+  await until("document.querySelector('.gameday-head h1')?.textContent?.includes('Recorded movement, not reconstructed guesses')",sid,'historical replay UI');
+  const researchSource=await until("document.querySelector('.field3d-source')?.textContent?.includes('RECORDED X/Y')",sid,'research mode source badge');
+  assert.equal(researchSource,true);
+  const resetResearch=await evalPage("(()=>{const b=document.querySelector('button[aria-label=\"Reset replay\"]');b?.click();return !!b})()",sid);
+  assert.equal(resetResearch,true);
+  await until("document.querySelector('.gameday-player-controls')?.textContent?.includes('frame 1')",sid,'first recorded frame');
+  const stepResearch=await evalPage("(()=>{const b=document.querySelector('button[aria-label=\"Next recorded source frame\"]');b?.click();return !!b})()",sid);
+  assert.equal(stepResearch,true);
+  await until("document.querySelector('.gameday-player-controls')?.textContent?.includes('frame 2')",sid,'recorded second frame');
+  await until("document.querySelector('.field3d-source')?.textContent?.includes('OBSERVED TRAVEL, NOT FACING')",sid,'measured travel provenance');
+  await capture(sid,'playlab-ci-fixture-travel.png');
+  const nextResearch=await evalPage("(()=>{document.querySelector('button[aria-label=\"Next recorded source frame\"]')?.click();return true})()",sid);
+  assert.equal(nextResearch,true);
+  await until("document.querySelector('.gameday-player-controls')?.textContent?.includes('frame 5')",sid,'source frame jump over missing IDs');
+  assert.equal(await evalPage("document.querySelector('.gameday-history-meta')?.textContent?.includes('2 missing frames')",sid),true);
+  console.log('PASS: real WebGL2 + 2D switch + synthetic CI replay import + recorded frame stepping + travel disclosure.');
+
 } finally {
   for(const job of pending.values())job.reject(new Error('Browser shutdown'));
   pending.clear();
