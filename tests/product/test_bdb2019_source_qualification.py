@@ -153,8 +153,16 @@ def test_invalid_tracking_sample_blocks_qualification(tmp_path: Path) -> None:
     track = path / SOURCE_FILES["tracking"][0]
     txt = track.read_text()
     track.write_text(txt.replace(",43.0,22.0,", ",134.0,22.0,", 1))
-    with pytest.raises(ValueError, match="Out-of-bounds"):
-        _qualify(path, _rehashed(path))
+    # The full qualifier opts explicitly into audited omission to preserve a
+    # real play with source frames extending outside the playing field.
+    report, replay = _qualify(path, _rehashed(path))
+    quality = report["tracking"]["position_quality"]
+    assert quality["omitted_off_field_position_rows"] == 1
+    assert quality["omitted_missing_position_rows"] == 0
+    assert quality["affected_source_frame_ids"] == [3]
+    assert quality["never_clamped_or_interpolated"] is True
+    assert replay["frames"][1]["players"][0]["nfl_id"] == "11"
+    assert all(p["x"] <= 120 for frame in replay["frames"] for p in frame["players"])
 
 
 def test_missing_snap_and_ball_are_flags_not_fabricated(tmp_path: Path) -> None:
