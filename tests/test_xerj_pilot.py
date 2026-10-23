@@ -171,7 +171,7 @@ def test_ground_truth_benchmark_and_missing_hits(local_repo: Path, tmp_path: Pat
     def fake_request(url: str, resource: str, body: dict | None = None) -> dict:
         if resource.endswith("/_count"):
             return {"count": 7}
-        assert resource == "/nfl-pse-*/_search"
+        assert resource == "/nfl-pse-clean-*/_search"
         if body["query"]["match"]["body"] == "score_quantile_components":
             paths = ["docs/stale-file.md", "src/player_state_engine/fantasy/scoring.py"]
         else:
@@ -303,7 +303,7 @@ def test_index_dry_run_is_default(local_repo: Path, tmp_path: Path) -> None:
     command = run.call_args.args[0]
     assert command[:2] == ["/usr/local/bin/xerj", "autoindex"]
     assert "--dry-run" in command and "--prefix" in command
-    assert "nfl-pse" in command
+    assert "nfl-pse-clean" in command
 
 
 def test_benchmark_cases_unique_and_tracked_in_repo() -> None:
