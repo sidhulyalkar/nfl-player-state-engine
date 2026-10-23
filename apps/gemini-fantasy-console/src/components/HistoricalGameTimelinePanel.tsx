@@ -67,7 +67,9 @@ export function HistoricalGameTimelinePanel({timeline,catalog,library,onOpen,onB
             <div className="gameday-timeline-id"><strong>{p.play_id}</strong><small>Play ID</small></div>
             <div className="gameday-timeline-info">
               <div className="gameday-timeline-situation"><strong>{p.down===0?'Down not charted':p.down+' & '+p.yards_to_go}</strong>
-                <span>{p.possession_team} · {p.game_clock_charted??'clock unavailable'}</span></div>
+                <span>{p.possession_team} · {p.game_clock_charted??'clock unavailable'}
+                  {p.yardline_side_charted!==null&&p.yardline_number_charted!==null
+                    ?' · ball at '+p.yardline_side_charted+' '+p.yardline_number_charted:''}</span></div>
               <p>{p.description_charted??'No published play description'}</p>
               <small>{p.formation_charted?'Formation: '+p.formation_charted+' · ':''}
                 {p.personnel_charted?'Personnel: '+p.personnel_charted:'Personnel not charted'}</small>
