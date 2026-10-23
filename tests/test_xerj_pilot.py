@@ -156,23 +156,26 @@ def test_ground_truth_benchmark_and_missing_hits(local_repo: Path, tmp_path: Pat
         if resource.endswith("/_count"):
             return {"count": 7}
         assert resource == "/nfl-pse-*/_search"
-        path = ("src/player_state_engine/fantasy/scoring.py" if
-                body["query"]["match"]["body"] == "score_quantile_components" else
-                "docs/not-the-answer.md")
-        return {"hits": {"hits": [{"_source": {"ax_path": path}}]}}
+        if body["query"]["match"]["body"] == "score_quantile_components":
+            paths = ["docs/stale-file.md", "src/player_state_engine/fantasy/scoring.py"]
+        else:
+            paths = ["docs/not-the-answer.md"]
+        return {"hits": {"hits": [{"_source": {"ax_path": path}} for path in paths]}}
 
     with patch.object(pilot, "request", side_effect=fake_request):
         result = pilot.benchmark(pilot.URL, corpus, case_file, k=5)
     assert result["index_document_count"] == 7
     assert result["tasks"] == 2
     assert result["hit_at_k"] == 0.5
-    assert result["mrr_at_k"] == 0.5
+    assert result["mrr_at_k"] == 0.25
+    assert result["unmapped_result_count"] == 2
     assert result["kind"] == "developer_retrieval_only"
     assert result["index_status"] == "complete"
-    assert result["results"][0]["returned_evidence"][0]["source_sha256"]
-    assert result["results"][0]["first_rank"] == 1
+    assert result["results"][0]["returned_evidence"][1]["source_sha256"]
+    assert result["results"][0]["returned_evidence"][0]["in_snapshot"] is False
+    assert result["results"][0]["first_rank"] == 2
     assert result["results"][1]["first_rank"] is None
-    assert result["results"][1]["returned_paths"] == []
+    assert result["results"][1]["returned_paths"] == ["docs/not-the-answer.md"]
 
 
 def test_benchmark_rejects_ground_truth_outside_snapshot(
