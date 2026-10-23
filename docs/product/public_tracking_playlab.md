@@ -19,8 +19,9 @@ https://github.com/nfl-football-ops/Big-Data-Bowl/blob/master/schema.md
 
 ### A fully identified example to inspect
 
-The original NFL tutorial uses game **2017090700**, play **2756** from
-Kansas City at New England on September 7, 2017.
+The original NFL tutorial uses game **2017090700**, play **938** (an Alex Smith
+7-yard TD pass to Demetrius Harris). Our separate longer example is play **2756**
+from Kansas City at New England on September 7, 2017.
 
 Its public plays CSV identifies a **75-yard Alex Smith to Tyreek Hill
 touchdown**, third quarter, 9:28 remaining. The offense was KC, the away
@@ -110,5 +111,10 @@ https://open-meteo.com/en/terms
 
     cd apps/gemini-fantasy-console && npm run build
 
-An actual end-to-end imported original tracking file and browser screenshot
-remain validation gates. Passing fixture tests alone cannot certify them.
+The currently merged Chromium smoke uses an explicitly generated fixture, not
+actual NFL tracking. To qualify downloaded official bytes and a source-verified
+home/away possession join, follow
+[the real-source qualification guide](bdb2019_real_source_qualification.md).
+A full first-party NFL data qualification workflow exists but runs only after
+explicit source terms review. Actual original video alignment remains a separate
+gate. Passing fixture tests alone cannot certify the real tracking.

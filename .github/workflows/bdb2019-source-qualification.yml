@@ -1,0 +1,71 @@
+name: Historical NFL BDB source qualification (manual)
+
+# No scheduled, PR or push trigger: source terms must be reviewed first.
+on:
+  workflow_dispatch:
+    inputs:
+      source_terms_reviewed:
+        description: "I reviewed applicable NFL BDB source terms and authorize this research-only execution"
+        required: true
+        type: boolean
+        default: false
+      source_terms_identifier:
+        description: "Identifier or version of terms reviewed; this declaration grants no rights"
+        required: true
+        type: string
+      play_id:
+        description: "2017 game 2017090700 play ID (938 is the official NFL tutorial)"
+        required: true
+        type: string
+        default: "938"
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    if: ${{ inputs.source_terms_reviewed == true }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install local research package
+        run: python -m pip install -e .
+      - name: Download and verify exact pinned official source bytes
+        env:
+          SOURCE_TERMS_IDENTIFIER: ${{ inputs.source_terms_identifier }}
+          BDB_PLAY_ID: ${{ inputs.play_id }}
+        run: |
+          set -euo pipefail
+          python scripts/qualify_bdb2019_example.py \
+            --download \
+            --source-dir "$RUNNER_TEMP/bdb2019-source" \
+            --output-dir "$RUNNER_TEMP/bdb2019-qualification" \
+            --game-id 2017090700 \
+            --play-id "$BDB_PLAY_ID" \
+            --license-id "$SOURCE_TERMS_IDENTIFIER" \
+            --acknowledge-source-terms \
+            --report-only
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          reports = list((Path(os.environ["RUNNER_TEMP"]) / "bdb2019-qualification").glob("*-qualification.json"))
+          assert len(reports) == 1, "Exactly one source qualification report is required"
+          report = json.loads(reports[0].read_text())
+          assert report["qualification_status"] == "SOURCE_AND_STRUCTURE_QUALIFIED_VIDEO_PENDING"
+          assert report["source_video_alignment_verified"] is False
+          assert all(item["identity_match"] for item in report["source_identities"].values())
+          assert report["tracking"]["frame_count"] >= 2
+          assert report["play"]["offense_side_verified_from_metadata"] in {"away", "home"}
+          print("Official bytes, possession metadata and tracked-frame structure qualified; VIDEO PENDING")
+          PY
+      - name: Upload summary JSON ONLY, never raw tracking or replay positions
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bdb2019-source-and-structure-report
+          path: ${{ runner.temp }}/bdb2019-qualification/*-qualification.json
+          if-no-files-found: error

@@ -142,6 +142,35 @@ try {
   assert.equal(await evalPage("document.querySelector('.gameday-history-meta')?.textContent?.includes('2 missing frames')",sid),true);
   console.log('PASS: real WebGL2 + 2D switch + synthetic CI replay import + recorded frame stepping + travel disclosure.');
 
+  // Optional local source-data check. Never exercised by push/PR CI:
+  // PLAYLAB_REAL_REPLAY_PATH must be a user-authorized local research file.
+  // No raw source rows or screenshots of this sample are published.
+  if (process.env.PLAYLAB_REAL_REPLAY_PATH) {
+    const privatePath=path.resolve(process.env.PLAYLAB_REAL_REPLAY_PATH);
+    const realContent=await readFile(privatePath,'utf8');
+    if (Buffer.byteLength(realContent,'utf8')>25_000_000)throw new Error('Local real replay exceeds 25 MB safety limit');
+    const record=JSON.parse(realContent);
+    assert.equal(record.data_mode,'HISTORICAL_RESEARCH');
+    assert.equal(record.tracking_fidelity,'RECORDED_FRAMES');
+    assert.ok(record.frame_count>=2 && Array.isArray(record.frames));
+    const wentBack=await evalPage("(()=>{const b=[...document.querySelectorAll('button')].find(v=>v.textContent?.includes('Return to demo'));b?.click();return !!b})()",sid);
+    assert.equal(wentBack,true,'Cannot leave synthetic replay');
+    await until("document.querySelector('.gameday-head h1')?.textContent?.includes('See the game beneath the game')",sid,'return to tutorial mode');
+    const imported=await evalPage("(()=>{const input=document.querySelector('input[type=file][accept*=\"json\"]');if(!input)return false;const dt=new DataTransfer();dt.items.add(new File(["+JSON.stringify(realContent)+"],'local-research-replay.json',{type:'application/json'}));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));return true})()",sid);
+    assert.equal(imported,true,'Local research file input unavailable');
+    await until("document.querySelector('.gameday-head h1')?.textContent?.includes('Recorded movement, not reconstructed guesses')",sid,'real source replay mount');
+    const meta=await evalPage("document.querySelector('.gameday-head')?.textContent",sid);
+    assert.ok(meta?.includes(record.game_id) && meta?.includes(record.play_id),'Incorrect real replay identity shown');
+    await until("document.querySelector('.field3d-source')?.textContent?.includes('RECORDED X/Y')",sid,'real recorded field');
+    const first=record.frames[0].frame_id,next=record.frames[1].frame_id;
+    await evalPage("document.querySelector('button[aria-label=\"Reset replay\"]')?.click()",sid);
+    await until("document.querySelector('.gameday-player-controls')?.textContent?.includes('frame "+first+"')",sid,'real first source frame');
+    await evalPage("document.querySelector('button[aria-label=\"Next recorded source frame\"]')?.click()",sid);
+    await until("document.querySelector('.gameday-player-controls')?.textContent?.includes('frame "+next+"')",sid,'real second recorded frame');
+    console.log('PASS: locally provided real-source replay loaded and stepped without raw-data output. Video alignment remains pending.');
+  }
+
+
 } finally {
   for(const job of pending.values())job.reject(new Error('Browser shutdown'));
   pending.clear();
