@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { motionAtFrame, observedDistance, formationFootprint } from './trackingMotion.ts';
+import { motionAtFrame, observedDistance, buildObservedPathIndex, formationFootprint } from './trackingMotion.ts';
 
 const frames = [
   { frame_id: 1, t_seconds_nominal: 0, players: [
@@ -72,4 +72,25 @@ test('formation footprint is geometric and excludes unknown-team members',()=>{
   assert.equal(attack.centroid_x,42.5);
   assert.equal(attack.centroid_y,15);
   assert.equal(formationFootprint([{nfl_id:'X',x:41,y:20,side:null}],'offense'),null);
+});
+
+test('indexed path length matches direct integration at every frame and gap',()=>{
+  const index=buildObservedPathIndex(frames);
+  assert.equal(index.frameCount,frames.length);
+  assert.equal(index.playerCount,3);
+  for(const player of ['11','22','33'])for(let i=0;i<frames.length;i++){
+    assert.deepEqual(index.get(player,i),observedDistance(frames,player,i));
+  }
+  assert.equal(index.get('missing',2),null);
+  assert.equal(index.get('11',frames.length),null);
+});
+test('indexed movement does not leak across absent player observations',()=>{
+  const f=[
+    {frame_id:10,t_seconds_nominal:0,players:[{nfl_id:'a',x:30,y:30}]},
+    {frame_id:11,t_seconds_nominal:.1,players:[{nfl_id:'b',x:32,y:30}]},
+    {frame_id:12,t_seconds_nominal:.2,players:[{nfl_id:'a',x:50,y:30}]},
+  ];
+  const index=buildObservedPathIndex(f);
+  assert.deepEqual(index.get('a',2),{yards:0,observed_pairs:0,complete:false});
+  assert.deepEqual(index.get('b',2),{yards:0,observed_pairs:0,complete:false});
 });

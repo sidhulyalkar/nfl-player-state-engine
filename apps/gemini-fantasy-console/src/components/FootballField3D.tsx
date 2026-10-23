@@ -5,6 +5,7 @@ import {
   projectToScreen, type CameraBasis, type CameraPreset, type Orbit, type Vec3,
 } from './football3dMath';
 import '../football-field-3d.css';
+import { travelChevron } from './playerTravelGeometry';
 
 /** Source-facing types: coordinates in yards, not arbitrary screen positions. */
 export interface Field3DPlayer {
@@ -98,6 +99,17 @@ class Mesh {
                 x+Math.cos(b)*r,z+Math.sin(b)*r,w,h,color);
     }
   }
+  /** Axis-aligned neutral glyph geometry; intentionally not a player-facing pose. */
+  block(x:number,z:number,rx:number,rz:number,y0:number,y1:number,color:Color){
+    const a:Vec3=[x-rx,y0,z-rz],b:Vec3=[x+rx,y0,z-rz];
+    const c:Vec3=[x+rx,y0,z+rz],d:Vec3=[x-rx,y0,z+rz];
+    const e:Vec3=[x-rx,y1,z-rz],f:Vec3=[x+rx,y1,z-rz];
+    const g:Vec3=[x+rx,y1,z+rz],h:Vec3=[x-rx,y1,z+rz];
+    const shade:Color=[color[0]*.7,color[1]*.7,color[2]*.7];
+    this.quad(a,b,f,e,shade);this.quad(b,c,g,f,color);
+    this.quad(c,d,h,g,shade);this.quad(d,a,e,h,color);
+    this.quad(e,f,g,h,color);
+  }
   cylinder(x:number,z:number,r:number,h:number,y0:number,color:Color){
     const n=10;
     for(let i=0;i<n;i++){
@@ -162,20 +174,19 @@ function buildActors(p:Props):Float32Array {
     const current=new Map(p.players.map(player=>[player.id,player]));
     for(const vector of p.motion){
       const player=current.get(vector.id);
-      if(!player || !Number.isFinite(vector.speed) || vector.speed < .5)continue;
-      const d=Math.hypot(vector.dx,vector.dy);
-      if(!Number.isFinite(d) || d<.005)continue;
-      const start=safeField(player.x,player.y,.18);
-      const end=safeField(player.x+vector.dx/d*Math.min(3,Math.max(.8,vector.speed*.24)),player.y+vector.dy/d*Math.min(3,Math.max(.8,vector.speed*.24)),.18);
-      if(!start||!end)continue;
+      if(!player)continue;
+      const triangle=travelChevron(
+        {x:player.x,y:player.y},
+        {dx:vector.dx,dy:vector.dy,speed:vector.speed},
+      );
+      if(!triangle)continue;
+      const points=triangle.map(v=>safeField(v.x,v.y,.2));
+      if(points.some(v=>!v))continue;
+      const [a,b,c]=points as [Vec3,Vec3,Vec3];
+      const at=safeField(player.x,player.y,.2);
       const color=player.id===p.selectedId?SELECT:player.side==='offense'?OFFENSE:player.side==='defense'?DEFENSE:UNKNOWN;
-      m.line(start[0],start[2],end[0],end[2],.19,.2,color);
-      const vx=end[0]-start[0],vz=end[2]-start[2],len=Math.hypot(vx,vz);
-      if(len>.1){
-        const ux=vx/len,uz=vz/len;
-        m.triangle([end[0],.24,end[2]],[end[0]-ux*.65-uz*.36,.24,end[2]-uz*.65+ux*.36],
-          [end[0]-ux*.65+uz*.36,.24,end[2]-uz*.65-ux*.36],color);
-      }
+      if(at)m.line(at[0],at[2],a[0],a[2],.16,.2,color);
+      m.triangle(a,b,c,color);
     }
   }
   if(p.showSnap && p.snapPlayers?.length){
@@ -203,9 +214,21 @@ function buildActors(p:Props):Float32Array {
     if(!world)continue;
     const [x,,z]=world;
     const color=player.side==='offense'?OFFENSE:player.side==='defense'?DEFENSE:UNKNOWN;
-    m.cylinder(x,z,.82,.035,.10,[.025,.085,.10]); // foot shadow
-    m.cylinder(x,z,.55,1.56,.15,color); // torso and shoulders
-    m.cylinder(x,z,.43,.58,1.71,player.side==='defense'?[.94,.79,.77]:[.83,.91,1]);
+    // Stylized 3D figure: symmetric silhouette stays deliberately unrotated.
+    // The separate turf chevron is measured TRAVEL, not true body orientation.
+    m.cylinder(x,z,.76,.035,.08,[.025,.085,.10]); // foot shadow
+    const boot:Color=[.09,.16,.19];
+    m.block(x,z-.21,.15,.16,.12,.43,boot);
+    m.block(x,z+.21,.15,.16,.12,.43,boot);
+    const leg:Color=[color[0]*.52,color[1]*.52,color[2]*.52];
+    m.block(x,z-.22,.19,.19,.40,.98,leg);
+    m.block(x,z+.22,.19,.19,.40,.98,leg);
+    m.block(x,z,.38,.50,.92,1.64,color); // padded torso
+    m.block(x,z-.60,.24,.14,1.11,1.58,color); // shoulder sleeve
+    m.block(x,z+.60,.24,.14,1.11,1.58,color);
+    m.cylinder(x,z,.43,.39,1.65,[.81,.87,.89]); // neutral helmet
+    m.cylinder(x,z,.50,.09,1.81,color); // team helmet stripe
+
     if(player.id===p.selectedId){
       m.ring(x,z,1.35,.24,.13,SELECT);
       m.ring(x,z,1.63,.10,.13,SELECT);
@@ -426,7 +449,7 @@ export function FootballField3D(props:Props) {
     <div className="field3d-stage">
       <canvas ref={canvasRef} aria-label="3D interactive football field: drag to orbit, shift-drag to pan, wheel to zoom; use the player list to select with keyboard" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onContextMenu={e=>e.preventDefault()} />
       <canvas ref={labelsRef} aria-hidden="true" className="field3d-labels" />
-      <div className="field3d-source"><Scan size={14}/> {props.synthetic?'ILLUSTRATIVE MOVEMENT':'RECORDED X/Y · 3D FIELD'} · BALL HEIGHT UNKNOWN</div>
+      <div className="field3d-source"><Scan size={14}/> {props.synthetic?'ILLUSTRATIVE MOVEMENT':'RECORDED X/Y · 3D FIELD'} · BALL HEIGHT UNKNOWN {props.showMotion&&props.motion?.length?' · CHEVRONS = OBSERVED TRAVEL, NOT FACING':''}</div>
       {error&&<div className="field3d-unavailable" role="alert">{error}<p>Choose 2D field to continue inspecting the replay.</p></div>}
       <div className="field3d-legend" aria-hidden="true"><span><i className="field3d-offense"/>Offense</span><span><i className="field3d-defense"/>Defense</span><span><i className="field3d-unknown"/>Unknown</span></div>
     </div>
