@@ -18,6 +18,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
+from xerj_query_modes import QUERY_MODES, build_query
 from xerj_ranking import rank_unique_files
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -230,11 +231,14 @@ def source_path(hit: dict) -> str | None:
 def benchmark(
     url: str, corpus: Path, cases_file: Path, k: int = 5,
     *, ranker: str = "raw", candidate_pool: int = 30,
+    query_mode: str = "lexical",
 ) -> dict:
     if k < 1 or k > 50:
         raise ValueError("k must be between 1 and 50")
     if ranker not in {"raw", "symbol-owner"}:
         raise ValueError("Unknown ranker")
+    if query_mode not in QUERY_MODES:
+        raise ValueError("Unknown query mode")
     if ranker != "raw" and not k <= candidate_pool <= 100:
         raise ValueError("candidate_pool must be between k and 100")
     fetch_size = k if ranker == "raw" else candidate_pool
@@ -267,7 +271,7 @@ def benchmark(
         started = time.perf_counter()
         response = request(url, f"/{PREFIX}-*/_search", {
             "size": fetch_size,
-            "query": {"match": {"body": case["query"]}},
+            "query": build_query(query_mode, case["query"], fetch_size),
             "_source": ["ax_path", "ax_locator", "title", "language", "defs"],
         })
         elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
@@ -336,6 +340,7 @@ def benchmark(
         "corpus_file_count": len(indexed_files),
         "k": k, "tasks": n,
         "ranker": ranker, "candidate_pool": fetch_size,
+        "query_mode": query_mode,
         "unmapped_result_count": sum(row["unmapped_hits"] for row in results),
         "candidate_hit_at_pool": round(
             sum(row["candidate_hit_at_pool"] for row in results) / n, 4
@@ -376,6 +381,8 @@ def main(argv: list[str] | None = None) -> int:
     trial.add_argument("--top-k", type=int, default=5)
     trial.add_argument("--ranker", choices=("raw", "symbol-owner"), default="raw")
     trial.add_argument("--candidate-pool", type=int, default=30)
+    trial.add_argument("--query-mode", choices=QUERY_MODES, default="lexical",
+                       help="Read-only lexical (control), semantic, or hybrid RRF")
     trial.add_argument("--output", type=Path, default=OUTPUT)
     args = parser.parse_args(argv)
     try:
@@ -429,6 +436,7 @@ def main(argv: list[str] | None = None) -> int:
             report = benchmark(
                 url, corpus, args.cases, args.top_k,
                 ranker=args.ranker, candidate_pool=args.candidate_pool,
+                query_mode=args.query_mode,
             )
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
