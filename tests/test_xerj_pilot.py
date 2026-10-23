@@ -117,6 +117,12 @@ def test_excludes_symlinks_hidden_and_untrusted_paths() -> None:
     assert not pilot.eligible("data/product/live_leagues/123.json")
     assert not pilot.eligible("artifacts/models/registry.json")
     assert not pilot.eligible("apps/gemini-fantasy-console/package-lock.json")
+    assert not pilot.eligible("configs/xerj/pilot_queries.json")
+    assert not pilot.eligible("configs/xerj/natural_language_queries_v1.json")
+    assert not pilot.eligible("tests/test_xerj_pilot.py")
+    assert not pilot.eligible("tests/test_xerj_ranking.py")
+    assert not pilot.eligible("scripts/xerj_rg_baseline.py")
+    assert not pilot.eligible("docs/tools/xerj_pilot.md")
     assert not pilot.eligible("../outside.py")
 
 
