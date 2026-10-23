@@ -47,7 +47,10 @@ Load Fourth Down Lab > GameDay Lab:
 5. **Back to play atlas** returns to the original frame/event overview.
 
 The exporter verifies all three **whole source file Git blob hashes and lengths**
-before performing the join. It requires all tracked play IDs in the catalog to
+before performing the join. For an official source, it also independently rescans
+all 316,025 tracking rows and requires the entire 177-play catalog (including
+per-play observation counts and frame/event evidence) to match exactly; merely
+claiming the correct tracking-file SHA in a manually edited JSON is insufficient. It requires all tracked play IDs in the catalog to
 have exactly one matching official `plays.csv` row and reconciles possession
 against home/away identities from `games.csv`. The browser independently
 checks game ID, tracking source SHA, play count, play IDs and tracked row counts,
