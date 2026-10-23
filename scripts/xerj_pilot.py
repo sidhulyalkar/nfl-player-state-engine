@@ -227,7 +227,7 @@ def benchmark(
         raise ValueError("k must be between 1 and 50")
     if ranker not in {"raw", "symbol-owner"}:
         raise ValueError("Unknown ranker")
-    if not k <= candidate_pool <= 100:
+    if ranker != "raw" and not k <= candidate_pool <= 100:
         raise ValueError("candidate_pool must be between k and 100")
     fetch_size = k if ranker == "raw" else candidate_pool
     count = check_index(url)
