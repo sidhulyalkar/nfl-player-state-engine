@@ -103,3 +103,68 @@ After checking out the latest branch commit, **rebuild the index** because the s
 The original 2026-10-23 run is the frozen historical baseline; don't replace or relabel it as a v2 run. Ranker results are not necessarily better than raw baseline and require independent measurement.
 
 **Crucial caveat:** Exact function and class symbol lookups are often trivial for local `rg` or AST-based navigation. Symbol-owner reranking is a diagnostic for navigation quality, *not evidence that XERJ beats ordinary code search*. Next, preregister natural-language tasks that don't provide exact symbol names and run a randomized, blinded, paired agent study against a strong `rg`+repo-tool baseline before deciding to roll out to other repositories.
+
+## Clean natural-language comparison protocol (v1)
+
+The first October 23 pilot was **exploratory, not fully blinded**: the original corpus allowlist included configs/xerj/ and could therefore index the query labels and expected source paths. Some benchmark-specific tests and self-referential documentation were also eligible. This is a reproducibility risk even if a particular result did not use those documents. Preserve its 85% Hit@5 / 0.4017 MRR@5 as an exploratory observation, not a qualified search-result claim.
+
+The corrected allowlist excludes configs/xerj/, scripts/xerj_*, tests/test_xerj_*, and docs/tools/xerj_pilot.md. The clean index uses **nfl-pse-clean** rather than nfl-pse, so previous answer-key chunks cannot persist in a reused namespace. New CI checks both suites' answers are present in the safely staged code, while the evaluation fixtures themselves are absent from the index.
+
+Twenty frozen problem-oriented, natural-language questions live in configs/xerj/natural_language_queries_v1.json. These do not disclose the exact function names to the retrieval algorithm, although the source owners and labels were authored with knowledge of the repository. This suite is a developer-retrieval experiment, not a truly independent blind external user benchmark.
+
+After checking out the most recent PR branch and starting the XERJ server, **inspect the staging manifest and dry-run plan before indexing**:
+
+    python scripts/xerj_pilot.py prepare
+    python scripts/xerj_pilot.py index
+    python scripts/xerj_pilot.py index --apply
+
+Then run the exact-symbol suite using the clean index:
+
+    python scripts/xerj_pilot.py benchmark \
+      --cases configs/xerj/pilot_queries.json \
+      --output .xerj-reports/clean_exact_raw.json
+
+    python scripts/xerj_pilot.py benchmark \
+      --cases configs/xerj/pilot_queries.json \
+      --ranker symbol-owner --candidate-pool 30 \
+      --output .xerj-reports/clean_exact_owner.json
+
+    python scripts/xerj_rg_baseline.py \
+      --cases configs/xerj/pilot_queries.json \
+      --output .xerj-reports/clean_exact_rg.json
+
+    python scripts/xerj_compare.py \
+      --raw .xerj-reports/clean_exact_raw.json \
+      --owner .xerj-reports/clean_exact_owner.json \
+      --rg .xerj-reports/clean_exact_rg.json \
+      --output .xerj-reports/clean_exact_compare.json
+
+Repeat on the **natural-language suite**, without modifying its frozen labels:
+
+    python scripts/xerj_pilot.py benchmark \
+      --cases configs/xerj/natural_language_queries_v1.json \
+      --output .xerj-reports/clean_natural_raw.json
+
+    python scripts/xerj_pilot.py benchmark \
+      --cases configs/xerj/natural_language_queries_v1.json \
+      --ranker symbol-owner --candidate-pool 30 \
+      --output .xerj-reports/clean_natural_owner.json
+
+    python scripts/xerj_rg_baseline.py \
+      --cases configs/xerj/natural_language_queries_v1.json \
+      --output .xerj-reports/clean_natural_rg.json
+
+    python scripts/xerj_compare.py \
+      --raw .xerj-reports/clean_natural_raw.json \
+      --owner .xerj-reports/clean_natural_owner.json \
+      --rg .xerj-reports/clean_natural_rg.json \
+      --output .xerj-reports/clean_natural_compare.json
+
+The local baseline requires ripgrep installed and available as rg. It uses the **same checked, immutable staged source snapshot** as XERJ, lexical ripgrep candidate discovery, BM25-style term-frequency weighting, path tokens, and exact-definition verification for symbol-name queries. It has no network dependency, does not access expected paths during ranking, and separately records the local catalog's build cost. Its query latencies cannot be compared naively against only XERJ HTTP request times because XERJ indexing has already been amortized. Record the XERJ indexing cost and node startup alongside the reports when evaluating end-to-end workflows.
+
+The comparison report refuses missing source fingerprints, mismatched Git commits, inconsistent query labels, incomplete indexes, or unknown XERJ sources. It keeps raw results, deduplicated reranking, and rg measurements distinct. Querying XERJ with a larger pool can change the raw order, so the report also records whether top-k raw results match between request sizes. Treat such differences as a search-engine stability diagnostic.
+
+**Honest go/no-go:**
+- The exact-symbol suite is a sanity check, not a competitive demonstration against rg.
+- The natural-language suite must meet the proposed retrieval thresholds and preferably compete with the strong local baseline before an agent study.
+- Only randomized, isolated end-to-end developer tasks with hidden labels can establish agent correctness, latency, or token improvements. Do not claim benefits to NFL prediction quality from source search.
