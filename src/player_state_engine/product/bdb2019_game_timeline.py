@@ -12,6 +12,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from player_state_engine.product.bdb2019_play_catalog import (
+    OFFICIAL_PLAY_COUNT,
+    OFFICIAL_SOURCE_ROWS,
+)
 from player_state_engine.product.bdb2019_source_qualification import (
     GAME_REQUIRED,
     PLAY_REQUIRED,
@@ -87,6 +91,13 @@ def build_bdb2019_game_timeline(
         or len(catalog["plays"]) > 1000
     ):
         raise ValueError("Position-free catalog provenance or shape disagrees with source.")
+    canonical = dict(expectations) == SOURCE_FILES
+    if canonical and (
+        catalog.get("play_count") != OFFICIAL_PLAY_COUNT
+        or catalog.get("source_rows") != OFFICIAL_SOURCE_ROWS
+        or catalog.get("qualification_status") != "SOURCE_AND_STRUCTURE_QUALIFIED_VIDEO_PENDING"
+    ):
+        raise ValueError("Official game timeline requires the complete source-audited 177-play catalog.")
     ids = set()
     for play in catalog["plays"]:
         if not isinstance(play, dict) or set(play).intersection({"frames", "players", "x", "y", "tracking"}):
@@ -154,7 +165,6 @@ def build_bdb2019_game_timeline(
             "personnel_charted": _optional_text(row.get("personnel.offense"), 120),
             "source_tracking_rows": next(p["source_rows"] for p in catalog["plays"] if p["play_id"] == pid),
         })
-    canonical = dict(expectations) == SOURCE_FILES
     return {
         "schema_version": 1,
         "data_mode": "HISTORICAL_RESEARCH_GAME_TIMELINE",
