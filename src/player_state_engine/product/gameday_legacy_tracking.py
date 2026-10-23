@@ -94,6 +94,19 @@ def import_bdb_2019_example(
             if unique in frame_seen:
                 raise ValueError("Duplicate identity within a recorded frame.")
             frame_seen.add(unique)
+            # Validate identity semantics BEFORE the optional on-field omission.
+            # Malformed team metadata must never hide behind missing x/y.
+            team = (row.get("team") or "").strip().lower()
+            if team not in {"home", "away", "football", "ball", ""}:
+                raise ValueError("Invalid home/away team label.")
+            if not ident and team not in {"football", "ball", ""}:
+                raise ValueError("Ball row must not carry a player-team label.")
+            if ident and team not in {"home", "away"}:
+                raise ValueError("Player must identify home or away team.")
+            side = (
+                ("offense" if team == offense_side else "defense")
+                if ident and offense_side is not None else None
+            )
             # Preserve source frames/events even if an entity has no valid
             # on-field position. Never reconstruct or boundary-clamp its x/y.
             frame_entities.setdefault(frame_id, [])
@@ -118,17 +131,6 @@ def import_bdb_2019_example(
                     omitted_off_field_positions += 1
                 continue
 
-            team = (row.get("team") or "").strip().lower()
-            if team not in {"home", "away", "football", "ball", ""}:
-                raise ValueError("Invalid home/away team label.")
-            if not ident and team not in {"football", "ball", ""}:
-                raise ValueError("Ball row must not carry a player-team label.")
-            if ident and team not in {"home", "away"}:
-                raise ValueError("Player must identify home or away team.")
-            side = (
-                ("offense" if team == offense_side else "defense")
-                if ident and offense_side is not None else None
-            )
             entity = {
                 "nfl_id": ident or None,
                 "is_ball": not ident,
