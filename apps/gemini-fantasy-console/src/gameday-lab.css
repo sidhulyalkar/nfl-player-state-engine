@@ -148,3 +148,42 @@
   .gameday-display-options button { font-size: 9px; padding: 6px 5px; }
   .gameday-field-shell > .field3d-shell .field3d-source { top: 48px; }
 }
+
+/* Historical replay stays explicit about missing source frames. */
+.gameday-gap-banner {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  bottom: 63px;
+  transform: translateX(-50%);
+  width: min(92%, 700px);
+  padding: 12px 15px;
+  border: 1px solid rgba(255, 189, 103, .72);
+  border-radius: 9px;
+  background: rgba(34, 27, 22, .95);
+  color: #ffe0a1;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+  pointer-events: none;
+  box-shadow: 0 8px 27px rgba(0,0,0,.25);
+}
+.gameday-playback-speed {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  color: #a7c7d1;
+  font-size: 11px;
+}
+.gameday-playback-speed select {
+  color: #d5efe8;
+  background: #172e3a;
+  border: 1px solid #4a6b76;
+  border-radius: 6px;
+  padding: 4px 5px;
+}
+@media(max-width:670px) {
+  .gameday-gap-banner { bottom: 46px; font-size: 10px; padding: 8px; }
+  .gameday-playback-speed { font-size: 10px; }
+  .gameday-playback-speed select { padding: 3px; }
+}
