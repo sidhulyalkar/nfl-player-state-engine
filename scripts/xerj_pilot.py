@@ -53,8 +53,7 @@ SENSITIVE = (
 
 def git(repo: Path, *args: str) -> bytes:
     return subprocess.run(
-        ["git", *args], cwd=repo, check=True, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        ["git", *args], cwd=repo, check=True, capture_output=True,
     ).stdout
 
 
