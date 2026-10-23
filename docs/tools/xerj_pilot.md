@@ -39,7 +39,7 @@ Terminal B, from a clean NFL Player State Engine checkout:
     xerj search --url http://127.0.0.1:9200 --prefix nfl-pse -k 5 "assess_draft_release_readiness"
     python scripts/xerj_pilot.py benchmark
 
-The first index command is a **dry-run by default**. Only --apply writes the index. The benchmark report appears under .xerj-reports/pilot_report.json and is not committed. Each source snapshot is keyed to one Git HEAD; repeat prepare and index when you commit new changes. Dirty changes are intentionally invisible.
+The first index command is a **dry-run by default**. Only --apply writes the index. A successful apply writes a local index_receipt.json alongside snapshot_manifest.json, recording the source fingerprint, prefix, local node URL, and complete/partial indexing status. A benchmark refuses an absent or stale receipt. When XERJ reports skipped/junk files, the receipt records partial, and coverage must be inspected before claiming completeness. The benchmark report appears under .xerj-reports/pilot_report.json and is not committed. Each source snapshot is keyed to one Git HEAD; repeat prepare and index when you commit new changes. Dirty changes are intentionally invisible.
 
 If using an authenticated node, omit --insecure and export XERJ_API_KEY from its locally generated admin key. The autoindex client does not load that key from the server TOML automatically.
 
