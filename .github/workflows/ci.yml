@@ -82,6 +82,12 @@ jobs:
           assert manifest["source_license"] == "MIT"
           print(f"Safe XERJ snapshot: {manifest['file_count']} tracked files, 2 evaluation suites")
           PY
+      - name: Install ripgrep for independent source-search baseline
+        run: |
+          if ! command -v rg >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ripgrep
+          fi
       - name: Reproduce strong local ripgrep baseline against clean source snapshot
         run: |
           command -v rg
