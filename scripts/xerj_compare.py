@@ -26,6 +26,9 @@ def compare(raw: dict, owner: dict, rg: dict) -> dict:
         values = [r.get(field) for r in (raw, owner, rg)]
         if any(value is None for value in values) or len(set(values)) != 1:
             raise ValueError(f"Incompatible benchmark reports: {field}")
+    query_mode = raw.get("query_mode", "lexical")
+    if query_mode != owner.get("query_mode", "lexical"):
+        raise ValueError("Cannot compare different XERJ query modes")
     if raw.get("ranker") != "raw" or owner.get("ranker") != "symbol-owner":
         raise ValueError("Expected one raw and one symbol-owner XERJ report")
     if rg.get("kind") != "developer_retrieval_baseline":
@@ -87,6 +90,7 @@ def compare(raw: dict, owner: dict, rg: dict) -> dict:
         "repo_commit": raw["repo_commit"],
         "source_fingerprint": raw["source_fingerprint"],
         "suite": raw["suite"],
+        "query_mode": query_mode,
         "tasks": n,
         "k": raw["k"],
         "raw_hit_at_k": hit("raw_hit"),
