@@ -82,3 +82,8 @@ Desktop.ini
 /artifacts/reports/historical_source_ablation_hardened/*
 !/artifacts/reports/historical_source_ablation_hardened/historical_source_summary.csv
 !/artifacts/reports/historical_source_ablation_hardened/historical_source_source_coverage.csv
+
+# Developer-only XERJ pilot receipts (never source or model authority)
+.xerj-reports/
+.xerj-data/
+.xerj-state/
