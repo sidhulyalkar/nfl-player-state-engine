@@ -187,3 +187,36 @@
   .gameday-playback-speed { font-size: 10px; }
   .gameday-playback-speed select { padding: 3px; }
 }
+
+/* Research play library stays session-local, explicit about source evidence. */
+.gameday-library-picker {
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  padding:5px 0;
+  color:var(--gd-muted,#8199ad);
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.025em;
+  max-width:min(325px,100%);
+}
+.gameday-library-picker select {
+  min-height:34px;
+  max-width:100%;
+  min-width:160px;
+  border:1px solid rgba(123,184,183,.42);
+  background:#132835;
+  border-radius:9px;
+  padding:5px 8px;
+  font:inherit;
+  font-size:12px;
+  color:#e3f4ee;
+}
+.gameday-library-picker select:focus-visible {
+  outline:2px solid #85e1c6;
+  outline-offset:2px;
+}
+@media(max-width:940px) {
+  .gameday-history-actions {flex-wrap:wrap;justify-content:flex-start;}
+  .gameday-library-picker {max-width:100%;}
+}

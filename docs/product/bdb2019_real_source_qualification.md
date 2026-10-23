@@ -169,3 +169,34 @@ Git source records via the GitHub integration. The entire original
 environment, and the manual all-three-source workflow has not yet run.
 No original-video alignment, ball-height measurement or commercial reuse
 approval is implied.
+
+
+## Multi-play research session (local UI)
+
+Fourth Down Lab now supports selecting several research replay JSON files at
+once with the **Load historical replay JSON(s)** file picker. The uploaded
+user-owned coordinates stay in React session memory. The panel exposes a
+**Research playlist** to switch plays, while **Add replay JSON(s)** appends
+another verified local file. The demo view retains a temporary play selector
+until the page is refreshed or navigated away from.
+
+For both original 2017 touchdowns:
+
+1. Use the above qualification command to generate each play's JSON.
+2. Select both JSON files from the local file picker (macOS: Command-click).
+3. In the historical panel, switch between game 2017090700, play 938
+   and game 2017090700, play 2756.
+4. Compare snap-aligned observed positions, event frames, selected-player
+   traveled distance, direction-of-travel arrows and exclusions. These are
+   observations, not reconstructed coaching intent or film verification.
+
+The research playlist is deliberately limited to 12 plays and 50 MB of
+serialized replay data in one browser session, with a 25 MB per-file cap.
+Conflicting normalized data for an existing game/play key are rejected,
+not silently overwritten; identical duplicate imports are idempotent.
+Importing a batch is atomic: one conflicting, corrupt or too-large file
+must not partially alter the session.
+
+No server upload, permanent storage or licensed live NFL feed is involved.
+Refreshing the browser clears the session. Do not interpret the label
+"Research playlist" as a dataset attestation or license approval.
