@@ -18,6 +18,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
+from xerj_ranking import rank_unique_files
+
 ROOT = Path(__file__).resolve().parents[1]
 PREFIX = "nfl-pse"
 URL = "http://127.0.0.1:9200"
@@ -217,9 +219,17 @@ def source_path(hit: dict) -> str | None:
     return path if path else None
 
 
-def benchmark(url: str, corpus: Path, cases_file: Path, k: int = 5) -> dict:
+def benchmark(
+    url: str, corpus: Path, cases_file: Path, k: int = 5,
+    *, ranker: str = "raw", candidate_pool: int = 30,
+) -> dict:
     if k < 1 or k > 50:
         raise ValueError("k must be between 1 and 50")
+    if ranker not in {"raw", "symbol-owner"}:
+        raise ValueError("Unknown ranker")
+    if not k <= candidate_pool <= 100:
+        raise ValueError("candidate_pool must be between k and 100")
+    fetch_size = k if ranker == "raw" else candidate_pool
     count = check_index(url)
     manifest = json.loads((corpus.parent / "snapshot_manifest.json").read_text(encoding="utf-8"))
     if manifest["corpus_dir"] != str(corpus):
@@ -248,7 +258,7 @@ def benchmark(url: str, corpus: Path, cases_file: Path, k: int = 5) -> dict:
             raise ValueError(f"Benchmark ground truth not in snapshot: {case['id']}")
         started = time.perf_counter()
         response = request(url, f"/{PREFIX}-*/_search", {
-            "size": k,
+            "size": fetch_size,
             "query": {"match": {"body": case["query"]}},
             "_source": ["ax_path", "ax_locator", "title", "language", "defs"],
         })
@@ -269,14 +279,38 @@ def benchmark(url: str, corpus: Path, cases_file: Path, k: int = 5) -> dict:
                 "locator": source.get("ax_locator"),
                 "title": source.get("title"),
             })
-        first_rank = next((rank for rank, path in enumerate(paths, 1) if path in expected), None)
+        raw_top_k = paths[:k]
+        first_rank = next(
+            (rank for rank, path in enumerate(raw_top_k, 1) if path in expected), None
+        )
+        ranked_paths = None
+        ranked_first_rank = None
+        rank_latency_ms = 0.0
+        if ranker == "symbol-owner":
+            ranking_started = time.perf_counter()
+            ranked_paths = rank_unique_files(paths, case["query"], corpus, indexed_hashes)[:k]
+            rank_latency_ms = round((time.perf_counter() - ranking_started) * 1000, 2)
+            ranked_first_rank = next(
+                (rank for rank, path in enumerate(ranked_paths, 1) if path in expected),
+                None,
+            )
         results.append({
             "id": case["id"], "query": case["query"],
-            "expected_paths": sorted(expected), "returned_paths": paths,
-            "returned_evidence": evidence,
+            "expected_paths": sorted(expected), "returned_paths": raw_top_k,
+            "returned_evidence": evidence[:k],
             "unmapped_hits": sum(not item["in_snapshot"] for item in evidence),
             "first_rank": first_rank, "hit_at_k": first_rank is not None,
             "reciprocal_rank": round(1 / first_rank, 5) if first_rank else 0,
+            "candidate_hit_at_pool": any(path in expected for path in paths),
+            "raw_candidates_returned": len(paths),
+            "unique_candidates_returned": len(set(paths)),
+            "ranked_returned_paths": ranked_paths,
+            "ranked_first_rank": ranked_first_rank,
+            "ranked_hit_at_k": ranked_first_rank is not None if ranked_paths is not None else None,
+            "ranked_reciprocal_rank": (
+                round(1 / ranked_first_rank, 5) if ranked_first_rank else 0.0
+            ) if ranked_paths is not None else None,
+            "rank_latency_ms": rank_latency_ms,
             "latency_ms": elapsed_ms,
         })
     n = len(results)
@@ -291,9 +325,25 @@ def benchmark(url: str, corpus: Path, cases_file: Path, k: int = 5) -> dict:
         "index_status": receipt["status"],
         "corpus_file_count": len(indexed_files),
         "k": k, "tasks": n,
+        "ranker": ranker, "candidate_pool": fetch_size,
         "unmapped_result_count": sum(row["unmapped_hits"] for row in results),
+        "candidate_hit_at_pool": round(
+            sum(row["candidate_hit_at_pool"] for row in results) / n, 4
+        ),
         "hit_at_k": round(sum(row["hit_at_k"] for row in results) / n, 4),
         "mrr_at_k": round(sum(row["reciprocal_rank"] for row in results) / n, 4),
+        "ranked_hit_at_k": (
+            round(sum(row["ranked_hit_at_k"] for row in results) / n, 4)
+            if ranker != "raw" else None
+        ),
+        "ranked_mrr_at_k": (
+            round(sum(row["ranked_reciprocal_rank"] for row in results) / n, 4)
+            if ranker != "raw" else None
+        ),
+        "p50_rank_latency_ms": (
+            sorted(row["rank_latency_ms"] for row in results)[(n - 1) // 2]
+            if ranker != "raw" else None
+        ),
         "p50_latency_ms": latency[(n - 1) // 2],
         "p95_latency_ms": latency[min(n - 1, (95 * n + 99) // 100 - 1)],
         "results": results,
@@ -314,6 +364,8 @@ def main(argv: list[str] | None = None) -> int:
     trial = commands.add_parser("benchmark", help="Run ground-truth retrieval tasks")
     trial.add_argument("--cases", type=Path, default=CASES)
     trial.add_argument("--top-k", type=int, default=5)
+    trial.add_argument("--ranker", choices=("raw", "symbol-owner"), default="raw")
+    trial.add_argument("--candidate-pool", type=int, default=30)
     trial.add_argument("--output", type=Path, default=OUTPUT)
     args = parser.parse_args(argv)
     try:
@@ -364,13 +416,23 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print("Dry-run only: no index was written. Use index --apply to commit.")
         elif args.command == "benchmark":
-            report = benchmark(url, corpus, args.cases, args.top_k)
+            report = benchmark(
+                url, corpus, args.cases, args.top_k,
+                ranker=args.ranker, candidate_pool=args.candidate_pool,
+            )
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
             print(
-                f"{report['tasks']} tasks | hit@{report['k']} {report['hit_at_k']:.1%} | "
-                f"MRR {report['mrr_at_k']:.3f} | report {args.output}"
+                f"{report['tasks']} tasks | raw hit@{report['k']} "
+                f"{report['hit_at_k']:.1%} | raw MRR {report['mrr_at_k']:.3f}"
             )
+            if args.ranker != "raw":
+                print(
+                    f"symbol-owner hit@{report['k']} {report['ranked_hit_at_k']:.1%}"
+                    f" | MRR {report['ranked_mrr_at_k']:.3f}"
+                    f" | candidate recall {report['candidate_hit_at_pool']:.1%}"
+                )
+            print(f"Report: {args.output}")
         return 0
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError, HTTPError, URLError) as exc:
         print(f"XERJ pilot: {exc}", file=sys.stderr)
