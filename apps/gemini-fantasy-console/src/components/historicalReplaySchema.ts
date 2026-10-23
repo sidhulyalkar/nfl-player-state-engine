@@ -21,7 +21,16 @@ export interface HistoricalFrame {
   ball: TrackedEntity | null;
   events: string[];
 }
+export interface PositionQuality {
+  policy: 'strict' | 'omit_off_field_with_audit';
+  omitted_missing_position_rows: number;
+  omitted_off_field_position_rows: number;
+  omitted_total_position_rows: number;
+  affected_source_frame_ids: number[];
+  never_clamped_or_interpolated: true;
+}
 export interface HistoricalReplay {
+  position_quality?: PositionQuality;
   data_mode: 'HISTORICAL_RESEARCH';
   tracking_fidelity: 'RECORDED_FRAMES';
   game_id: string;
@@ -80,5 +89,22 @@ export function parseHistoricalReplay(value: unknown): HistoricalReplay {
   if (o.missing_frame_count!==span-o.frames.length || Math.abs(o.frame_coverage!-o.frames.length/span)>1e-5)throw new Error('Tracking coverage metadata disagrees with frame IDs.');
   if (typeof o.source!=='string' || !o.source.trim() || typeof o.source_license_identifier!=='string' || !o.source_license_identifier.trim())throw new Error('Tracking source attribution is required.');
   if (typeof o.frame_coverage!=='number' || !Number.isFinite(o.frame_coverage) || o.frame_coverage<=0 || o.frame_coverage>1)throw new Error('Invalid tracking coverage metadata.');
+  if (o.position_quality !== undefined) {
+    const q=o.position_quality;
+    const whole=(n:unknown)=>Number.isSafeInteger(n)&&Number(n)>=0;
+    if (!q || !['strict','omit_off_field_with_audit'].includes(q.policy)
+        || !whole(q.omitted_missing_position_rows)
+        || !whole(q.omitted_off_field_position_rows)
+        || !whole(q.omitted_total_position_rows)
+        || q.omitted_total_position_rows!==q.omitted_missing_position_rows+q.omitted_off_field_position_rows
+        || q.never_clamped_or_interpolated!==true || !Array.isArray(q.affected_source_frame_ids)
+        || q.affected_source_frame_ids.length>o.frames.length
+        || q.affected_source_frame_ids.some((id,i)=>!Number.isSafeInteger(id) ||
+          !o.frames!.some(f=>f.frame_id===id) ||
+          (i>0&&id<=q.affected_source_frame_ids[i-1]))
+        || (q.omitted_total_position_rows===0)!==(q.affected_source_frame_ids.length===0)) {
+      throw new Error('Invalid historical observation exclusion audit.');
+    }
+  }
   return o as HistoricalReplay;
 }

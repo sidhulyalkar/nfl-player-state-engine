@@ -27,6 +27,7 @@ def main() -> None:
     parser.add_argument("--csv", required=True, help="Local tracking CSV file")
     parser.add_argument("--format", choices=["bdb2025", "bdb2019"], default="bdb2025")
     parser.add_argument("--offense-side", choices=["home", "away"], help="For bdb2019: verified possession team side from play and game metadata")
+    parser.add_argument("--position-policy", choices=["strict", "omit_off_field_with_audit"], default="strict", help="bdb2019 only: explicitly omit out-of-field/missing positions with audit metadata instead of rejecting play")
     parser.add_argument("--game-id", required=True)
     parser.add_argument("--play-id", required=True)
     parser.add_argument("--possession-team", help="Offense team abbreviation, if independently verified")
@@ -47,8 +48,11 @@ def main() -> None:
             offense_side=args.offense_side,
             license_acknowledged=args.acknowledge_source_terms,
             license_identifier=args.license_id,
+            position_policy=args.position_policy,
         )
     else:
+        if args.position_policy != "strict":
+            parser.error("--position-policy is only supported by the bdb2019 research adapter.")
         if args.offense_side:
             parser.error("--offense-side is for bdb2019 only.")
         result = import_bdb_2025_tracking(

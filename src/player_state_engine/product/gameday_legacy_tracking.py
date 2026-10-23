@@ -36,11 +36,17 @@ def import_bdb_2019_example(
     license_identifier: str = "",
     offense_side: str | None = None,
     max_selected_rows: int = 25000,
+    position_policy: str = "strict",
 ) -> dict[str, Any]:
     """Normalize one historic play, preserving source frame gaps and roles.
 
     offense_side may be home or away, but must be verified via separate plays
     and games files; NEVER infer team possession from on-field coordinates.
+
+    strict rejects any missing/out-of-field source coordinate. For public
+    historical plays where players legitimately leave the field, the explicit
+    omit_off_field_with_audit policy preserves the frame and all source events
+    but excludes unusable locations from on-field rendering, with counts.
     """
     if not license_acknowledged or not license_identifier.strip():
         raise ValueError("Explicit source rights acknowledgment and license identifier are required.")
@@ -50,12 +56,17 @@ def import_bdb_2019_example(
         raise ValueError("offense_side must be home or away, sourced from play metadata.")
     if max_selected_rows < 1:
         raise ValueError("max_selected_rows must be positive.")
+    if position_policy not in {"strict", "omit_off_field_with_audit"}:
+        raise ValueError("Unknown recorded-position policy.")
 
     path = Path(csv_path)
     frame_entities: dict[int, list[dict[str, Any]]] = {}
     seen_in_frame: dict[int, set[str]] = {}
     frame_events: dict[int, set[str]] = {}
     matched = 0
+    omitted_missing_positions = 0
+    omitted_off_field_positions = 0
+    omitted_frame_ids: set[int] = set()
 
     with path.open("r", encoding="utf-8-sig", newline="") as stream:
         reader = csv.DictReader(stream)
@@ -83,20 +94,34 @@ def import_bdb_2019_example(
             if unique in frame_seen:
                 raise ValueError("Duplicate identity within a recorded frame.")
             frame_seen.add(unique)
+            # Preserve source frames/events even if an entity has no valid
+            # on-field position. Never reconstruct or boundary-clamp its x/y.
+            frame_entities.setdefault(frame_id, [])
+            event = (row.get("event") or "").strip()
+            if event and event.lower() not in {"na", "n/a", "nan", "none", "null"}:
+                frame_events.setdefault(frame_id, set()).add(event)
 
             x = _maybe_number(row["x"])
             y = _maybe_number(row["y"])
-            if (
-                x is None or y is None
-                or not 0 <= x <= FIELD_LENGTH_YARDS
+            missing_position = x is None or y is None
+            out_of_field = not missing_position and (
+                not 0 <= x <= FIELD_LENGTH_YARDS
                 or not 0 <= y <= FIELD_WIDTH_YARDS
-            ):
-                raise ValueError("Out-of-bounds or missing tracking position.")
+            )
+            if missing_position or out_of_field:
+                if position_policy == "strict":
+                    raise ValueError("Out-of-bounds or missing tracking position.")
+                omitted_frame_ids.add(frame_id)
+                if missing_position:
+                    omitted_missing_positions += 1
+                else:
+                    omitted_off_field_positions += 1
+                continue
 
             team = (row.get("team") or "").strip().lower()
-            if team not in {"home", "away", "football", ""}:
+            if team not in {"home", "away", "football", "ball", ""}:
                 raise ValueError("Invalid home/away team label.")
-            if not ident and team not in {"football", ""}:
+            if not ident and team not in {"football", "ball", ""}:
                 raise ValueError("Ball row must not carry a player-team label.")
             if ident and team not in {"home", "away"}:
                 raise ValueError("Player must identify home or away team.")
@@ -120,10 +145,7 @@ def import_bdb_2019_example(
                 "movement_dir_deg": _maybe_number(row.get("dir")),
                 "observed": True,
             }
-            frame_entities.setdefault(frame_id, []).append(entity)
-            event = (row.get("event") or "").strip()
-            if event and event.lower() not in {"na", "nan", "none", "null"}:
-                frame_events.setdefault(frame_id, set()).add(event)
+            frame_entities[frame_id].append(entity)
 
     if not frame_entities:
         raise ValueError("No tracking rows matched game_id/play_id.")
@@ -160,6 +182,14 @@ def import_bdb_2019_example(
         "missing_frame_count": expected - len(frames),
         "frame_coverage": len(frames) / expected,
         "rows": matched,
+        "position_quality": {
+            "policy": position_policy,
+            "omitted_missing_position_rows": omitted_missing_positions,
+            "omitted_off_field_position_rows": omitted_off_field_positions,
+            "omitted_total_position_rows": omitted_missing_positions + omitted_off_field_positions,
+            "affected_source_frame_ids": sorted(omitted_frame_ids),
+            "never_clamped_or_interpolated": True,
+        },
         "source_file_sha256": _file_sha256(path),
         "frames": frames,
     }

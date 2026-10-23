@@ -105,3 +105,67 @@ does not by itself qualify positional accuracy against video.
 
 No live NFL tracking, player-grade promotion, model training or commercial
 license is established by this command.
+
+
+## Real source-data audit: exact NFL tracking blob (2026-10-23)
+
+We inspected the original 31,659,157-byte file from the NFL's published
+2017 season sample, supplied privately by the user. It matches official
+Git blob SHA-1 `2394ce60e8947eb7e73d36515c021a0699768ca1`
+and source SHA-256
+`30e0de5a213093011d16f7c0893fb6108284cb82be155b5e1bb14de754319f9b`.
+The complete source contains 316,025 records across 177 plays, for game
+2017090700. No copyrighted tracking records were committed.
+
+Important discovery: the original NFL file calls the ball entity `team=ball`
+(not just `football`). The BDB2019 adapter now accepts either label.
+
+For the two publicly identified reference plays:
+
+| Observation | Play 938 | Play 2756 |
+| --- | ---: | ---: |
+| Source rows | 1,426 | 2,691 |
+| Recorded 10 Hz frames | 62 | 117 |
+| Unique tracked players | 22 | 22 |
+| Source-labeled snap frame | 15 | 15 |
+| Source ball frames | 62 | 117 |
+| Missing whole source frames | 0 | 0 |
+| Position samples missing x/y | 0 | 6 |
+| Source positions outside the 120 x 53.3-yard display bounds | 0 | 10 |
+| Unrenderable observations excluded, NOT clipped | 0 | 16 |
+
+On play 2756, the ten outside-field observations and six missing x/y
+samples correspond to Malcolm Butler after he crosses beyond the sideline
+late in the touchdown sequence (source frames 102-117). The source still
+has 117 original frame IDs and its touchdown event in frame 107.
+No positions are manufactured at the sideline.
+
+The audited position policy retains such frames and event tags even when
+a participant has no drawable on-field x/y. The replay JSON includes a
+`position_quality` record, and the Play Lab displays its omitted-row
+counts. Importer strict mode continues to reject missing/outside values.
+The manual **real-source qualification** CLI uses the audited policy,
+while the lower-level legacy importer defaults to strict. When calling the
+generic importer directly for the longer play, specify:
+
+    python scripts/import_bdb_tracking.py \
+      --format bdb2019 --csv /path/to/tracking_gameId_2017090700.csv \
+      --game-id 2017090700 --play-id 2756 \
+      --offense-side away \
+      --position-policy omit_off_field_with_audit \
+      --license-id "ACTUAL_SOURCE_TERMS_IDENTIFIER_YOU_REVIEWED" \
+      --acknowledge-source-terms \
+      --output /tmp/pse-bdb2019-2756.json
+
+The exact real-file frame, ball and omission counts are enforced by the
+canonical qualification contract for both selected plays, so a changed
+interpretation is visible in CI or manual source qualification.
+
+**Scope of what was actually checked:** The exact tracking CSV was available
+locally and its full-file blob hash was independently confirmed. Game/play
+metadata for these two selected plays was checked against the NFL's official
+Git source records via the GitHub integration. The entire original
+`games.csv` and `plays.csv` were not downloaded into the local analysis
+environment, and the manual all-three-source workflow has not yet run.
+No original-video alignment, ball-height measurement or commercial reuse
+approval is implied.

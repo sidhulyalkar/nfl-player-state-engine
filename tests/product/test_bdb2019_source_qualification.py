@@ -153,8 +153,16 @@ def test_invalid_tracking_sample_blocks_qualification(tmp_path: Path) -> None:
     track = path / SOURCE_FILES["tracking"][0]
     txt = track.read_text()
     track.write_text(txt.replace(",43.0,22.0,", ",134.0,22.0,", 1))
-    with pytest.raises(ValueError, match="Out-of-bounds"):
-        _qualify(path, _rehashed(path))
+    # The full qualifier opts explicitly into audited omission to preserve a
+    # real play with source frames extending outside the playing field.
+    report, replay = _qualify(path, _rehashed(path))
+    quality = report["tracking"]["position_quality"]
+    assert quality["omitted_off_field_position_rows"] == 1
+    assert quality["omitted_missing_position_rows"] == 0
+    assert quality["affected_source_frame_ids"] == [3]
+    assert quality["never_clamped_or_interpolated"] is True
+    assert replay["frames"][1]["players"][0]["nfl_id"] == "22"
+    assert all(p["x"] <= 120 for frame in replay["frames"] for p in frame["players"])
 
 
 def test_missing_snap_and_ball_are_flags_not_fabricated(tmp_path: Path) -> None:
@@ -182,3 +190,31 @@ def test_explicit_terms_declaration_required(tmp_path: Path) -> None:
         qualify_bdb2019_play(
             path, expectations=expected, license_acknowledged=True, license_identifier=""
         )
+
+
+def test_off_field_player_keeps_play_events_and_reports_exclusion(
+    tmp_path: Path,
+) -> None:
+    path, _ = fixture_source(tmp_path)
+    tracking = path / SOURCE_FILES["tracking"][0]
+    with tracking.open("r", encoding="utf-8", newline="") as stream:
+        reader = csv.DictReader(stream)
+        columns = list(reader.fieldnames or ())
+        rows = list(reader)
+    rows[3]["y"] = "-0.59"
+    rows[3]["event"] = "touchdown"
+    rows[4]["x"] = "NA"
+    rows[2]["team"] = "ball"
+    rows[5]["team"] = "ball"
+    _csv(tracking, columns, rows)
+    report, replay = _qualify(path, _rehashed(path))
+    assert replay["frames"][1]["events"] == ["touchdown"]
+    assert replay["frames"][1]["players"] == []
+    assert replay["frames"][1]["ball"] is not None
+    quality = report["tracking"]["position_quality"]
+    assert quality["omitted_total_position_rows"] == 2
+    assert quality["omitted_missing_position_rows"] == 1
+    assert quality["omitted_off_field_position_rows"] == 1
+    assert quality["affected_source_frame_ids"] == [3]
+    assert any("not clamped or interpolated" in w for w in report["warnings"])
+    assert report["source_video_alignment_verified"] is False

@@ -118,3 +118,47 @@ def test_original_tracking_missing_optional_numbers_are_not_invented(tmp_path: P
     entity = replay["frames"][0]["players"][0]
     assert entity["speed_yards_per_s"] is None
     assert entity["orientation_deg"] is None
+
+
+def test_official_nfl_ball_team_label_normalizes_as_ball(tmp_path: Path) -> None:
+    data = _rows()
+    data[2]["team"] = "ball"
+    replay = _convert(_write(tmp_path / "official_ball.csv", data), offense_side="away")
+    ball = replay["frames"][0]["ball"]
+    assert ball is not None
+    assert ball["nfl_id"] is None
+    assert ball["is_ball"] is True
+    assert ball["team"] == "ball"
+    assert replay["position_quality"]["omitted_total_position_rows"] == 0
+
+
+def test_real_world_post_touchdown_outside_sideline_is_explicitly_omitted(
+    tmp_path: Path,
+) -> None:
+    data = _rows()
+    data[3]["y"] = "-0.59"
+    data[3]["event"] = "touchdown"
+    data[4]["x"] = "NA"
+    path = _write(tmp_path / "off_sideline.csv", data)
+    with pytest.raises(ValueError, match="Out-of-bounds"):
+        _convert(path)
+    replay = _convert(path, position_policy="omit_off_field_with_audit")
+    assert replay["rows"] == 5
+    assert replay["frame_count"] == 2
+    assert replay["missing_frame_count"] == 1
+    assert replay["frames"][1]["events"] == ["touchdown"]
+    assert replay["frames"][1]["players"] == []
+    q = replay["position_quality"]
+    assert q["omitted_total_position_rows"] == 2
+    assert q["omitted_off_field_position_rows"] == 1
+    assert q["omitted_missing_position_rows"] == 1
+    assert q["affected_source_frame_ids"] == [3]
+    assert q["never_clamped_or_interpolated"] is True
+
+
+def test_unknown_position_policy_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="policy"):
+        _convert(
+            _write(tmp_path / "badpolicy.csv", _rows()),
+            position_policy="clamp_outside_coords",
+        )
