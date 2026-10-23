@@ -131,6 +131,13 @@ def test_remote_or_ambiguous_endpoint_fails_closed(bad_url: str) -> None:
         pilot.validate_url(bad_url)
 
 
+def test_redirect_is_refused_without_following_external_links() -> None:
+    with pytest.raises(pilot.URLError, match="redirects"):
+        pilot._NoRedirect().redirect_request(
+            None, None, 302, "Found", {}, "https://external.invalid/leak"
+        )
+
+
 def _index_receipt(corpus: Path) -> None:
     manifest = json.loads((corpus.parent / "snapshot_manifest.json").read_text())
     receipt = {
