@@ -278,3 +278,24 @@ jobs:
       - run: npm run build
       - name: Test WebGL football field coordinate and camera invariants
         run: npm run test:field3d
+      - name: Browser smoke - native 3D and SVG fallback
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v chromium
+          npm run preview -- --host 127.0.0.1 --port 4173 --strictPort >/tmp/pse-playlab-preview.log 2>&1 &
+          PREVIEW_PID=$!
+          trap 'kill "$PREVIEW_PID" || true' EXIT
+          for i in $(seq 1 50); do
+            if curl -fsS 'http://127.0.0.1:4173/?workspace=gameday' >/dev/null 2>&1; then
+              break
+            fi
+            sleep .2
+          done
+          CHROME_BIN="$(command -v google-chrome || command -v chromium)" node scripts/smoke_gameday_browser.mjs
+      - name: Upload Play Lab Chrome screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playlab-chrome-screenshots
+          path: apps/gemini-fantasy-console/browser-artifacts/*.png
+          if-no-files-found: ignore
