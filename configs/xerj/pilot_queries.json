@@ -1,0 +1,142 @@
+[
+  {
+    "id": "01-exact-scoring",
+    "query": "score_quantile_components",
+    "expected_paths": [
+      "src/player_state_engine/fantasy/scoring.py"
+    ]
+  },
+  {
+    "id": "02-contract-qualification",
+    "query": "qualify_live_draft",
+    "expected_paths": [
+      "src/player_state_engine/fantasy/draft_qualification.py"
+    ]
+  },
+  {
+    "id": "03-candidate-actionability",
+    "query": "assess_candidate_scope_actionability",
+    "expected_paths": [
+      "src/player_state_engine/fantasy/draft_actionability.py"
+    ]
+  },
+  {
+    "id": "04-legal-roster-simulator",
+    "query": "evaluate_candidate_impacts",
+    "expected_paths": [
+      "src/player_state_engine/fantasy/roster_simulator.py"
+    ]
+  },
+  {
+    "id": "05-hybrid-champion",
+    "query": "HybridQuantileModelBundle",
+    "expected_paths": [
+      "src/player_state_engine/models/hybrid.py"
+    ]
+  },
+  {
+    "id": "06-position-specific-heads",
+    "query": "PositionSpecificQuantileBundle",
+    "expected_paths": [
+      "src/player_state_engine/models/position_quantile.py"
+    ]
+  },
+  {
+    "id": "07-role-posteriors",
+    "query": "DiscountedBetaRoleEstimator",
+    "expected_paths": [
+      "src/player_state_engine/state_graph/role.py"
+    ]
+  },
+  {
+    "id": "08-uncertainty-decomposition",
+    "query": "decompose_counterfactual_variance",
+    "expected_paths": [
+      "src/player_state_engine/state_graph/uncertainty.py"
+    ]
+  },
+  {
+    "id": "09-frozen-evidence",
+    "query": "canonicalize_predictions",
+    "expected_paths": [
+      "src/player_state_engine/evaluation/evidence_factory.py"
+    ]
+  },
+  {
+    "id": "10-release-gates",
+    "query": "assess_draft_release_readiness",
+    "expected_paths": [
+      "src/player_state_engine/product/release_readiness.py"
+    ]
+  },
+  {
+    "id": "11-shadow-season",
+    "query": "normalize_production_forecasts",
+    "expected_paths": [
+      "src/player_state_engine/product/shadow_season.py"
+    ]
+  },
+  {
+    "id": "12-portfolio-exposure",
+    "query": "build_portfolio_exposure",
+    "expected_paths": [
+      "src/player_state_engine/product/portfolio_exposure.py"
+    ]
+  },
+  {
+    "id": "13-sleeper-ingestion",
+    "query": "SleeperImporter",
+    "expected_paths": [
+      "src/player_state_engine/integrations/sleeper.py"
+    ]
+  },
+  {
+    "id": "14-espn-ingestion",
+    "query": "ESPNImporter",
+    "expected_paths": [
+      "src/player_state_engine/integrations/espn.py"
+    ]
+  },
+  {
+    "id": "15-terminal-research",
+    "query": "v016_terminal_promotion_gate",
+    "expected_paths": [
+      "src/player_state_engine/game_intelligence/terminal_benchmark.py"
+    ]
+  },
+  {
+    "id": "16-gemini-tool-boundary",
+    "query": "selectFallbackTool",
+    "expected_paths": [
+      "apps/gemini-fantasy-console/server/gemini.ts"
+    ]
+  },
+  {
+    "id": "17-model-diagnostics",
+    "query": "ModelDiagnosticsPanel",
+    "expected_paths": [
+      "apps/gemini-fantasy-console/src/components/ModelDiagnosticsPanel.tsx"
+    ]
+  },
+  {
+    "id": "18-draft-checkout",
+    "query": "run_preflight",
+    "expected_paths": [
+      "scripts/check_draft_checkout.py"
+    ]
+  },
+  {
+    "id": "19-empirical-survival",
+    "query": "apply_empirical_survival",
+    "expected_paths": [
+      "src/player_state_engine/fantasy/draft_survival.py"
+    ]
+  },
+  {
+    "id": "20-forecast-loss-metric",
+    "query": "summarize_methods",
+    "expected_paths": [
+      "src/player_state_engine/evaluation/evidence_factory.py"
+    ]
+  }
+]
