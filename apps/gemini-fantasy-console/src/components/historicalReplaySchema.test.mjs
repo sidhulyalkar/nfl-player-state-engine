@@ -71,3 +71,26 @@ test('ball and player identities cannot be swapped by an import payload',()=>{
   x.frames[0].ball={nfl_id:'42',is_ball:true,x:40,y:10};
   assert.throws(()=>parseHistoricalReplay(x),/Ball identity/);
 });
+
+
+test('audited off-field source exclusions remain visible and validated',()=>{
+  const x=valid();
+  x.position_quality={
+    policy:'omit_off_field_with_audit',
+    omitted_missing_position_rows:1,
+    omitted_off_field_position_rows:2,
+    omitted_total_position_rows:3,
+    affected_source_frame_ids:[2],
+    never_clamped_or_interpolated:true,
+  };
+  assert.equal(parseHistoricalReplay(x).position_quality.omitted_total_position_rows,3);
+  const invalid=structuredClone(x);
+  invalid.position_quality.omitted_total_position_rows=0;
+  assert.throws(()=>parseHistoricalReplay(invalid),/observation exclusion audit/);
+  const id=structuredClone(x);
+  id.position_quality.affected_source_frame_ids=[999];
+  assert.throws(()=>parseHistoricalReplay(id),/observation exclusion audit/);
+  const clamp=structuredClone(x);
+  clamp.position_quality.never_clamped_or_interpolated=false;
+  assert.throws(()=>parseHistoricalReplay(clamp),/observation exclusion audit/);
+});
