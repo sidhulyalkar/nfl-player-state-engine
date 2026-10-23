@@ -10,6 +10,8 @@ export interface GameTimelinePlay {
   possession_team:string;
   offense_side:'home'|'away';
   game_clock_charted:string|null;
+  yardline_side_charted:string|null;
+  yardline_number_charted:number|null;
   description_charted:string|null;
   formation_charted:string|null;
   personnel_charted:string|null;
@@ -80,7 +82,12 @@ export function parseGameTimeline(value:unknown,catalog:PlayCatalog):GameTimelin
     if(!integer(p.quarter,1,5)||!integer(p.down,0,4)||!integer(p.yards_to_go,0,100)
         ||![root.home_team,root.away_team].includes(p.possession_team)
         ||p.offense_side!==(p.possession_team===root.home_team?'home':'away')
-        ||!gameClock(p.game_clock_charted)||!nullableText(p.description_charted)
+        ||!gameClock(p.game_clock_charted)
+        ||!nullableText(p.yardline_side_charted,8)
+        ||!((p.yardline_side_charted===null&&p.yardline_number_charted===null)
+          ||([root.home_team,root.away_team].includes(p.yardline_side_charted as string)
+            &&integer(p.yardline_number_charted,0,50)))
+        ||!nullableText(p.description_charted)
         ||!nullableText(p.formation_charted,120)||!nullableText(p.personnel_charted,120))
       throw new Error('Invalid or unverified game situation metadata.');
   }
