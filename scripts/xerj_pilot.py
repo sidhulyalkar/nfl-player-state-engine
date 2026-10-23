@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parents[1]
 PREFIX = "nfl-pse"
@@ -163,6 +163,14 @@ def prepare(repo: Path, corpus: Path) -> dict:
     return manifest
 
 
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(
+        self, req: Request, fp: object, code: int, msg: str,
+        headers: object, newurl: str,
+    ) -> None:
+        raise URLError("XERJ pilot refuses HTTP redirects")
+
+
 def request(url: str, resource: str, body: dict | None = None, timeout: int = 20) -> dict:
     endpoint = validate_url(url)
     headers = {"Accept": "application/json"}
@@ -175,7 +183,9 @@ def request(url: str, resource: str, body: dict | None = None, timeout: int = 20
         data = json.dumps(body).encode("utf-8")
     req = Request(endpoint + resource, data=data, headers=headers,
                   method="POST" if body is not None else "GET")
-    with urlopen(req, timeout=timeout) as response:
+    # Ignore proxy environment and refuse redirects; queries/keys stay on loopback.
+    opener = build_opener(ProxyHandler({}), _NoRedirect())
+    with opener.open(req, timeout=timeout) as response:
         return json.load(response)
 
 
