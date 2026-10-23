@@ -1,0 +1,307 @@
+#!/usr/bin/env python3
+"""Opt-in, local-only XERJ code-search pilot. Never used in model inference."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from datetime import UTC, datetime
+from pathlib import Path, PurePosixPath
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
+
+ROOT = Path(__file__).resolve().parents[1]
+PREFIX = "nfl-pse"
+URL = "http://127.0.0.1:9200"
+CORPUS = Path.home() / ".cache" / "nfl-pse-xerj" / "corpus"
+CASES = ROOT / "configs" / "xerj" / "pilot_queries.json"
+OUTPUT = ROOT / ".xerj-reports" / "pilot_report.json"
+MAX_FILE_BYTES = 512_000
+SOURCE_ROOTS = (
+    "src/",
+    "scripts/",
+    "docs/",
+    "tests/",
+    "configs/",
+    "apps/gemini-fantasy-console/src/",
+    "apps/gemini-fantasy-console/server/",
+    "apps/gemini-fantasy-console/shared/",
+)
+ROOT_FILES = {
+    "README.md", "AGENTS.md", "CLAUDE.md", "CODEX.md",
+    "MODEL_CARD.md", "DRAFT_DAY.md", "project_goals.md",
+}
+SUFFIXES = {".py", ".ts", ".tsx", ".js", ".jsx", ".md", ".yaml", ".yml", ".toml", ".css", ".html"}
+BLOCKED_PARTS = {
+    "private", "secrets", "credentials", "node_modules", "fixtures-private",
+    ".git", ".venv", "raw", "processed", "external", "live_leagues",
+}
+SENSITIVE = (
+    re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
+    re.compile(rb"gh[pousr]_[A-Za-z0-9_]{25,}"),
+    re.compile(rb"sk-[A-Za-z0-9]{24,}"),
+)
+
+
+def git(repo: Path, *args: str) -> bytes:
+    return subprocess.run(
+        ["git", *args], cwd=repo, check=True, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ).stdout
+
+
+def eligible(path: str, mode: str = "100644") -> bool:
+    p = PurePosixPath(path)
+    if mode != "100644" or p.is_absolute() or ".." in p.parts:
+        return False
+    if any(part.startswith(".") or part.lower() in BLOCKED_PARTS for part in p.parts):
+        return False
+    if any(term in part.lower() for part in p.parts for term in ("secret", "credential", "token")):
+        return False
+    if path in ROOT_FILES:
+        return True
+    return any(path.startswith(root) for root in SOURCE_ROOTS) and p.suffix in SUFFIXES
+
+
+def validate_url(url: str) -> str:
+    parsed = urlsplit(url)
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
+        or not parsed.port
+        or parsed.username
+        or parsed.password
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("XERJ endpoint must be plain HTTP on an explicit loopback port")
+    return url.rstrip("/")
+
+
+def validate_corpus(repo: Path, corpus: Path) -> Path:
+    path = corpus.expanduser().absolute()
+    if path.is_symlink():
+        raise ValueError("Refusing symlink corpus directory")
+    resolved = path.resolve()
+    if resolved == repo.resolve() or repo.resolve() in resolved.parents:
+        raise ValueError("XERJ corpus must stay outside the project checkout")
+    return resolved
+
+
+def prepare(repo: Path, corpus: Path) -> dict:
+    repo = repo.resolve()
+    corpus = validate_corpus(repo, corpus)
+    if not (repo / "src" / "player_state_engine").is_dir():
+        raise ValueError("Not an NFL Player State Engine checkout")
+    commit = git(repo, "rev-parse", "HEAD").decode().strip()
+    listing = git(repo, "ls-tree", "-r", "-z", "HEAD")
+    selected: dict[str, bytes] = {}
+    for line in listing.split(b"\0"):
+        if not line:
+            continue
+        metadata, raw_path = line.split(b"\t", 1)
+        mode, obj_type, sha = metadata.decode("ascii").split()
+        path = raw_path.decode("utf-8")
+        if obj_type != "blob" or not eligible(path, mode):
+            continue
+        payload = git(repo, "cat-file", "blob", sha)
+        if len(payload) > MAX_FILE_BYTES:
+            continue
+        if any(pattern.search(payload) for pattern in SENSITIVE):
+            raise ValueError(f"Potential committed credential in {path}; aborting before indexing")
+        selected[path] = payload
+
+    # Only manage files from our previous manifest, never arbitrary files in this directory.
+    manifest_path = corpus.parent / "snapshot_manifest.json"
+    previous = {}
+    if manifest_path.exists():
+        previous = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if previous.get("schema_version") != 1 or previous.get("corpus_dir") != str(corpus):
+            raise ValueError("Unexpected existing snapshot manifest")
+    known = {entry["path"] for entry in previous.get("files", [])}
+    if corpus.exists():
+        for item in corpus.rglob("*"):
+            if item.is_symlink():
+                raise ValueError(f"Refusing symlink inside staged corpus: {item}")
+            if item.is_file() and item.relative_to(corpus).as_posix() not in known:
+                raise ValueError(f"Refusing unrecognized corpus file: {item}")
+    corpus.mkdir(parents=True, exist_ok=True)
+    for stale in known - selected.keys():
+        (corpus / stale).unlink(missing_ok=True)
+    files = []
+    for name, payload in sorted(selected.items()):
+        target = corpus / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists() or target.read_bytes() != payload:
+            target.write_bytes(payload)
+        files.append({
+            "path": name,
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "bytes": len(payload),
+        })
+    # Do not put this manifest in the indexed folder: it contains a source inventory.
+    manifest = {
+        "schema_version": 1, "repo_commit": commit, "corpus_dir": str(corpus),
+        "files": files, "file_count": len(files), "bytes": sum(f["bytes"] for f in files),
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return manifest
+
+
+def request(url: str, resource: str, body: dict | None = None, timeout: int = 20) -> dict:
+    endpoint = validate_url(url)
+    headers = {"Accept": "application/json"}
+    key = os.getenv("XERJ_API_KEY")
+    if key:
+        headers["Authorization"] = f"ApiKey {key}"
+    data = None
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(body).encode("utf-8")
+    req = Request(endpoint + resource, data=data, headers=headers,
+                  method="POST" if body is not None else "GET")
+    with urlopen(req, timeout=timeout) as response:
+        return json.load(response)
+
+
+def check_index(url: str) -> int:
+    status = request(url, f"/{PREFIX}-*/_count")
+    count = status.get("count")
+    if not isinstance(count, int) or count <= 0:
+        raise RuntimeError("Index is empty. Run index --apply after preparing the snapshot")
+    return count
+
+
+def source_path(hit: dict) -> str | None:
+    source = hit.get("_source")
+    if not isinstance(source, dict):
+        return None
+    path = source.get("ax_path")
+    if not isinstance(path, str):
+        return None
+    path = path.replace("\\", "/").lstrip("./")
+    return path if path else None
+
+
+def benchmark(url: str, corpus: Path, cases_file: Path, k: int = 5) -> dict:
+    if k < 1 or k > 50:
+        raise ValueError("k must be between 1 and 50")
+    count = check_index(url)
+    manifest = json.loads((corpus.parent / "snapshot_manifest.json").read_text(encoding="utf-8"))
+    if manifest["corpus_dir"] != str(corpus):
+        raise ValueError("Corpus/manifest mismatch")
+    indexed_files = {f["path"] for f in manifest["files"]}
+    cases = json.loads(cases_file.read_text(encoding="utf-8"))
+    if not isinstance(cases, list) or not cases:
+        raise ValueError("Benchmark cases must be a nonempty JSON array")
+    results = []
+    for case in cases:
+        if not {"id", "query", "expected_paths"} <= case.keys() or not case["expected_paths"]:
+            raise ValueError("Malformed benchmark case")
+        expected = set(case["expected_paths"])
+        if not expected <= indexed_files:
+            raise ValueError(f"Benchmark ground truth not in snapshot: {case['id']}")
+        started = time.perf_counter()
+        response = request(url, f"/{PREFIX}-*/_search", {
+            "size": k,
+            "query": {"match": {"body": case["query"]}},
+            "_source": ["ax_path", "ax_locator", "title", "language", "defs"],
+        })
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+        hits = response.get("hits", {}).get("hits", [])
+        paths = []
+        for hit in hits:
+            path = source_path(hit)
+            if path is not None and path in indexed_files:
+                paths.append(path)
+        first_rank = next((rank for rank, path in enumerate(paths, 1) if path in expected), None)
+        results.append({
+            "id": case["id"], "query": case["query"],
+            "expected_paths": sorted(expected), "returned_paths": paths,
+            "first_rank": first_rank, "hit_at_k": first_rank is not None,
+            "reciprocal_rank": round(1 / first_rank, 5) if first_rank else 0,
+            "latency_ms": elapsed_ms,
+        })
+    n = len(results)
+    latency = sorted(row["latency_ms"] for row in results)
+    return {
+        "schema_version": 1, "kind": "developer_retrieval_only",
+        "created_at": datetime.now(UTC).isoformat(),
+        "index_prefix": PREFIX, "index_document_count": count,
+        "repo_commit": manifest["repo_commit"], "corpus_file_count": len(indexed_files),
+        "k": k, "tasks": n,
+        "hit_at_k": round(sum(row["hit_at_k"] for row in results) / n, 4),
+        "mrr_at_k": round(sum(row["reciprocal_rank"] for row in results) / n, 4),
+        "p50_latency_ms": latency[(n - 1) // 2],
+        "p95_latency_ms": latency[min(n - 1, (95 * n + 99) // 100 - 1)],
+        "results": results,
+        "caveat": "Retrieval correctness only; not fantasy accuracy, agent completion, token savings, or speedup.",
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repo", type=Path, default=ROOT)
+    parser.add_argument("--corpus-dir", type=Path, default=CORPUS)
+    parser.add_argument("--url", default=URL)
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("prepare", help="Safely stage committed public-source-only snapshot")
+    index = commands.add_parser("index", help="Index the staged snapshot (dry-run by default)")
+    index.add_argument("--apply", action="store_true", help="Actually create/update the index")
+    index.add_argument("--workers", type=int, default=4)
+    trial = commands.add_parser("benchmark", help="Run ground-truth retrieval tasks")
+    trial.add_argument("--cases", type=Path, default=CASES)
+    trial.add_argument("--top-k", type=int, default=5)
+    trial.add_argument("--output", type=Path, default=OUTPUT)
+    args = parser.parse_args(argv)
+    try:
+        corpus = validate_corpus(args.repo.resolve(), args.corpus_dir)
+        url = validate_url(args.url)
+        if args.command == "prepare":
+            result = prepare(args.repo, corpus)
+            print(f"Prepared {result['file_count']} files at {corpus}; HEAD {result['repo_commit']}")
+        elif args.command == "index":
+            if not (corpus.parent / "snapshot_manifest.json").exists():
+                raise ValueError("Run prepare first")
+            if args.workers < 1 or args.workers > 16:
+                raise ValueError("workers must be 1..16")
+            xerj = shutil.which("xerj")
+            if not xerj:
+                raise RuntimeError("XERJ binary not found. Install from official xerj-org/xerj")
+            cmd = [
+                xerj, "autoindex", str(corpus), "--url", url, "--prefix", PREFIX,
+                "--workers", str(args.workers), "--progress", "plain",
+            ]
+            if not args.apply:
+                cmd.append("--dry-run")
+            # Credentials, if needed, are inherited through XERJ_API_KEY, never arguments.
+            subprocess.run(cmd, check=True)
+            if args.apply:
+                print(f"Indexed {check_index(url)} documents under {PREFIX}-*")
+            else:
+                print("Dry-run only: no index was written. Use index --apply to commit.")
+        elif args.command == "benchmark":
+            report = benchmark(url, corpus, args.cases, args.top_k)
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+            print(
+                f"{report['tasks']} tasks | hit@{report['k']} {report['hit_at_k']:.1%} | "
+                f"MRR {report['mrr_at_k']:.3f} | report {args.output}"
+            )
+        return 0
+    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError, HTTPError, URLError) as exc:
+        print(f"XERJ pilot: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
