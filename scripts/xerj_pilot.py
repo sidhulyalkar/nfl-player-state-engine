@@ -333,6 +333,7 @@ def main(argv: list[str] | None = None) -> int:
             cmd = [
                 xerj, "autoindex", str(corpus), "--url", url, "--prefix", PREFIX,
                 "--workers", str(args.workers), "--progress", "plain",
+                "--disable-feedback",
             ]
             if not args.apply:
                 cmd.append("--dry-run")
