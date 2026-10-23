@@ -109,6 +109,12 @@ try {
     source:'CI GENERATED FIXTURE; NOT AN ACTUAL NFL PLAY',
     source_license_identifier:'internal-test-fixture-only',
     source_file_sha256:'c'.repeat(64),
+    position_quality:{
+      policy:'omit_off_field_with_audit',
+      omitted_missing_position_rows:0,omitted_off_field_position_rows:1,
+      omitted_total_position_rows:1,affected_source_frame_ids:[5],
+      never_clamped_or_interpolated:true,
+    },
     game_id:'CI_TEST_GAME',play_id:'CI_TEST_PLAY',
     frame_count:3,missing_frame_count:2,frame_coverage:3/5,play_direction:null,
     frames:[
@@ -128,6 +134,7 @@ try {
   await until("document.querySelector('.gameday-head h1')?.textContent?.includes('Recorded movement, not reconstructed guesses')",sid,'historical replay UI');
   const researchSource=await until("document.querySelector('.field3d-source')?.textContent?.includes('RECORDED X/Y')",sid,'research mode source badge');
   assert.equal(researchSource,true);
+  assert.equal(await evalPage("document.body.textContent?.includes('1 excluded')",sid),true,'Missing source exclusion audit in research interface');
   const resetResearch=await evalPage("(()=>{const b=document.querySelector('button[aria-label=\"Reset replay\"]');b?.click();return !!b})()",sid);
   assert.equal(resetResearch,true);
   await until("document.querySelector('.gameday-player-controls')?.textContent?.includes('frame 1')",sid,'first recorded frame');
