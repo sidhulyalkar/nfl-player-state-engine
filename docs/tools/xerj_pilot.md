@@ -27,7 +27,7 @@ On macOS/Linux (for Windows PowerShell use equivalent paths and a terminal for t
 Terminal A:
 
     mkdir -p "$HOME/.local/share/nfl-pse-xerj/node"
-    xerj --insecure --data-dir "$HOME/.local/share/nfl-pse-xerj/node"
+    xerj --insecure --disable-feedback --data-dir "$HOME/.local/share/nfl-pse-xerj/node"
 
 Terminal B, from a clean NFL Player State Engine checkout:
 
