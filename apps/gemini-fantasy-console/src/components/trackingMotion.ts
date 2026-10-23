@@ -84,3 +84,44 @@ export function formationFootprint(
     centroid_y:ys.reduce((a,b)=>a+b,0)/present.length,
   };
 }
+
+
+/** O(N*P) upfront computation, then O(1) selected-player path inspection.
+ * Never joins across missing source frames and never manufactures distance.
+ */
+export function buildObservedPathIndex(frames: readonly MotionFrame[]) {
+  const count=frames.length;
+  const ids=new Set<string>();
+  for(const f of frames) for(const p of f.players) {
+    if(p.nfl_id && VALID(p)) ids.add(p.nfl_id);
+  }
+  type Prefix = {yards: Float64Array; pairs: Uint32Array};
+  const byId=new Map<string,Prefix>();
+  for(const id of ids)byId.set(id,{yards:new Float64Array(count),pairs:new Uint32Array(count)});
+  for(let i=1;i<count;i++){
+    for(const entry of byId.values()){
+      entry.yards[i]=entry.yards[i-1];
+      entry.pairs[i]=entry.pairs[i-1];
+    }
+    for(const v of motionAtFrame(frames,i)){
+      const row=byId.get(v.nfl_id);
+      if(!row)continue;
+      row.yards[i]+=v.displacement_yards;
+      row.pairs[i]++;
+    }
+  }
+  return {
+    playerCount:byId.size,
+    frameCount:count,
+    get(id:string,index:number) {
+      if(!Number.isInteger(index)||index<0||index>=count)return null;
+      const row=byId.get(id);
+      if(!row)return null;
+      return {
+        yards:row.yards[index],
+        observed_pairs:row.pairs[index],
+        complete:row.pairs[index]===index,
+      };
+    },
+  };
+}
