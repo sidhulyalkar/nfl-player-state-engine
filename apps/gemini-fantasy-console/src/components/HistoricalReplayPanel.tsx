@@ -3,7 +3,7 @@ import { Activity, ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, CircleAle
 import '../gameday-lab.css';
 import { FootballField3D, type Field3DPlayer, type Field3DTrail } from './FootballField3D';
 import { trackingFocus, sourceSnapIndex, observedTrailSegments } from './football3dMath';
-import { motionAtFrame, observedDistance, formationFootprint } from './trackingMotion';
+import { motionAtFrame, buildObservedPathIndex, formationFootprint } from './trackingMotion';
 import { displayClock, frameAtTime, stepFrame } from './trackingTimeline';
 
 import { type HistoricalReplay } from './historicalReplaySchema';
@@ -48,7 +48,8 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
   const defenseNow=useMemo(()=>formationFootprint(frame.players,'defense'),[frame]);
   const offenseAtSnap=useMemo(()=>snapFrame?formationFootprint(snapFrame.players,'offense'):null,[snapFrame]);
   const defenseAtSnap=useMemo(()=>snapFrame?formationFootprint(snapFrame.players,'defense'):null,[snapFrame]);
-  const traveled=useMemo(()=>focus?observedDistance(replay.frames,focus,currentIndex):null,[replay,focus,currentIndex]);
+  const travelIndex=useMemo(()=>buildObservedPathIndex(replay.frames),[replay]);
+  const traveled=focus?travelIndex.get(focus,currentIndex):null;
   const fieldFocus=useMemo(()=>trackingFocus(replay.frames[0].players),[replay]);
   const scenePlayers=useMemo<Field3DPlayer[]>(()=>frame.players.filter(p=>p.nfl_id).map(p=>({
     id:p.nfl_id!,x:p.x,y:p.y,jersey:p.jersey,name:p.name,team:p.team,
