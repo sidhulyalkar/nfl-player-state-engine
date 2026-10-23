@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -77,7 +76,8 @@ def compare(raw: dict, owner: dict, rg: dict) -> dict:
             ),
         })
     n = len(rows)
-    hit = lambda key: round(sum(row[key] for row in rows) / n, 4)
+    def hit(key: str) -> float:
+        return round(sum(row[key] for row in rows) / n, 4)
     gain = sum(row["owner_improves_hit"] for row in rows)
     loss = sum(row["owner_regresses_hit"] for row in rows)
     return {
