@@ -131,9 +131,19 @@ def test_remote_or_ambiguous_endpoint_fails_closed(bad_url: str) -> None:
         pilot.validate_url(bad_url)
 
 
+def _index_receipt(corpus: Path) -> None:
+    manifest = json.loads((corpus.parent / "snapshot_manifest.json").read_text())
+    receipt = {
+        "schema_version": 1, "source_fingerprint": pilot.snapshot_fingerprint(manifest),
+        "url": pilot.URL, "prefix": pilot.PREFIX, "status": "complete",
+    }
+    (corpus.parent / "index_receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
+
+
 def test_ground_truth_benchmark_and_missing_hits(local_repo: Path, tmp_path: Path) -> None:
     corpus = tmp_path / "corpus"
     pilot.prepare(local_repo, corpus)
+    _index_receipt(corpus)
     cases = [
         {"id": "a", "query": "score_quantile_components",
          "expected_paths": ["src/player_state_engine/fantasy/scoring.py"]},
@@ -158,6 +168,8 @@ def test_ground_truth_benchmark_and_missing_hits(local_repo: Path, tmp_path: Pat
     assert result["hit_at_k"] == 0.5
     assert result["mrr_at_k"] == 0.5
     assert result["kind"] == "developer_retrieval_only"
+    assert result["index_status"] == "complete"
+    assert result["results"][0]["returned_evidence"][0]["source_sha256"]
     assert result["results"][0]["first_rank"] == 1
     assert result["results"][1]["first_rank"] is None
     assert result["results"][1]["returned_paths"] == []
@@ -168,11 +180,28 @@ def test_benchmark_rejects_ground_truth_outside_snapshot(
 ) -> None:
     corpus = tmp_path / "corpus"
     pilot.prepare(local_repo, corpus)
+    _index_receipt(corpus)
     cases = [{"id": "x", "query": "anything", "expected_paths": ["private.key"]}]
     case_file = tmp_path / "cases.json"
     case_file.write_text(json.dumps(cases), encoding="utf-8")
     with patch.object(pilot, "request", return_value={"count": 1}):
         with pytest.raises(ValueError, match="ground truth"):
+            pilot.benchmark(pilot.URL, corpus, case_file)
+
+
+def test_benchmark_rejects_stale_index(local_repo: Path, tmp_path: Path) -> None:
+    corpus = tmp_path / "corpus"
+    pilot.prepare(local_repo, corpus)
+    _index_receipt(corpus)
+    receipt_path = corpus.parent / "index_receipt.json"
+    receipt = json.loads(receipt_path.read_text())
+    receipt["source_fingerprint"] = "wrong-commit"
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    cases = [{"id": "a", "query": "anything", "expected_paths": ["docs/guide.md"]}]
+    case_file = tmp_path / "cases.json"
+    case_file.write_text(json.dumps(cases), encoding="utf-8")
+    with patch.object(pilot, "request", return_value={"count": 3}):
+        with pytest.raises(ValueError, match="stale"):
             pilot.benchmark(pilot.URL, corpus, case_file)
 
 
@@ -189,6 +218,7 @@ def test_index_dry_run_is_default(local_repo: Path, tmp_path: Path) -> None:
         patch.object(pilot.shutil, "which", return_value="/usr/local/bin/xerj"),
         patch.object(pilot.subprocess, "run") as run,
     ):
+        run.return_value.returncode = 0
         status = pilot.main([
             "--repo", str(local_repo), "--corpus-dir", str(corpus),
             "index",
