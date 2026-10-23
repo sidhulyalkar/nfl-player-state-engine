@@ -223,6 +223,9 @@ export function GameDayLab() {
       }
       // All-or-nothing: a conflicting play must not partially import a batch.
       const next=mergeReplayLibrary(replayLibrary,incoming);
+      // Bound the total in-memory collection, not merely this upload batch.
+      if(new TextEncoder().encode(JSON.stringify(next)).byteLength>MAX_REPLAY_IMPORT_BYTES)
+        throw new Error('The in-memory research session is limited to 50 MB of replay JSON.');
       setReplayLibrary(next);
       setHistorical(selectReplay(next,replayKey(incoming[0])));
       setImportError(null);
