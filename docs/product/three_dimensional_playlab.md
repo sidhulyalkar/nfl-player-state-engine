@@ -102,3 +102,25 @@ No web browser render test or actual tracking CSV has been performed in this PR.
 
 Technical references: https://threejs.org/docs/pages/WebGLRenderer
 and https://github.com/nfl-football-ops/Big-Data-Bowl/blob/master/schema.md.
+
+
+## Precision replay timeline (next tranche)
+
+- Historical replay supports 0.25×, 0.5×, 1× and 2× playback, with a
+  hundredth-second scrub control and explicit previous/next **recorded**
+  frame buttons.
+- A missing frame is no longer silently presented as current position.
+  During the source gap, current 3D and SVG player/ball positions are hidden
+  and a status identifies the last recorded frame. Last-observed information
+  in the inspector is explicitly identified as such.
+- Selected player trails remain composed solely of observed adjacent-frame
+  samples, with no bridge drawn across missing frame IDs.
+- Frame stepping jumps directly between source IDs, even when multiple
+  intervening frames are missing.
+- Node tests validate missing-frame detection and frame stepping at nominal
+  10 Hz, including exceptional timing inputs.
+- This is a local historical research viewer; playback speed controls do
+  **not** create live tracking or represent interpolation between samples.
+
+A future pass should add visual snapshot testing in Chromium/Firefox/Safari,
+versioned graphics contracts, and a source-authenticated full 2017 sample.
