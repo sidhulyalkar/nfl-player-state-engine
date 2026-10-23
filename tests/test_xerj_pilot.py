@@ -6,12 +6,15 @@ import hashlib
 import importlib.util
 import json
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "xerj_pilot.py"
+# The standalone script imports a sibling module when executed from scripts/.
+sys.path.insert(0, str(SCRIPT.parent))
 SPEC = importlib.util.spec_from_file_location("pse_xerj_pilot", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 pilot = importlib.util.module_from_spec(SPEC)
@@ -183,6 +186,63 @@ def test_ground_truth_benchmark_and_missing_hits(local_repo: Path, tmp_path: Pat
     assert result["results"][0]["first_rank"] == 2
     assert result["results"][1]["first_rank"] is None
     assert result["results"][1]["returned_paths"] == ["docs/not-the-answer.md"]
+
+
+def test_symbol_owner_ranker_keeps_unmodified_raw_comparison(
+    local_repo: Path, tmp_path: Path
+) -> None:
+    corpus = tmp_path / "corpus"
+    pilot.prepare(local_repo, corpus)
+    _index_receipt(corpus)
+    cases = [{
+        "id": "owner", "query": "score_quantile_components",
+        "expected_paths": ["src/player_state_engine/fantasy/scoring.py"],
+    }]
+    case_file = tmp_path / "cases.json"
+    case_file.write_text(json.dumps(cases), encoding="utf-8")
+
+    def fake_request(url: str, resource: str, body: dict | None = None) -> dict:
+        if resource.endswith("/_count"):
+            return {"count": 2}
+        assert body["size"] == 3
+        return {"hits": {"hits": [
+            {"_source": {"ax_path": "docs/guide.md"}},
+            {"_source": {"ax_path": "docs/guide.md", "ax_locator": "s1"}},
+            {"_source": {"ax_path": "src/player_state_engine/fantasy/scoring.py"}},
+        ]}}
+
+    with patch.object(pilot, "request", side_effect=fake_request):
+        report = pilot.benchmark(
+            pilot.URL, corpus, case_file, k=1, ranker="symbol-owner", candidate_pool=3,
+        )
+
+    assert report["hit_at_k"] == 0.0
+    assert report["mrr_at_k"] == 0.0
+    assert report["candidate_hit_at_pool"] == 1.0
+    assert report["ranked_hit_at_k"] == 1.0
+    assert report["ranked_mrr_at_k"] == 1.0
+    assert report["results"][0]["ranked_first_rank"] == 1
+    assert report["results"][0]["unique_candidates_returned"] == 2
+    assert report["results"][0]["returned_paths"] == ["docs/guide.md"]
+
+
+def test_symbol_owner_refuses_modified_staged_source(
+    local_repo: Path, tmp_path: Path
+) -> None:
+    corpus = tmp_path / "corpus"
+    pilot.prepare(local_repo, corpus)
+    scoring = corpus / "src/player_state_engine/fantasy/scoring.py"
+    scoring.write_text("def score_quantile_components(): pass\n# tampered\n")
+
+    from xerj_ranking import owner_priority
+
+    manifest = json.loads((corpus.parent / "snapshot_manifest.json").read_text())
+    hashes = {entry["path"]: entry["sha256"] for entry in manifest["files"]}
+    with pytest.raises(ValueError, match="hash mismatch"):
+        owner_priority(
+            "src/player_state_engine/fantasy/scoring.py",
+            "score_quantile_components", corpus, hashes,
+        )
 
 
 def test_benchmark_rejects_ground_truth_outside_snapshot(
