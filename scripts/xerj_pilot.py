@@ -21,7 +21,7 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 from xerj_ranking import rank_unique_files
 
 ROOT = Path(__file__).resolve().parents[1]
-PREFIX = "nfl-pse"
+PREFIX = "nfl-pse-clean"
 URL = "http://127.0.0.1:9200"
 CORPUS = Path.home() / ".cache" / "nfl-pse-xerj" / "corpus"
 CASES = ROOT / "configs" / "xerj" / "pilot_queries.json"
