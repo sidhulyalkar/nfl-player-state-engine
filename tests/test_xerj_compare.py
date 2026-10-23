@@ -78,6 +78,14 @@ def test_rejects_mismatched_sources(modified: str) -> None:
         compare(raw, owner, rg)
 
 
+def test_rejects_cross_mode_comparisons() -> None:
+    raw, owner, rg = fixture_reports()
+    raw["query_mode"] = "lexical"
+    owner["query_mode"] = "hybrid"
+    with pytest.raises(ValueError, match="different XERJ query modes"):
+        compare(raw, owner, rg)
+
+
 def test_rejects_incomplete_index_or_unmapped_sources() -> None:
     raw, owner, rg = fixture_reports()
     owner["unmapped_result_count"] = 1
