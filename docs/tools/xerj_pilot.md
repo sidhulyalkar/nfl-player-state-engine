@@ -8,7 +8,7 @@ Index NFL Player State Engine source and documentation first, then compare retri
 
 ## Security contract
 
-The script at scripts/xerj_pilot.py prepares a **committed-HEAD-only** mirror in ~/.cache/nfl-pse-xerj/corpus. It never copies untracked or modified working-tree content. Only explicitly selected src/, scripts/, docs/, tests/, configs/, and frontend code plus root guides are eligible. It excludes data/, artifacts/, private league snapshots, credentials, hidden files, binaries, lockfiles, symlinks, and oversized files. Several known credential patterns abort staging.
+The script at scripts/xerj_pilot.py prepares a **committed-HEAD-only** mirror in ~/.cache/nfl-pse-xerj/corpus. It never copies untracked or modified working-tree content. Only explicitly selected src/, scripts/, docs/, tests/, configs/, and frontend code plus root guides are eligible; all XERJ benchmark fixtures and pilot tooling are separately excluded. It excludes data/, artifacts/, private league snapshots, credentials, hidden files, binaries, lockfiles, symlinks, and oversized files. Several known credential patterns abort staging.
 
 These rules are **defense in depth**, not a guarantee that no secret has ever been committed. Review snapshot_manifest.json before indexing. This manifest, kept in the parent of the corpus, records HEAD, source paths, SHA-256 hashes and byte sizes. All generated local reports are gitignored.
 
@@ -51,11 +51,11 @@ After starting the node, the official CLI provides:
 
 Or point your local host's stdio MCP configuration to command xerj and args ["mcp", "--url", "http://127.0.0.1:9200"]. Store configuration outside the repository. The MCP command does not start a node on its own.
 
-Agents should use prefix nfl-pse and return the exact ax_path, XERJ locator or line (when actually present), and the manifest's Git SHA. Open the real source and related tests before editing. If an indexed file differs from HEAD, re-run staging and indexing.
+Agents should use prefix nfl-pse-clean and return the exact ax_path, XERJ locator or line (when actually present), and the manifest's Git SHA. Open the real source and related tests before editing. If an indexed file differs from HEAD, re-run staging and indexing.
 
 ## What the benchmark measures
 
-configs/xerj/pilot_queries.json contains twenty fixed tasks with query text and ground-truth source paths. The wrapper sends lexical match queries to the XERJ body field, scoped to nfl-pse-*, and records:
+configs/xerj/pilot_queries.json contains twenty fixed tasks with query text and ground-truth source paths. The wrapper sends lexical match queries to the XERJ body field, scoped to nfl-pse-clean-*, and records:
 
 | Metric | Meaning |
 | --- | --- |
