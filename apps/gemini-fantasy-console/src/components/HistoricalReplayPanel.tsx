@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import { Activity, ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert, Pause, Play, RotateCcw } from 'lucide-react';
 import '../gameday-lab.css';
 import { FootballField3D, type Field3DPlayer, type Field3DTrail } from './FootballField3D';
@@ -7,6 +7,7 @@ import { motionAtFrame, buildObservedPathIndex, formationFootprint } from './tra
 import { displayClock, frameAtTime, stepFrame } from './trackingTimeline';
 
 import { type HistoricalReplay } from './historicalReplaySchema';
+import { replayKey, replayLabel } from './historicalReplayLibrary';
 export { parseHistoricalReplay } from './historicalReplaySchema';
 export type { HistoricalReplay } from './historicalReplaySchema';
 type Angle = 'broadcast' | 'all22' | 'overhead';
@@ -20,7 +21,17 @@ function quad(x0:number,x1:number,mode:Angle){
   return [point(x0,0,mode),point(x1,0,mode),point(x1,53.3,mode),point(x0,53.3,mode)]
     .map(p=>p.x.toFixed(1)+','+p.y.toFixed(1)).join(' ');
 }
-export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;onBack:()=>void}) {
+export function HistoricalReplayPanel({
+  replay,library,onSelect,onImportFiles,importing,importError,onBack,
+}: {
+  replay:HistoricalReplay;
+  library:readonly HistoricalReplay[];
+  onSelect:(key:string)=>void;
+  onImportFiles:(event:ChangeEvent<HTMLInputElement>)=>void;
+  importing:boolean;
+  importError:string|null;
+  onBack:()=>void;
+}) {
   const [time,setTime]=useState(0);
   const [running,setRunning]=useState(true);
   const [playbackSpeed,setPlaybackSpeed]=useState(1);
@@ -100,8 +111,18 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
   return <main className="gameday-page">
     <header className="gameday-head">
       <div><div className="gameday-kicker"><Activity size={15}/> FOURTH DOWN LAB / HISTORICAL TRACKING</div><h1>Recorded movement, not reconstructed guesses.</h1><p>Game {replay.game_id} · play {replay.play_id} · recorded historical tracking</p></div>
-      <div className="gameday-history-actions"><button onClick={onBack}><ArrowLeft size={15}/> Return to demo</button><div className="gameday-source"><span className="gameday-source-dot"/><div><strong>Historical research only</strong><small>Not live · rights not independently verified</small></div></div></div>
+      <div className="gameday-history-actions">
+        <label className="gameday-library-picker">Research playlist
+          <select aria-label="Select loaded historical play" value={replayKey(replay)} onChange={e=>onSelect(e.target.value)}>
+            {library.map(p=><option key={replayKey(p)} value={replayKey(p)}>{replayLabel(p)}</option>)}
+          </select>
+        </label>
+        <label className="gameday-history-upload">{importing?'Importing…':'Add replay JSON(s)'}
+          <input type="file" multiple disabled={importing} accept=".json,application/json" onChange={onImportFiles}/>
+        </label>
+        <button onClick={onBack}><ArrowLeft size={15}/> Return to demo</button><div className="gameday-source"><span className="gameday-source-dot"/><div><strong>Historical research only</strong><small>Not live · rights not independently verified</small></div></div></div>
     </header>
+    {importError&&<div className="gameday-import-error" role="alert">{importError}</div>}
     <div className="gameday-layout">
       <section className="gameday-main">
         <div className="gameday-history-meta"><span><CheckCircle2 size={14}/> Recorded x/y coordinates</span><span>{replay.frame_count} frames</span><span>{replay.missing_frame_count} missing frames</span><span>Direction: {replay.play_direction ?? 'unknown'}</span></div>
