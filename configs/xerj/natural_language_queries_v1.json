@@ -1,0 +1,142 @@
+[
+  {
+    "id": "nl-01-league-scoring",
+    "query": "Where is fantasy scoring calculated from passing rushing receiving and reception statistics?",
+    "expected_paths": [
+      "src/player_state_engine/fantasy/scoring.py"
+    ]
+  },
+  {
+    "id": "nl-02-draft-qualification",
+    "query": "What decides whether a league's draft recommendations are properly qualified before use?",
+    "expected_paths": [
+      "src/player_state_engine/fantasy/draft_qualification.py"
+    ]
+  },
+  {
+    "id": "nl-03-candidate-actionability",
+    "query": "Which logic allows individual draft candidates to be assessed even when overall league readiness is blocked?",
+    "expected_paths": [
+      "src/player_state_engine/fantasy/draft_actionability.py"
+    ]
+  },
+  {
+    "id": "nl-04-legal-roster",
+    "query": "Where does the engine assign players to legal starter slots and evaluate roster depth?",
+    "expected_paths": [
+      "src/player_state_engine/fantasy/roster_simulator.py"
+    ]
+  },
+  {
+    "id": "nl-05-carry-routing",
+    "query": "Where does the hybrid projection model route carries through different position-specific heads?",
+    "expected_paths": [
+      "src/player_state_engine/models/hybrid.py"
+    ]
+  },
+  {
+    "id": "nl-06-position-heads",
+    "query": "Where are player-position-specific quantile prediction heads implemented?",
+    "expected_paths": [
+      "src/player_state_engine/models/position_quantile.py"
+    ]
+  },
+  {
+    "id": "nl-07-role-state",
+    "query": "What component estimates evolving player role shares using discounted Bayesian posteriors?",
+    "expected_paths": [
+      "src/player_state_engine/state_graph/role.py"
+    ]
+  },
+  {
+    "id": "nl-08-variance",
+    "query": "Which component decomposes forecast uncertainty across counterfactual sources of variation?",
+    "expected_paths": [
+      "src/player_state_engine/state_graph/uncertainty.py"
+    ]
+  },
+  {
+    "id": "nl-09-frozen-comparison",
+    "query": "Where are frozen out-of-sample model predictions compared using paired loss and multiple-testing control?",
+    "expected_paths": [
+      "src/player_state_engine/evaluation/evidence_factory.py"
+    ]
+  },
+  {
+    "id": "nl-10-live-release",
+    "query": "What code enforces scoring-contract and freshness gates before draft predictions are released?",
+    "expected_paths": [
+      "src/player_state_engine/product/release_readiness.py"
+    ]
+  },
+  {
+    "id": "nl-11-shadow-snapshots",
+    "query": "Where do weekly pregame player forecasts get normalized for later shadow-season settlement?",
+    "expected_paths": [
+      "src/player_state_engine/product/shadow_season.py"
+    ]
+  },
+  {
+    "id": "nl-12-cross-league-risk",
+    "query": "Where is my fantasy player exposure aggregated across multiple leagues and rosters?",
+    "expected_paths": [
+      "src/player_state_engine/product/portfolio_exposure.py"
+    ]
+  },
+  {
+    "id": "nl-13-sleeper-adapter",
+    "query": "Which integration turns Sleeper platform leagues and rosters into canonical league snapshots?",
+    "expected_paths": [
+      "src/player_state_engine/integrations/sleeper.py"
+    ]
+  },
+  {
+    "id": "nl-14-espn-adapter",
+    "query": "Which integration normalizes ESPN league lineup positions and fantasy scoring rules?",
+    "expected_paths": [
+      "src/player_state_engine/integrations/espn.py"
+    ]
+  },
+  {
+    "id": "nl-15-game-terminal",
+    "query": "Where does football game-simulation research evaluate terminal outcomes and advancement criteria?",
+    "expected_paths": [
+      "src/player_state_engine/game_intelligence/terminal_benchmark.py"
+    ]
+  },
+  {
+    "id": "nl-16-copilot-boundary",
+    "query": "Where does the server-side fantasy copilot choose deterministic tools when generative assistance is unavailable?",
+    "expected_paths": [
+      "apps/gemini-fantasy-console/server/gemini.ts"
+    ]
+  },
+  {
+    "id": "nl-17-model-visuals",
+    "query": "Which React component displays model calibration drift and performance diagnostic charts?",
+    "expected_paths": [
+      "apps/gemini-fantasy-console/src/components/ModelDiagnosticsPanel.tsx"
+    ]
+  },
+  {
+    "id": "nl-18-checkout-doctor",
+    "query": "What startup check validates a fresh draft checkout and required data dependencies?",
+    "expected_paths": [
+      "scripts/check_draft_checkout.py"
+    ]
+  },
+  {
+    "id": "nl-19-player-survival",
+    "query": "Where is the probability of a draft target surviving until the next pick estimated from market evidence?",
+    "expected_paths": [
+      "src/player_state_engine/fantasy/draft_survival.py"
+    ]
+  },
+  {
+    "id": "nl-20-method-summaries",
+    "query": "Where are aggregate forecast errors computed separately for candidate methods in the evidence evaluation?",
+    "expected_paths": [
+      "src/player_state_engine/evaluation/evidence_factory.py"
+    ]
+  }
+]
