@@ -124,3 +124,47 @@ and https://github.com/nfl-football-ops/Big-Data-Bowl/blob/master/schema.md.
 
 A future pass should add visual snapshot testing in Chromium/Firefox/Safari,
 versioned graphics contracts, and a source-authenticated full 2017 sample.
+
+
+## Motion evidence and refined marker silhouettes (PR #95)
+
+The 3D actor rendering now uses low-poly, symmetric football silhouettes
+(padded torso, sleeves, legs, boots and helmet) instead of a single cylinder.
+The actor pose is explicitly **neutral**. Do not interpret the helmet or
+torso as the player's observed facing angle.
+
+A separate ground chevron appears only where consecutive source x/y samples
+support a finite, plausible movement vector. The direction is **derived
+travel heading** and is not interchangeable with player facing, gaze, an
+assigned route or defensive coverage. No chevron appears for stationary,
+missing, nonfinite or implausible movement, or if the entire glyph would leave
+the playing field. The 3D source badge reiterates the distinction when
+chevrons are visible.
+
+The official 2019 Big Data Bowl schema supplies an angle of **motion**
+(dir), but not the same explicit player orientation field offered in later
+Big Data Bowl releases. This implementation deliberately does not apply a
+shared angle-to-world transform to both fields. A future verified
+source-specific convention contract would be needed for a truthful player
+facing overlay.
+
+Longer historical replays no longer rescan all previous frames to calculate
+one player's path length at each timestamp. A precomputed per-player
+path-prefix index preserves gaps and identity changes, making UI reads O(1).
+
+### Browser regression scope
+
+The GitHub Actions Chromium smoke additionally uploads a clearly
+labelled **CI-generated fake tracking JSON** through the real import control.
+It verifies transition to the historical UI, source labels, jump to a
+recorded source frame, travel provenance, and stepping across absent frame IDs.
+This fixture is not an NFL recording, does not authenticate the data
+pipeline's published source rights, and must not be used for scientific
+or product claims.
+
+Actual first-party 2017 tracking-file animation and video alignment,
+multi-browser screenshots, and frame-time performance measurement are
+separate remaining qualification gates.
+
+Official historical source dictionary:
+https://github.com/nfl-football-ops/Big-Data-Bowl/blob/master/schema.md
