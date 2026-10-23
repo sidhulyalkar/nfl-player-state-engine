@@ -63,6 +63,14 @@ def eligible(path: str, mode: str = "100644") -> bool:
     p = PurePosixPath(path)
     if mode != "100644" or p.is_absolute() or ".." in p.parts:
         return False
+    # Prevent evaluation leakage and the pilot's own references from ranking above code.
+    if (
+        path.startswith("configs/xerj/")
+        or path.startswith("scripts/xerj_")
+        or path.startswith("tests/test_xerj_")
+        or path == "docs/tools/xerj_pilot.md"
+    ):
+        return False
     if any(part.startswith(".") or part.lower() in BLOCKED_PARTS for part in p.parts):
         return False
     if any(term in part.lower() for part in p.parts for term in ("secret", "credential", "token")):
@@ -320,6 +328,8 @@ def benchmark(
         "created_at": datetime.now(UTC).isoformat(),
         "index_prefix": PREFIX, "index_document_count": count,
         "repo_commit": manifest["repo_commit"],
+        "source_fingerprint": snapshot_fingerprint(manifest),
+        "suite": cases_file.name,
         "source_repository": manifest.get("source_repository"),
         "source_license": manifest.get("source_license"),
         "index_status": receipt["status"],
