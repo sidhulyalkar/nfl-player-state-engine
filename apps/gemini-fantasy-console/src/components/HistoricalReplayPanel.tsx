@@ -6,7 +6,7 @@ import { trackingFocus, sourceSnapIndex, observedTrailSegments } from './footbal
 import { motionAtFrame, observedDistance, formationFootprint } from './trackingMotion';
 import { displayClock, frameAtTime, stepFrame } from './trackingTimeline';
 
-import { type HistoricalFrame, type HistoricalReplay } from './historicalReplaySchema';
+import { type HistoricalReplay } from './historicalReplaySchema';
 export { parseHistoricalReplay } from './historicalReplaySchema';
 export type { HistoricalReplay } from './historicalReplaySchema';
 type Angle = 'broadcast' | 'all22' | 'overhead';
@@ -148,7 +148,7 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
             <text x="33" y="45" fill="#e8f4f6" fontSize="12" letterSpacing="1.5">SOURCE FRAMES · {frame.frame_id}</text>
             <text x="33" y="65" fill="#a3bbbf" fontSize="11">Ball elevation unavailable; movement is NOT interpolated.</text>
           </svg>}
-          {sourceGap&&<div role="status" className="gameday-gap-banner">No position sample at {displayClock(time)} · last observed frame {frame.frame_id} · next source frame pending</div>}
+          {sourceGap&&<div role="status" className="gameday-gap-banner">No position sample at {displayClock(time)} · last observed frame {frame.frame_id} · source frame unavailable</div>}
         </div>
         <div className="gameday-controlbar"><div className="gameday-player-controls">
           <button onClick={()=>{if(time>=duration)setTime(0);setRunning(!running);}} aria-label={running?'Pause replay':'Play replay'}>{running?<Pause size={18}/>:<Play size={18}/>}</button>
@@ -171,7 +171,8 @@ export function HistoricalReplayPanel({replay,onBack}: {replay:HistoricalReplay;
               <option value="">Select a tracked player</option>
               {frame.players.filter(p=>p.nfl_id).map(p=><option key={p.nfl_id} value={p.nfl_id!}>{p.name??p.nfl_id} {p.jersey?'#'+p.jersey:''} {p.team?'('+p.team+')':''}</option>)}
             </select>
-          </label><div className="gameday-fact"><span>Entity</span><strong>{focused?.name??focused?.nfl_id??'Select a player'}</strong></div><div className="gameday-fact"><span>Team / side</span><strong>{focused?.team??'unavailable'} / {focused?.side??'unknown'}</strong></div><div className="gameday-fact"><span>Position</span><strong>{focused?focused.x.toFixed(2)+' x '+focused.y.toFixed(2)+' yd':'—'}</strong></div>
+          </label>{sourceGap&&<p className="gameday-muted">Position telemetry below belongs to last observed frame {frame.frame_id}, not the missing current sample.</p>}
+          <div className="gameday-fact"><span>Entity</span><strong>{focused?.name??focused?.nfl_id??'Select a player'}</strong></div><div className="gameday-fact"><span>Team / side</span><strong>{focused?.team??'unavailable'} / {focused?.side??'unknown'}</strong></div><div className="gameday-fact"><span>Position</span><strong>{focused?focused.x.toFixed(2)+' x '+focused.y.toFixed(2)+' yd':'—'}</strong></div>
           <div className="gameday-fact"><span>Straight-line displacement from snap</span><strong>{straightFromSnap==null?'Unavailable':straightFromSnap.toFixed(2)+' yd'}</strong></div><div className="gameday-fact"><span>Source-reported speed</span><strong>{focused?.speed_yards_per_s==null?'Unavailable':focused.speed_yards_per_s.toFixed(2)+' yd/s'}</strong></div>
           <div className="gameday-fact"><span>Adjacent-frame speed</span><strong>{currentMotion?currentMotion.computed_speed_yards_per_second.toFixed(2)+' yd/s':'Insufficient consecutive frames'}</strong></div>
           <div className="gameday-fact"><span>Source-reported acceleration</span><strong>{focused?.acceleration_yards_per_s2==null?'Unavailable':focused.acceleration_yards_per_s2.toFixed(2)+' yd/s²'}</strong></div>
