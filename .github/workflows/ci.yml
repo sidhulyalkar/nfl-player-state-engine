@@ -20,7 +20,7 @@ jobs:
       - run: python -m pip install -e '.[dev,intelligence,api,espn]'
       - name: Lint package, tests, and operational research scripts
         run: |
-          ruff check src tests \
+          ruff check src tests scripts/xerj_pilot.py scripts/xerj_ranking.py scripts/xerj_rg_baseline.py scripts/xerj_compare.py \
             scripts/acquire_game_intelligence_sources.py \
             scripts/build_game_intelligence.py \
             scripts/build_draft_survival_observations.py \
@@ -52,6 +52,60 @@ jobs:
             scripts/run_reg_historical_intelligence_experiment_v2.py
       - name: Compile Python sources and all scripts
         run: python -m compileall -q src scripts tests
+      - name: Smoke committed-source XERJ corpus safety and benchmark coverage
+        run: |
+          python scripts/xerj_pilot.py --corpus-dir "$RUNNER_TEMP/nfl-pse-xerj-corpus" prepare
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          manifest = json.loads((root / "snapshot_manifest.json").read_text())
+          staged = {f["path"] for f in manifest["files"]}
+          for case_file in (
+              "configs/xerj/pilot_queries.json",
+              "configs/xerj/natural_language_queries_v1.json",
+          ):
+              cases = json.loads(Path(case_file).read_text())
+              missing = {
+                  path
+                  for case in cases
+                  for path in case["expected_paths"]
+                  if path not in staged
+              }
+              assert not missing, f"Missing benchmark ground truth in {case_file}: {sorted(missing)}"
+              assert len({case["id"] for case in cases}) == len(cases)
+              assert case_file not in staged, "Ground-truth answer key leaked into index"
+          assert not any(p.startswith(("scripts/xerj_", "tests/test_xerj_")) for p in staged)
+          assert "docs/tools/xerj_pilot.md" not in staged
+          assert manifest["source_license"] == "MIT"
+          print(f"Safe XERJ snapshot: {manifest['file_count']} tracked files, 2 evaluation suites")
+          PY
+      - name: Install ripgrep for independent source-search baseline
+        run: |
+          if ! command -v rg >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ripgrep
+          fi
+      - name: Reproduce strong local ripgrep baseline against clean source snapshot
+        run: |
+          command -v rg
+          python scripts/xerj_rg_baseline.py \
+            --corpus-dir "$RUNNER_TEMP/nfl-pse-xerj-corpus" \
+            --cases configs/xerj/natural_language_queries_v1.json \
+            --output "$RUNNER_TEMP/xerj_rg_natural.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          result = json.loads((Path(os.environ["RUNNER_TEMP"]) / "xerj_rg_natural.json").read_text())
+          assert result["tasks"] == 20
+          assert result["kind"] == "developer_retrieval_baseline"
+          assert len(result["repo_commit"]) == 40
+          print(f"ripgrep baseline: Hit@5={result['hit_at_k']:.2%}, MRR={result['mrr_at_k']:.3f}")
+          PY
       - name: Smoke Evidence Factory against frozen benchmark artifacts
         run: |
           python scripts/run_evidence_factory.py \
