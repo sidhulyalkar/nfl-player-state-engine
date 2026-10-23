@@ -82,3 +82,24 @@ Suggested decision thresholds are hit@5 >= 0.80, MRR@5 >= 0.60, and no loss of t
 - Source retrieval misses: inspect the real field mapping and returned ax_path; a nonexistent expected file or unknown schema is an evaluation failure.
 - Index completes with warnings/partial status: inspect autoindex status and coverage before interpreting benchmark results.
 - Repo functions as normal without XERJ: all developer tooling is opt-in, with offline unit tests only in CI.
+
+## First local results and second-stage diagnostic run (October 23, 2026)
+
+The real local run at commit `6782c0759329466fa0a10ff23f9e3b86932996f3` indexed **600 files / 4,562 documents** with `index_status=complete` and `unmapped_result_count=0`. Across 20 exact-symbol queries, raw **Hit@5 was 0.85** and **MRR@5 was 0.4017**, with **p50 6.5 ms / p95 13.84 ms** API latency. It meets the proposed 0.80 Hit@5 target but misses the 0.60 MRR target. The three misses were `03-candidate-actionability`, `13-sleeper-ingestion`, and `14-espn-ingestion`. No agent task-speed or correctness improvement was measured.
+
+Observed competing matches include tests, re-exports, routes, and the XERJ pilot's own documentation. Multiple XERJ document chunks can share one `ax_path`, causing the same file to occupy multiple top-k positions. `source_sha256` is a hash of a staged *whole file*, not proof the returned passage is a definition.
+
+The second-stage mode runs **two separate metrics on the same query response**: the original raw chunk-level top five, and a deterministic deduplicated, exact-symbol-owner-aware ranking over a larger raw candidate pool. This stage uses Python AST definitions and conservative TypeScript/JavaScript declarations. It never reads `expected_paths`, and cannot recover a correct file absent from XERJ's candidate pool. It records candidate recall, raw/ranked Hit@5, raw/ranked MRR@5, unmapped hits, API and local ranking latency. It makes no assertion that results have improved until a new real run completes.
+
+After checking out the latest branch commit, **rebuild the index** because the staged-source fingerprint changes:
+
+    python scripts/xerj_pilot.py prepare
+    python scripts/xerj_pilot.py index
+    python scripts/xerj_pilot.py index --apply
+    python scripts/xerj_pilot.py benchmark --output .xerj-reports/pilot_raw_v2.json
+    python scripts/xerj_pilot.py benchmark --ranker symbol-owner --candidate-pool 30 \
+        --output .xerj-reports/pilot_symbol_owner_v2.json
+
+The original 2026-10-23 run is the frozen historical baseline; don't replace or relabel it as a v2 run. Ranker results are not necessarily better than raw baseline and require independent measurement.
+
+**Crucial caveat:** Exact function and class symbol lookups are often trivial for local `rg` or AST-based navigation. Symbol-owner reranking is a diagnostic for navigation quality, *not evidence that XERJ beats ordinary code search*. Next, preregister natural-language tasks that don't provide exact symbol names and run a randomized, blinded, paired agent study against a strong `rg`+repo-tool baseline before deciding to roll out to other repositories.
