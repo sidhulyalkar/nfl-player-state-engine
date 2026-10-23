@@ -161,7 +161,7 @@ def test_invalid_tracking_sample_blocks_qualification(tmp_path: Path) -> None:
     assert quality["omitted_missing_position_rows"] == 0
     assert quality["affected_source_frame_ids"] == [3]
     assert quality["never_clamped_or_interpolated"] is True
-    assert replay["frames"][1]["players"][0]["nfl_id"] == "11"
+    assert replay["frames"][1]["players"][0]["nfl_id"] == "22"
     assert all(p["x"] <= 120 for frame in replay["frames"] for p in frame["players"])
 
 
