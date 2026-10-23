@@ -169,3 +169,7 @@ When working on the fantasy product layer:
 8. Make data freshness, uncertainty, and missing inputs visible.
 9. Update `docs/product/testing_predictive_capability.md` when adding a decision metric.
 10. Do not claim product or predictive performance from synthetic frontend fixtures.
+
+## Optional local XERJ developer retrieval pilot
+
+Read `docs/tools/xerj_pilot.md` before using XERJ. It is strictly an **opt-in coding-agent navigation layer**, not a production data source, model feature, or license to skip source inspection. Prepare the committed-HEAD allowlisted snapshot with `python scripts/xerj_pilot.py prepare`, inspect its inventory, then dry-run `python scripts/xerj_pilot.py index`; only use `index --apply` after review. Queries must be scoped to `nfl-pse` and evidence must include source path, source commit, and lines only when verified. Never index local league data, untracked material, secrets, or model artifacts. Never promote a model, change league-scoring contracts, or claim benchmark quality based on retrieved passages. Run the preregistered benchmark via `python scripts/xerj_pilot.py benchmark` and keep its receipts local.
