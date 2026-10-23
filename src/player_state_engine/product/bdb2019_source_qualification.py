@@ -30,6 +30,22 @@ SOURCE_FILES: dict[str, tuple[str, str, int]] = {
 PLAY_REQUIRED = {"gameId", "playId", "possessionTeam", "quarter", "down", "yardsToGo"}
 GAME_REQUIRED = {"gameId", "homeTeamAbbr", "visitorTeamAbbr", "season", "week"}
 
+# Independent profile measured from the exact source-hash-verified 31,659,157-
+# byte official tracking file. Neither rows nor source trajectories are vendored.
+# These are guards on two reproducible plays, not claims of video alignment.
+KNOWN_TRACKING_PLAY_PROFILES = {
+    "938": {
+        "rows": 1426, "frames": 62, "ball_frames": 62,
+        "omitted_missing": 0, "omitted_outside": 0,
+        "snap_frame": 15, "observed_player_ids": 22,
+    },
+    "2756": {
+        "rows": 2691, "frames": 117, "ball_frames": 117,
+        "omitted_missing": 6, "omitted_outside": 10,
+        "snap_frame": 15, "observed_player_ids": 22,
+    },
+}
+
 
 def file_identifiers(path: Path) -> dict[str, Any]:
     """Stream SHA-256 and canonical Git SHA-1 (including blob header)."""
@@ -188,6 +204,21 @@ def qualify_bdb2019_play(
             "from on-field rendering (missing or out of bounds), not clamped or interpolated."
         )
     canonical = dict(expectations) == SOURCE_FILES
+    if canonical and play_id in KNOWN_TRACKING_PLAY_PROFILES:
+        expected = KNOWN_TRACKING_PLAY_PROFILES[play_id]
+        actual = {
+            "rows": replay["rows"], "frames": replay["frame_count"],
+            "ball_frames": observed_balls,
+            "omitted_missing": quality["omitted_missing_position_rows"],
+            "omitted_outside": quality["omitted_off_field_position_rows"],
+            "snap_frame": snap_ids[0] if len(snap_ids) == 1 else None,
+            "observed_player_ids": len(observed_player_ids),
+        }
+        if actual != expected:
+            raise ValueError(
+                "Pinned NFL source tracking profile is inconsistent with independent "
+                "play-level observation audit."
+            )
     first, last = replay["frames"][0], replay["frames"][-1]
     report: dict[str, Any] = {
         "schema_version": 1,
