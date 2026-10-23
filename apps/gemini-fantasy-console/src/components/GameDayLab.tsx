@@ -3,6 +3,7 @@ import { Activity, Bell, ChevronRight, CircleAlert, Maximize2, Pause, Play, Rota
 import '../gameday-lab.css';
 import { HistoricalReplayPanel, parseHistoricalReplay, type HistoricalReplay } from './HistoricalReplayPanel';
 import { FootballField3D, type Field3DTrail } from './FootballField3D';
+import { MAX_REPLAY_FILE_BYTES, MAX_REPLAY_IMPORT_BYTES, MAX_REPLAY_LIBRARY, mergeReplayLibrary, replayKey, replayLabel, selectReplay } from './historicalReplayLibrary';
 
 /**
  * Illustrative data only. Production tracking adapters must carry a separate
@@ -196,19 +197,40 @@ function Field({ play, time, camera, overlays, onPlayer }: {
 }
 export function GameDayLab() {
   const [historical,setHistorical] = useState<HistoricalReplay|null>(null);
+  const [replayLibrary,setReplayLibrary] = useState<HistoricalReplay[]>([]);
   const [importError,setImportError] = useState<string|null>(null);
+  const [importing,setImporting] = useState(false);
   async function onReplayFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    event.target.value = '';
+    const files=Array.from(event.target.files??[]);
+    event.target.value='';
+    if(!files.length || importing) return;
     try {
-      if (file.size > 25_000_000) throw new Error('Replay JSON exceeds the 25 MB safety limit.');
-      const replay = parseHistoricalReplay(JSON.parse(await file.text()) as unknown);
+      setImporting(true);
+      if(files.length>MAX_REPLAY_LIBRARY)
+        throw new Error('Choose at most '+MAX_REPLAY_LIBRARY+' research replay JSON files at a time.');
+      if(files.some(file=>file.size>MAX_REPLAY_FILE_BYTES))
+        throw new Error('Each historical replay JSON must be 25 MB or smaller.');
+      if(files.reduce((sum,file)=>sum+file.size,0)>MAX_REPLAY_IMPORT_BYTES)
+        throw new Error('A replay batch must be 50 MB or smaller.');
+      const incoming:HistoricalReplay[]=[];
+      for(const file of files){
+        try {
+          incoming.push(parseHistoricalReplay(JSON.parse(await file.text()) as unknown));
+        } catch(reason) {
+          const message=reason instanceof Error?reason.message:'Invalid replay format';
+          throw new Error('File '+file.name+': '+message);
+        }
+      }
+      // All-or-nothing: a conflicting play must not partially import a batch.
+      const next=mergeReplayLibrary(replayLibrary,incoming);
+      setReplayLibrary(next);
+      setHistorical(selectReplay(next,replayKey(incoming[0])));
       setImportError(null);
-      setHistorical(replay);
       setPlaying(false);
-    } catch (reason) {
-      setImportError(reason instanceof Error ? reason.message : 'Invalid replay file');
+    } catch(reason) {
+      setImportError(reason instanceof Error?reason.message:'Invalid replay file');
+    } finally {
+      setImporting(false);
     }
   }
   const [index,setIndex] = useState(0);
@@ -265,10 +287,10 @@ export function GameDayLab() {
     const u=Math.max(0,Math.min(1,(time-3.15)/1.2));
     return {x:a.x+(b.x-a.x)*u,y:a.y+(b.y-a.y)*u};
   },[time,play.kind]);
-  return historical ? <HistoricalReplayPanel replay={historical} onBack={()=>{setHistorical(null);setTime(0);setPlaying(true);}}/> : <main className="gameday-page">
+  return historical ? <HistoricalReplayPanel key={replayKey(historical)} replay={historical} library={replayLibrary} onSelect={key=>setHistorical(selectReplay(replayLibrary,key))} onImportFiles={onReplayFile} importing={importing} importError={importError} onBack={()=>{setHistorical(null);setTime(0);setPlaying(true);}}/> : <main className="gameday-page">
     <header className="gameday-head">
       <div><div className="gameday-kicker"><Activity size={15}/> FOURTH DOWN LAB / GAMEDAY</div><h1>See the game beneath the game.</h1><p>Replay the formation. Explore the decisions. Understand the contributions.</p></div>
-      <div className="gameday-history-actions"><label className="gameday-history-upload">Load historical replay JSON<input type="file" accept=".json,application/json" onChange={event=>{void onReplayFile(event);}}/></label><div className="gameday-source"><span className="gameday-source-dot"/><div><strong>Synthetic demonstration</strong><small>Not a live game or licensed tracking feed</small></div></div></div>
+      <div className="gameday-history-actions"><label className="gameday-history-upload">{importing?'Importing replay files…':'Load historical replay JSON(s)'}<input type="file" multiple disabled={importing} accept=".json,application/json" onChange={event=>{void onReplayFile(event);}}/></label>{replayLibrary.length>0&&<label className="gameday-library-picker">Loaded plays<select aria-label="Choose saved historical replay" value="" onChange={e=>setHistorical(selectReplay(replayLibrary,e.target.value))}><option value="" disabled>Select a play ({replayLibrary.length})</option>{replayLibrary.map(p=><option key={replayKey(p)} value={replayKey(p)}>{replayLabel(p)}</option>)}</select></label>}<div className="gameday-source"><span className="gameday-source-dot"/><div><strong>Synthetic demonstration</strong><small>Not a live game or licensed tracking feed</small></div></div></div>
     </header>
     {importError && <div className="gameday-import-error" role="alert">{importError}</div>}
     <div className="gameday-layout">
