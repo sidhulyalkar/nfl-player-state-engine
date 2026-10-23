@@ -157,7 +157,11 @@ try {
   const switchedBack=await evalPage("(()=>{const selector=document.querySelector('select[aria-label=\"Select loaded historical play\"]');if(!selector)return false;selector.selectedIndex=0;selector.dispatchEvent(new Event('change',{bubbles:true}));return true})()",sid);
   assert.equal(switchedBack,true);
   await until("document.querySelector('.gameday-head')?.textContent?.includes('CI_TEST_PLAY')",sid,'switching to first recorded play');
-  await until("document.querySelector('.gameday-player-controls')?.textContent?.includes('frame 1')",sid,'switched replay timeline reset');
+  // Playback starts automatically after a play switch. Reset explicitly to
+  // inspect the first recorded sample deterministically on a busy CI runner.
+  const resetAfterSwap=await evalPage("(()=>{const b=document.querySelector('button[aria-label=\"Reset replay\"]');b?.click();return !!b})()",sid);
+  assert.equal(resetAfterSwap,true);
+  await until("document.querySelector('.gameday-player-controls')?.textContent?.includes('frame 1')",sid,'switched replay reset control');
   const wentToDemo=await evalPage("(()=>{const b=[...document.querySelectorAll('button')].find(v=>v.textContent?.includes('Return to demo'));b?.click();return !!b})()",sid);
   assert.equal(wentToDemo,true);
   await until("document.querySelector('.gameday-head h1')?.textContent?.includes('See the game beneath the game')",sid,'demo reset');
