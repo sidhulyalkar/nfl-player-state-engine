@@ -168,3 +168,54 @@ The comparison report refuses missing source fingerprints, mismatched Git commit
 - The exact-symbol suite is a sanity check, not a competitive demonstration against rg.
 - The natural-language suite must meet the proposed retrieval thresholds and preferably compete with the strong local baseline before an agent study.
 - Only randomized, isolated end-to-end developer tasks with hidden labels can establish agent correctness, latency, or token improvements. Do not claim benefits to NFL prediction quality from source search.
+
+## Clean natural-language benchmark: measured failure (October 23, 2026)
+
+**Status: NO-GO for XERJ source navigation as currently queried. Do not promote into agent defaults or NFL production paths.**
+
+The user-provided local comparison report is for repo commit
+`c9f31a227ba0a6b47f9eb0943987d567f3197aad`, source fingerprint
+`3b4125e280ec9270d7ba1e8b32e461eee6974c18362ba81f3603de7afb66f6d2`,
+20 tasks, k=5, suite `natural_language_queries_v1.json`. This fixed source fingerprint identifies the **evaluated** commit, not the subsequently modified diagnostic code.
+
+| Strategy | Hit@5 | MRR@5 | Query p50 | Notes |
+| --- | ---: | ---: | ---: | --- |
+| XERJ lexical body match, raw | 4/20 (0.20) | 0.1125 | 6.41 ms | Clean index, correct source identity |
+| XERJ lexical, pool 30 + owner/dedupe | 5/20 (0.25) | 0.1267 | 23.35 ms API; 0.01 ms local ranking | Gains one task; regresses zero |
+| Independent rg + BM25/path/owner | 16/20 (0.80) | 0.4850 | 47.4 ms | Local catalog build 274.63 ms |
+
+The ranker found the expected owner on `nl-16-copilot-boundary` at position 5 (a deduplication gain), and improved checkout-doctor from rank 4 to 3. All five XERJ owner-ranked hits were also retrieved by rg. The extra owner-ranked 30-candidate pool found an expected file on 13/20 questions, so **65% candidate recall puts an upper bound below the target 80% Hit@5 even for a perfect reranker**. Eleven of the twenty questions succeeded for rg but missed for owner-ranked XERJ. All top-five raw results matched across the requests with sizes 5 and 30.
+
+The source-owner heuristic is intentionally invoked only on exact identifier-like queries; for ordinary sentences, its improvement is deduplication, not semantic understanding. Latency is not apples-to-apples: the rg catalog's build cost and XERJ's separate indexing/server startup are not included in both per-query medians. The small, curated suite is directional rather than a statistically broad developer productivity estimate. It does not assess code-line relevance, downstream agent completion, model quality, or fantasy outcomes.
+
+### Next diagnostic experiment, not a retroactive pass
+
+Official XERJ documentation describes three distinct query families: lexical `match`, server-side `semantic` on fields mapped `semantic_text`, and `hybrid` rank fusion. The pilot previously exercised **only** `match` against the `body` field. New opt-in `--query-mode` variants let us measure whether the retrieval API used was the bottleneck. They never alter index data, production projection paths, expected answer labels, or the existing lexical control.
+
+**Before using semantic or hybrid**, inspect `xerj autoindex map --url http://127.0.0.1:9200`. The relevant code indices must expose `body` with compatible semantic mapping. If not, report that these query modes are unsupported by this index and do **not** silently fall back to lexical or delete/rebuild unrelated indices. XERJ's default local embedder is described by its documentation as deterministic/lexical, not a large neural embedding model. A query failure is evidence of a mapping or implementation incompatibility, not a quality score.
+
+From the repository root, with the existing clean index and matching receipt for current HEAD:
+
+    python scripts/xerj_pilot.py prepare
+    python scripts/xerj_pilot.py index
+    python scripts/xerj_pilot.py index --apply
+
+For each mode (`semantic` then `hybrid`), keep queries, k, corpus and answer labels unchanged; run raw and owner-deduplicated reports:
+
+    python scripts/xerj_pilot.py benchmark \
+      --query-mode semantic \
+      --cases configs/xerj/natural_language_queries_v1.json \
+      --output .xerj-reports/natural_semantic_raw.json
+    python scripts/xerj_pilot.py benchmark \
+      --query-mode semantic --ranker symbol-owner --candidate-pool 30 \
+      --cases configs/xerj/natural_language_queries_v1.json \
+      --output .xerj-reports/natural_semantic_owner.json
+    python scripts/xerj_compare.py \
+      --raw .xerj-reports/natural_semantic_raw.json \
+      --owner .xerj-reports/natural_semantic_owner.json \
+      --rg .xerj-reports/natural_rg.json \
+      --output .xerj-reports/natural_semantic_comparison.json
+
+Repeat the commands with `--query-mode hybrid` and distinct `natural_hybrid_*.json` filenames. The report checker refuses to compare two different XERJ query modes in one paired report.
+
+Treat these reruns on the **already inspected natural-language test set as exploratory diagnostics only**. An eventual go decision requires preregistering a fresh holdout of independently written engineering questions, validating file ownership, and demonstrating value beyond rg without compromising source provenance or existing CI. No acceptance criteria should be retuned to make the existing benchmark pass.
