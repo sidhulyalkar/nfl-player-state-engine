@@ -126,7 +126,7 @@ A future pass should add visual snapshot testing in Chromium/Firefox/Safari,
 versioned graphics contracts, and a source-authenticated full 2017 sample.
 
 
-## Motion evidence and refined marker silhouettes (PR #95)
+## Motion evidence and refined marker silhouettes
 
 The 3D actor rendering now uses low-poly, symmetric football silhouettes
 (padded torso, sleeves, legs, boots and helmet) instead of a single cylinder.
