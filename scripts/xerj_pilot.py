@@ -248,19 +248,23 @@ def benchmark(url: str, corpus: Path, cases_file: Path, k: int = 5) -> dict:
         evidence = []
         for hit in hits:
             path = source_path(hit)
-            if path is not None and path in indexed_files:
-                paths.append(path)
-                source = hit["_source"]
-                evidence.append({
-                    "path": path, "source_sha256": indexed_hashes[path],
-                    "locator": source.get("ax_locator"),
-                    "title": source.get("title"),
-                })
+            # Keep unrecognized hits in the ranking: removing them inflates MRR.
+            paths.append(path)
+            source = hit.get("_source")
+            source = source if isinstance(source, dict) else {}
+            evidence.append({
+                "path": path,
+                "in_snapshot": path in indexed_files if path is not None else False,
+                "source_sha256": indexed_hashes.get(path) if path is not None else None,
+                "locator": source.get("ax_locator"),
+                "title": source.get("title"),
+            })
         first_rank = next((rank for rank, path in enumerate(paths, 1) if path in expected), None)
         results.append({
             "id": case["id"], "query": case["query"],
             "expected_paths": sorted(expected), "returned_paths": paths,
             "returned_evidence": evidence,
+            "unmapped_hits": sum(not item["in_snapshot"] for item in evidence),
             "first_rank": first_rank, "hit_at_k": first_rank is not None,
             "reciprocal_rank": round(1 / first_rank, 5) if first_rank else 0,
             "latency_ms": elapsed_ms,
@@ -277,6 +281,7 @@ def benchmark(url: str, corpus: Path, cases_file: Path, k: int = 5) -> dict:
         "index_status": receipt["status"],
         "corpus_file_count": len(indexed_files),
         "k": k, "tasks": n,
+        "unmapped_result_count": sum(row["unmapped_hits"] for row in results),
         "hit_at_k": round(sum(row["hit_at_k"] for row in results) / n, 4),
         "mrr_at_k": round(sum(row["reciprocal_rank"] for row in results) / n, 4),
         "p50_latency_ms": latency[(n - 1) // 2],
