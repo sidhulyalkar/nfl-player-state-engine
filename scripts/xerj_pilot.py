@@ -180,6 +180,15 @@ def request(url: str, resource: str, body: dict | None = None, timeout: int = 20
         return json.load(response)
 
 
+def snapshot_fingerprint(manifest: dict) -> str:
+    payload = {
+        "repo_commit": manifest["repo_commit"],
+        "files": manifest["files"],
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def check_index(url: str) -> int:
     status = request(url, f"/{PREFIX}-*/_count")
     count = status.get("count")
@@ -206,6 +215,16 @@ def benchmark(url: str, corpus: Path, cases_file: Path, k: int = 5) -> dict:
     manifest = json.loads((corpus.parent / "snapshot_manifest.json").read_text(encoding="utf-8"))
     if manifest["corpus_dir"] != str(corpus):
         raise ValueError("Corpus/manifest mismatch")
+    receipt_file = corpus.parent / "index_receipt.json"
+    if not receipt_file.is_file():
+        raise ValueError("No matching index receipt; run index --apply after prepare")
+    receipt = json.loads(receipt_file.read_text(encoding="utf-8"))
+    if (
+        receipt.get("source_fingerprint") != snapshot_fingerprint(manifest)
+        or receipt.get("url") != validate_url(url)
+        or receipt.get("prefix") != PREFIX
+    ):
+        raise ValueError("Index receipt is stale or points at a different XERJ node")
     indexed_hashes = {f["path"]: f["sha256"] for f in manifest["files"]}
     indexed_files = set(indexed_hashes)
     cases = json.loads(cases_file.read_text(encoding="utf-8"))
@@ -256,6 +275,7 @@ def benchmark(url: str, corpus: Path, cases_file: Path, k: int = 5) -> dict:
         "repo_commit": manifest["repo_commit"],
         "source_repository": manifest.get("source_repository"),
         "source_license": manifest.get("source_license"),
+        "index_status": receipt["status"],
         "corpus_file_count": len(indexed_files),
         "k": k, "tasks": n,
         "hit_at_k": round(sum(row["hit_at_k"] for row in results) / n, 4),
@@ -303,9 +323,29 @@ def main(argv: list[str] | None = None) -> int:
             if not args.apply:
                 cmd.append("--dry-run")
             # Credentials, if needed, are inherited through XERJ_API_KEY, never arguments.
-            subprocess.run(cmd, check=True)
+            run = subprocess.run(cmd, check=False)
+            if run.returncode not in (0, 3):
+                raise subprocess.CalledProcessError(run.returncode, cmd)
             if args.apply:
-                print(f"Indexed {check_index(url)} documents under {PREFIX}-*")
+                documents = check_index(url)
+                manifest_file = corpus.parent / "snapshot_manifest.json"
+                manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+                receipt = {
+                    "schema_version": 1,
+                    "prefix": PREFIX,
+                    "url": url,
+                    "status": "complete" if run.returncode == 0 else "partial",
+                    "source_fingerprint": snapshot_fingerprint(manifest),
+                    "repo_commit": manifest["repo_commit"],
+                    "document_count": documents,
+                    "indexed_at": datetime.now(UTC).isoformat(),
+                }
+                (corpus.parent / "index_receipt.json").write_text(
+                    json.dumps(receipt, indent=2) + "\n", encoding="utf-8"
+                )
+                print(f"Indexed {documents} documents under {PREFIX}-* ({receipt['status']})")
+                if receipt["status"] == "partial":
+                    print("WARNING: XERJ reported skipped/junk data; inspect autoindex status", file=sys.stderr)
             else:
                 print("Dry-run only: no index was written. Use index --apply to commit.")
         elif args.command == "benchmark":
