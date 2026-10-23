@@ -20,7 +20,7 @@ jobs:
       - run: python -m pip install -e '.[dev,intelligence,api,espn]'
       - name: Lint package, tests, and operational research scripts
         run: |
-          ruff check src tests scripts/xerj_pilot.py scripts/xerj_ranking.py scripts/xerj_rg_baseline.py scripts/xerj_compare.py \
+          ruff check src tests scripts/xerj_pilot.py scripts/xerj_ranking.py scripts/xerj_rg_baseline.py scripts/xerj_compare.py scripts/xerj_query_modes.py \
             scripts/acquire_game_intelligence_sources.py \
             scripts/build_game_intelligence.py \
             scripts/build_draft_survival_observations.py \
