@@ -147,6 +147,7 @@ def qualify_bdb2019_play(
         license_acknowledged=license_acknowledged,
         license_identifier=license_identifier,
         offense_side=offense_side,
+        position_policy="omit_off_field_with_audit",
     )
     if replay["source_file_sha256"] != identities["tracking"]["sha256"]:
         raise ValueError("Tracking CSV mutated after source identity check.")
@@ -180,6 +181,12 @@ def qualify_bdb2019_play(
         warnings.append("Ball is missing from some source frames; no ball positions will be inferred.")
     if min(counts) < 22:
         warnings.append("Some recorded frames have fewer than 22 tracked players.")
+    quality = replay["position_quality"]
+    if quality["omitted_total_position_rows"]:
+        warnings.append(
+            f'{quality["omitted_total_position_rows"]} source x/y observations were excluded '
+            "from on-field rendering (missing or out of bounds), not clamped or interpolated."
+        )
     canonical = dict(expectations) == SOURCE_FILES
     first, last = replay["frames"][0], replay["frames"][-1]
     report: dict[str, Any] = {
@@ -226,6 +233,7 @@ def qualify_bdb2019_play(
             "players_per_frame_max": max(counts),
             "ball_observed_frames": observed_balls,
             "source_labeled_snap_frames": snap_ids,
+            "position_quality": quality,
         },
         "warnings": warnings,
     }
