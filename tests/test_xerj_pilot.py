@@ -315,3 +315,43 @@ def test_benchmark_cases_unique_and_tracked_in_repo() -> None:
         for target in case["expected_paths"]:
             assert pilot.eligible(target)
             assert (pilot.ROOT / target).is_file()
+
+
+@pytest.mark.parametrize("query_mode", ["semantic", "hybrid"])
+def test_optional_query_mode_dispatch_records_provenance(
+    local_repo: Path, tmp_path: Path, query_mode: str
+) -> None:
+    corpus = tmp_path / "corpus"
+    pilot.prepare(local_repo, corpus)
+    _index_receipt(corpus)
+    case_path = tmp_path / "case.json"
+    case_path.write_text(json.dumps([{
+        "id": "natural",
+        "query": "Where is the scoring implemented?",
+        "expected_paths": ["src/player_state_engine/fantasy/scoring.py"],
+    }]))
+    observed = []
+
+    def fake_request(url: str, resource: str, body: dict | None = None) -> dict:
+        if resource.endswith("/_count"):
+            return {"count": 2}
+        observed.append(body["query"])
+        return {"hits": {"hits": [{
+            "_source": {"ax_path": "src/player_state_engine/fantasy/scoring.py"}
+        }]}}
+
+    with patch.object(pilot, "request", side_effect=fake_request):
+        result = pilot.benchmark(
+            pilot.URL, corpus, case_path, k=5,
+            query_mode=query_mode,
+        )
+
+    assert result["query_mode"] == query_mode
+    assert result["hit_at_k"] == 1.0
+    assert len(observed) == 1
+    if query_mode == "semantic":
+        assert observed[0]["semantic"]["field"] == "body"
+        assert observed[0]["semantic"]["k"] == 5
+    else:
+        assert observed[0]["hybrid"]["fusion"] == "rrf"
+        assert len(observed[0]["hybrid"]["queries"]) == 2
