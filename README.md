@@ -177,3 +177,14 @@ For actual draft use, add the strict data-plane and multicontract release checks
 - [`docs/modeling/evidence_factory.md`](docs/modeling/evidence_factory.md) — frozen comparison contract
 - [`docs/modeling/terminal_family_v016.md`](docs/modeling/terminal_family_v016.md) — v0.16 generative research
 - [`docs/releases/v0.16.md`](docs/releases/v0.16.md) — previous release history
+
+## Optional AI-agent code search: XERJ pilot
+
+The experimental local-first XERJ integration is a **developer-only** source retrieval layer. It stages a hashed, committed-source-only corpus outside the checkout, indexes under the isolated `nfl-pse` namespace, and evaluates 20 fixed file-retrieval tasks. It does not change Python model authority, projection serving, scoring, or the production API. See [`docs/tools/xerj_pilot.md`](docs/tools/xerj_pilot.md) for secure local setup, dry-run-first indexing, MCP hookup, benchmark gates, and limitations.
+
+```
+python scripts/xerj_pilot.py prepare
+python scripts/xerj_pilot.py index           # dry-run
+python scripts/xerj_pilot.py index --apply   # after review, with local XERJ node running
+python scripts/xerj_pilot.py benchmark
+```
