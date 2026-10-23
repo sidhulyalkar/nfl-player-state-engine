@@ -149,8 +149,15 @@ def prepare(repo: Path, corpus: Path) -> dict:
             "bytes": len(payload),
         })
     # Do not put this manifest in the indexed folder: it contains a source inventory.
+    try:
+        license_text = git(repo, "show", "HEAD:LICENSE").decode("utf-8", errors="replace")
+    except subprocess.CalledProcessError:
+        license_text = ""
+    license_id = "MIT" if license_text.startswith("MIT License") else None
     manifest = {
         "schema_version": 1, "repo_commit": commit, "corpus_dir": str(corpus),
+        "source_repository": "sidhulyalkar/nfl-player-state-engine" if repo == ROOT else None,
+        "source_license": license_id,
         "files": files, "file_count": len(files), "bytes": sum(f["bytes"] for f in files),
     }
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -199,7 +206,8 @@ def benchmark(url: str, corpus: Path, cases_file: Path, k: int = 5) -> dict:
     manifest = json.loads((corpus.parent / "snapshot_manifest.json").read_text(encoding="utf-8"))
     if manifest["corpus_dir"] != str(corpus):
         raise ValueError("Corpus/manifest mismatch")
-    indexed_files = {f["path"] for f in manifest["files"]}
+    indexed_hashes = {f["path"]: f["sha256"] for f in manifest["files"]}
+    indexed_files = set(indexed_hashes)
     cases = json.loads(cases_file.read_text(encoding="utf-8"))
     if not isinstance(cases, list) or not cases:
         raise ValueError("Benchmark cases must be a nonempty JSON array")
@@ -219,14 +227,22 @@ def benchmark(url: str, corpus: Path, cases_file: Path, k: int = 5) -> dict:
         elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
         hits = response.get("hits", {}).get("hits", [])
         paths = []
+        evidence = []
         for hit in hits:
             path = source_path(hit)
             if path is not None and path in indexed_files:
                 paths.append(path)
+                source = hit["_source"]
+                evidence.append({
+                    "path": path, "source_sha256": indexed_hashes[path],
+                    "locator": source.get("ax_locator"),
+                    "title": source.get("title"),
+                })
         first_rank = next((rank for rank, path in enumerate(paths, 1) if path in expected), None)
         results.append({
             "id": case["id"], "query": case["query"],
             "expected_paths": sorted(expected), "returned_paths": paths,
+            "returned_evidence": evidence,
             "first_rank": first_rank, "hit_at_k": first_rank is not None,
             "reciprocal_rank": round(1 / first_rank, 5) if first_rank else 0,
             "latency_ms": elapsed_ms,
@@ -237,7 +253,10 @@ def benchmark(url: str, corpus: Path, cases_file: Path, k: int = 5) -> dict:
         "schema_version": 1, "kind": "developer_retrieval_only",
         "created_at": datetime.now(UTC).isoformat(),
         "index_prefix": PREFIX, "index_document_count": count,
-        "repo_commit": manifest["repo_commit"], "corpus_file_count": len(indexed_files),
+        "repo_commit": manifest["repo_commit"],
+        "source_repository": manifest.get("source_repository"),
+        "source_license": manifest.get("source_license"),
+        "corpus_file_count": len(indexed_files),
         "k": k, "tasks": n,
         "hit_at_k": round(sum(row["hit_at_k"] for row in results) / n, 4),
         "mrr_at_k": round(sum(row["reciprocal_rank"] for row in results) / n, 4),
