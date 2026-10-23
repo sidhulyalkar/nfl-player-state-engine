@@ -17,7 +17,7 @@ def _fixture(path: Path, rows: list[dict[str, str]] | None = None) -> Path:
     ]
     if rows is None:
         rows = [
-            dict(zip(fields, vals))
+            dict(zip(fields, vals, strict=True))
             for vals in [
                 ("2017090700", "938", "1", "11", "away", "40", "21", "ball_snap"),
                 ("2017090700", "938", "1", "NA", "ball", "40", "21", "ball_snap"),
