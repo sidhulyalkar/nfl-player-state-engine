@@ -15,6 +15,7 @@ from typing import Any
 from player_state_engine.product.bdb2019_play_catalog import (
     OFFICIAL_PLAY_COUNT,
     OFFICIAL_SOURCE_ROWS,
+    scan_bdb2019_play_catalog,
 )
 from player_state_engine.product.bdb2019_source_qualification import (
     GAME_REQUIRED,
@@ -98,6 +99,17 @@ def build_bdb2019_game_timeline(
         or catalog.get("qualification_status") != "SOURCE_AND_STRUCTURE_QUALIFIED_VIDEO_PENDING"
     ):
         raise ValueError("Official game timeline requires the complete source-audited 177-play catalog.")
+    if canonical:
+        recomputed = scan_bdb2019_play_catalog(
+            source / expectations["tracking"][0],
+            license_acknowledged=True,
+            license_identifier=license_identifier,
+        )
+        if catalog["plays"] != recomputed["plays"]:
+            raise ValueError(
+                "Official tracking catalog per-play observations disagree "
+                "with the exact source CSV. Rebuild the catalog."
+            )
     ids = set()
     for play in catalog["plays"]:
         if not isinstance(play, dict) or set(play).intersection({"frames", "players", "x", "y", "tracking"}):
