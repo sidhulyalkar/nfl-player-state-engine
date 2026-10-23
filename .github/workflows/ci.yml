@@ -52,6 +52,29 @@ jobs:
             scripts/run_reg_historical_intelligence_experiment_v2.py
       - name: Compile Python sources and all scripts
         run: python -m compileall -q src scripts tests
+      - name: Smoke committed-source XERJ corpus safety and benchmark coverage
+        run: |
+          python scripts/xerj_pilot.py --corpus-dir "$RUNNER_TEMP/nfl-pse-xerj-corpus" prepare
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          manifest = json.loads((root / "snapshot_manifest.json").read_text())
+          cases = json.loads(Path("configs/xerj/pilot_queries.json").read_text())
+          staged = {f["path"] for f in manifest["files"]}
+          missing = {
+              path
+              for case in cases
+              for path in case["expected_paths"]
+              if path not in staged
+          }
+          assert not missing, f"Missing benchmark ground-truth files: {sorted(missing)}"
+          assert manifest["file_count"] >= len(cases)
+          assert manifest["source_license"] == "MIT"
+          print(f"Safe XERJ snapshot: {manifest['file_count']} tracked files; {len(cases)} tasks")
+          PY
       - name: Smoke Evidence Factory against frozen benchmark artifacts
         run: |
           python scripts/run_evidence_factory.py \
