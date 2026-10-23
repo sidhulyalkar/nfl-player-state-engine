@@ -11,8 +11,8 @@ from unittest.mock import patch
 
 import pytest
 
-from scripts import xerj_rg_baseline as baseline
 from scripts import xerj_pilot as pilot
+from scripts import xerj_rg_baseline as baseline
 
 
 def _git(root: Path, *args: str) -> None:
