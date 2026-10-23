@@ -117,3 +117,34 @@
   outline: 2px solid #85e1c6;
   outline-offset: 2px;
 }
+
+/* Native WebGL3D field selection. Controls remain above the canvas, which
+ * owns pointer capture only inside its own viewport. */
+.gameday-display-options {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gameday-display-options button {
+  border: 1px solid #35545e;
+  background: rgba(15,34,47,.95);
+  color: #a7bac8;
+  border-radius: 7px;
+  font-size: 11px;
+  padding: 8px 9px;
+  cursor: pointer;
+}
+.gameday-display-options button.selected {
+  border-color: #7adab9;
+  background: rgba(48,107,91,.86);
+  color: #dcfff2;
+}
+.gameday-display-options button:focus-visible {
+  outline: 2px solid #89ebc8;
+  outline-offset: 2px;
+}
+.gameday-field-shell > .field3d-shell .field3d-source { top: 56px; }
+@media(max-width:700px) {
+  .gameday-display-options button { font-size: 9px; padding: 6px 5px; }
+  .gameday-field-shell > .field3d-shell .field3d-source { top: 48px; }
+}

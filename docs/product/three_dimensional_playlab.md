@@ -1,0 +1,104 @@
+# 3D Play Lab: lightweight WebGL2 field (initial operational implementation)
+
+Branch: feat/playlab-3d-integrated (PR #92), now based directly on main after PRs #89 and #90 merged. Original stacked PR #91 superseded.
+
+## Shipped capabilities
+
+- Real WebGL2 render surface with **120 by 53.3 yard** mesh field and real 3D player cylinders/helmets.
+- Physical depth, yard markers, end zones and a free camera with **broadcast,
+  elevated All-22 and overhead** presets.
+- Orbit drag, shift/right-drag pan, scroll/pinch-device wheel zoom, explicit zoom/reset buttons.
+- Overlay canvas for jersey IDs and yard labels. Click a player to inspect its
+  recorded source identity; keyboard-safe player selector remains in the sidebar.
+- Historical playback sources use observed x/y at **each recorded frame**. Frame
+  IDs, source events and timestamps remain authoritative; frame gaps are **not**
+  interpolated, and each continuous observed trail is bounded to consecutive
+  frame pairs only.
+- Snapshots can show movement trails, team colors, and a geometric nearest
+  opponent line for roles with source-confirmed offense and defense sides.
+- **Snap formation:** only if a recorded frame has an explicit ball_snap, snap,
+  or snap_direct source event, the user can jump directly to it, overlay ghost
+  rings at its recorded player positions, and inspect selected-player straight-
+  line displacement since snap. No phantom presnap alignment is created when
+  the source omits a snap event. These rings do not classify defensive coverage.
+- Pure frame-join tests ensure movement trails never bridge missing frame IDs.
+- No ball height is inferred from 2D tracking. Ball is drawn on/near the ground
+  and labeled **height unknown**, NOT on an invented throw trajectory.
+- WebGL2 unavailable/context loss -> return to existing working SVG 2D mode.
+- The pre-existing demo scenarios have an explicitly labeled 3D **illustration**
+  mode. They do not become licensed NFL plays by being in WebGL.
+- Pure camera math, historical input schema and gap-safe motion helpers are independently
+  tested in Node; frontend CI runs the geometry, tracking and replay-contract
+  test suites after the TypeScript/Vite production build.
+- **Measured movement vectors** are derived only from two temporally and numerically
+  adjacent recorded frames, and have separate labels from source-reported speed.
+  Optional acceleration is shown only when present in the source.
+- **Observed team footprint** reports width (max y minus min y) and depth
+  (max x minus min x), both in yards, for source-confirmed offense/defense sides.
+  These are geometry, not an automated personnel or coverage classification.
+- Source-file imports fail closed on duplicate NFL IDs, malformed numeric measurements,
+  invalid source labels or corrupt frame identifiers. Kaggle-style NA identifiers
+  for the ball and absent optional speeds/orientations are handled separately.
+
+## Usage
+
+1. Open Fourth Down Lab, select GameDay Lab.
+2. Select 3D Field, adjust camera preset; orbit, pan and zoom.
+3. Synthetic scenarios can replay immediately and are prominently labeled.
+4. For genuine observed movement, import an authorized NFL Big Data Bowl
+   tracking CSV with scripts/import_bdb_tracking.py and load the resulting
+   HISTORICAL_RESEARCH replay JSON in the GameDay Lab.
+5. Select a player by field click or keyboard-accessible player selector.
+6. Toggle nearest opponent, observed trails and jersey numbers.
+7. Select 2D Field any time as the lightweight alternative.
+
+## Source and engineering boundaries
+
+- Historical source is user-supplied, never publicly hosted by this patch.
+- Fetching the complete official public 2017 sample was not possible from the
+  available runtime; actual file playback, screenshot and cross-browser
+  validation remain unverified. Passing synthetic/fixture tests is not the same
+  as validating an NFL replay against its source footage.
+- Exact coach calls and defensive coverage assignments are not observable
+  from x/y alone, and no fabricated tactical labels are generated.
+- Direct WebGL2 avoids new npm dependencies, keeps the RedZone Companion
+  lightweight and prevents unwanted background video/GPU load.
+- WebGL visuals are not a 3D full-motion avatar or licensed Madden animation.
+  The models are stylized field markers with true 3D geometry and scale.
+- Geometry input from public tracking is already validated by the replay
+  parser, with an additional bounds check in the renderer.
+- Rendering draws only on observable state/camera/viewport changes. It does
+  not run a permanent draw loop when the replay is paused.
+- Raw source file rights, source attribution and any commercial deployment
+  need independent review; the renderer grants no data redistribution rights.
+
+## Testing and next qualification
+
+    cd apps/gemini-fantasy-console
+    npm ci
+    npm run build
+    npm run test:field3d
+
+    pytest -q tests/product/test_gameday_tracking.py tests/product/test_gameday_legacy_tracking.py
+
+Review a real 2017 source replay against source-aligned video after legal
+review. Capture screenshots for every preset, zoom, selection, and frame-gap
+case. Test Safari, Firefox, Chrome, high-DPI and GPU-disabled fallback.
+Measure frame timing on older laptops and multi-monitor use.
+No web browser render test or actual tracking CSV has been performed in this PR.
+
+## Next research stages
+
+- Move to an instanced-marker render path if >22 animated objects or many
+  simultaneous fields are required; avoid keeping dozens of live WebGL contexts.
+- Add verified play metadata (home/away, down, distance, personnel, formation,
+  documented source event identities) by direct play ID joins, never heuristic
+  guesses.
+- Historical coverage/route classifications require human validation and
+  error calibration; show estimates only as estimates.
+- Add true positional tracking and video alignment only with explicit rights.
+- Preserve the live multi-game RedZone Companion as scoreboard and alerts,
+  with **one optional** featured 3D replay rather than 8+ concurrent canvases.
+
+Technical references: https://threejs.org/docs/pages/WebGLRenderer
+and https://github.com/nfl-football-ops/Big-Data-Bowl/blob/master/schema.md.

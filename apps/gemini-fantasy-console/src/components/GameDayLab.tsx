@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import { Activity, Bell, ChevronRight, CircleAlert, Maximize2, Pause, Play, RotateCcw, Shield, SlidersHorizontal, Target, Zap } from 'lucide-react';
 import '../gameday-lab.css';
 import { HistoricalReplayPanel, parseHistoricalReplay, type HistoricalReplay } from './HistoricalReplayPanel';
+import { FootballField3D, type Field3DTrail } from './FootballField3D';
 
 /**
  * Illustrative data only. Production tracking adapters must carry a separate
@@ -72,6 +73,7 @@ const plays: DemoPlay[] = [
     ],
   },
 ];
+const DEMO_FOCUS = [-9,0,0] as const;
 const roster: Player[] = [
   { id:'qb', jersey:'7', role:'QB', side:'offense', x:44,y:26.7,dx:-2,dy:0 },
   { id:'rb', jersey:'22', role:'RB', side:'offense', x:40,y:21,dx:7,dy:2 },
@@ -214,6 +216,7 @@ export function GameDayLab() {
   const [playing,setPlaying] = useState(true);
   const [speed,setSpeed] = useState(1);
   const [camera,setCamera] = useState<Camera>('broadcast');
+  const [renderMode,setRenderMode] = useState<'3d'|'2d'>('3d');
   const [overlays,setOverlays] = useState<Set<Overlay>>(new Set(['routes','labels']));
   const [selected,setSelected] = useState('wr1');
   const [quiet,setQuiet] = useState(false);
@@ -235,6 +238,33 @@ export function GameDayLab() {
   const selectPlay=(i:number)=>{setIndex(i);setTime(0);setPlaying(true);setSelected(i===1?'rb':i===2?'qb':'wr1');};
   const toggle=(v:Overlay)=>setOverlays(old=>{const next=new Set(old);if(next.has(v))next.delete(v);else next.add(v);return next;});
   const focused=roster.find(p=>p.id===selected)!;
+  const scenePlayers=useMemo(()=>roster.map(p=>({
+    id:p.id,jersey:p.jersey,name:p.role,side:p.side,team:p.side,
+    ...position(p,time,play.kind),
+  })),[time,play.kind]);
+  const sceneTrails=useMemo(()=>{
+    const segments:Field3DTrail[]=[];
+    for(let t=.8;t<Math.min(time,4.8);t+=.20){
+      for(const p of roster){
+        if(p.side==='offense'&&!overlays.has('routes'))continue;
+        if(p.side==='defense'&&!overlays.has('coverage'))continue;
+        const a=position(p,t,play.kind),b=position(p,Math.min(t+.20,time),play.kind);
+        segments.push({id:p.id,from:[a.x,a.y],to:[b.x,b.y],side:p.side});
+      }
+    }
+    return segments;
+  },[time,play.kind,overlays]);
+  const sceneBall=useMemo(()=>{
+    if(play.kind!=='pass'){
+      const p=roster.find(r=>r.id===(play.kind==='run'?'rb':'qb'))!;
+      return position(p,time,play.kind);
+    }
+    const qb=roster[0],receiver=roster.find(r=>r.id==='wr1')!;
+    if(time<=3.15)return position(qb,time,play.kind);
+    const a=position(qb,3.15,play.kind),b=position(receiver,4.35,play.kind);
+    const u=Math.max(0,Math.min(1,(time-3.15)/1.2));
+    return {x:a.x+(b.x-a.x)*u,y:a.y+(b.y-a.y)*u};
+  },[time,play.kind]);
   return historical ? <HistoricalReplayPanel replay={historical} onBack={()=>{setHistorical(null);setTime(0);setPlaying(true);}}/> : <main className="gameday-page">
     <header className="gameday-head">
       <div><div className="gameday-kicker"><Activity size={15}/> FOURTH DOWN LAB / GAMEDAY</div><h1>See the game beneath the game.</h1><p>Replay the formation. Explore the decisions. Understand the contributions.</p></div>
@@ -245,8 +275,8 @@ export function GameDayLab() {
       <section className="gameday-main">
         <div className="gameday-scoreline"><div><span className="gameday-team-mark">O</span><div><strong>{play.offense}</strong><small>OFFENSE</small></div><b>21</b></div><div className="gameday-situation"><span>DEMO PLAY</span><strong>{play.down}</strong><small>Q3 · 08:42 · ILLUSTRATIVE SCORE</small></div><div><b>17</b><div><strong>{play.defense}</strong><small>DEFENSE</small></div><span className="gameday-team-mark secondary">F</span></div></div>
         <div className="gameday-field-shell">
-          <div className="gameday-toolbar"><strong><Maximize2 size={14}/> Interactive 3D projection</strong><div><select aria-label="Camera angle" value={camera} onChange={e=>setCamera(e.target.value as Camera)}><option value="broadcast">Broadcast angle</option><option value="all22">All-22 perspective</option><option value="overhead">Overhead</option></select></div></div>
-          <Field play={play} time={time} camera={camera} overlays={overlays} onPlayer={setSelected}/>
+          <div className="gameday-toolbar"><strong><Maximize2 size={14}/> {renderMode==='3d'?'Interactive 3D stadium':'Projected 2D tactical field'}</strong><div className="gameday-display-options"><button aria-pressed={renderMode==='3d'} className={renderMode==='3d'?'selected':''} onClick={()=>setRenderMode('3d')}>3D Field</button><button aria-pressed={renderMode==='2d'} className={renderMode==='2d'?'selected':''} onClick={()=>setRenderMode('2d')}>2D Field</button><select aria-label="Camera angle" value={camera} onChange={e=>setCamera(e.target.value as Camera)}><option value="broadcast">Broadcast angle</option><option value="all22">All-22 perspective</option><option value="overhead">Overhead</option></select></div></div>
+          {renderMode==='3d' ? <FootballField3D players={scenePlayers} ball={sceneBall} trails={sceneTrails} selectedId={selected} onSelect={setSelected} preset={camera} focus={DEMO_FOCUS} showTrails showLabels={overlays.has('labels')} showNearest={false} synthetic onUnsupported={()=>setRenderMode('2d')}/> : <Field play={play} time={time} camera={camera} overlays={overlays} onPlayer={setSelected}/> }
           {!quiet && currentMoment && <div className={'gameday-event-pill '+(currentMoment.type==='result'?'impact':'')}><Zap size={15}/><span><strong>{currentMoment.label}</strong> {currentMoment.detail}</span></div>}
         </div>
         <div className="gameday-controlbar"><div className="gameday-player-controls"><button aria-label={playing?'Pause replay':'Play replay'} onClick={()=>{if(time>=play.duration)setTime(0);setPlaying(!playing);}}>{playing?<Pause size={18}/>:<Play size={18}/>}</button><button aria-label="Restart replay" onClick={()=>{setTime(0);setPlaying(true);}}><RotateCcw size={17}/></button><span>{time.toFixed(1)}s / {play.duration.toFixed(1)}s</span></div><input aria-label="Replay timeline" type="range" min="0" max={play.duration} step=".05" value={time} onChange={e=>{setTime(Number(e.target.value));setPlaying(false);}}/><select aria-label="Playback speed" value={speed} onChange={e=>setSpeed(Number(e.target.value))}><option value=".5">0.5×</option><option value="1">1×</option><option value="2">2×</option></select></div>

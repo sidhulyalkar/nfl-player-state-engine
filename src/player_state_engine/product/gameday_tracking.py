@@ -27,6 +27,12 @@ def _optional_number(value: str | None) -> float | None:
     return number
 
 
+def _optional_measure(value: str | None) -> float | None:
+    if value is None or str(value).strip().lower() in {"", "na", "n/a", "nan", "none", "null"}:
+        return None
+    return _optional_number(value)
+
+
 def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -83,6 +89,8 @@ def import_bdb_2025_tracking(
             if frame < 1:
                 raise ValueError("frameId must be positive.")
             player_id = (raw.get("nflId") or "").strip()
+            if player_id.lower() in {"na", "n/a", "nan", "null", "none"}:
+                player_id = ""
             entity_key = player_id if player_id else "__BALL__"
             seen = ids_by_frame.setdefault(frame, set())
             if entity_key in seen:
@@ -104,7 +112,7 @@ def import_bdb_2025_tracking(
             club = (raw.get("club") or "").strip() or None
             side = (
                 "offense" if possession_team and club == possession_team
-                else "defense" if possession_team and club and club != possession_team
+                else "defense" if possession_team and club and club not in {"football", "ball"} and club != possession_team
                 else None
             )
             entry = {
@@ -117,15 +125,15 @@ def import_bdb_2025_tracking(
                 "x": x,
                 "y": y,
                 "z": None,  # Source x/y alone does not establish ball height.
-                "speed_yards_per_s": _optional_number(raw.get("s")),
-                "acceleration_yards_per_s2": _optional_number(raw.get("a")),
-                "orientation_deg": _optional_number(raw.get("o")),
-                "movement_dir_deg": _optional_number(raw.get("dir")),
+                "speed_yards_per_s": _optional_measure(raw.get("s")),
+                "acceleration_yards_per_s2": _optional_measure(raw.get("a")),
+                "orientation_deg": _optional_measure(raw.get("o")),
+                "movement_dir_deg": _optional_measure(raw.get("dir")),
                 "observed": True,
             }
             rows_by_frame.setdefault(frame, []).append(entry)
             event = (raw.get("event") or "").strip()
-            if event and event.lower() not in {"none", "nan"}:
+            if event and event.lower() not in {"none", "nan", "na", "n/a", "null"}:
                 events_by_frame.setdefault(frame, set()).add(event)
 
     if not rows_by_frame:

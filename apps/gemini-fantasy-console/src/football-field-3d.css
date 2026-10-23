@@ -1,0 +1,19 @@
+.field3d-shell{position:relative;background:#07141d;color:#dce9ed;}
+.field3d-stage{position:relative;aspect-ratio:1040/590;width:100%;min-height:295px;max-height:700px;overflow:hidden;background:radial-gradient(ellipse at 45% 50%,#123031,#08141e 70%);}
+.field3d-stage>canvas{display:block;width:100%;height:100%;position:absolute;inset:0;touch-action:none;cursor:grab;}
+.field3d-stage>canvas:active{cursor:grabbing;}
+.field3d-stage>canvas.field3d-labels{pointer-events:none;cursor:default;}
+.field3d-source{position:absolute;left:17px;top:17px;display:flex;align-items:center;gap:6px;pointer-events:none;background:rgba(7,21,30,.87);border:1px solid rgba(120,210,183,.31);color:#aae2cc;font-size:10px;font-weight:800;letter-spacing:.08em;padding:8px 10px;border-radius:8px;max-width:calc(100% - 32px);}
+.field3d-legend{position:absolute;right:18px;bottom:14px;display:flex;align-items:center;gap:14px;border-radius:9px;background:rgba(6,19,29,.83);padding:10px 12px;color:#b9ced4;font-size:10px;pointer-events:none;}
+.field3d-legend span{display:flex;align-items:center;gap:6px;}
+.field3d-legend i{display:inline-block;width:9px;height:9px;border-radius:50%;}
+.field3d-offense{background:#55b2ef;}.field3d-defense{background:#f36f69;}.field3d-unknown{background:#b4c4cf;}
+.field3d-unavailable{position:absolute;inset:12% 9%;z-index:4;display:grid;align-content:center;justify-content:center;text-align:center;background:rgba(10,20,31,.96);border:1px solid #a36b5b;border-radius:12px;padding:25px;color:#ffcaaf;font-size:14px;line-height:1.55;}
+.field3d-unavailable p{font-size:12px;color:#d5afa1;}
+.field3d-controls{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 15px;background:#0f222f;border-top:1px solid rgba(121,164,185,.18);}
+.field3d-controls>span{color:#86a5b2;font-size:11px;line-height:1.4;}
+.field3d-controls>div{display:flex;align-items:center;gap:6px;}
+.field3d-controls button{display:grid;place-items:center;width:32px;height:32px;flex-shrink:0;border-radius:7px;color:#c8ece1;background:#1b3540;border:1px solid #345b63;cursor:pointer;}
+.field3d-controls button:hover{background:#284d57;}
+.field3d-controls button:focus-visible{outline:2px solid #8deac9;outline-offset:2px;}
+@media(max-width:700px){.field3d-source{left:8px;top:8px;font-size:9px;letter-spacing:0;padding:6px}.field3d-legend{right:6px;bottom:6px;padding:7px;gap:7px;font-size:9px}.field3d-controls{padding:8px;flex-wrap:wrap}.field3d-controls>span{font-size:10px}.field3d-stage{min-height:260px;}}
