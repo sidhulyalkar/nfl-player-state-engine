@@ -40,7 +40,8 @@ def sources(tmp_path: Path) -> tuple[Path, Path, dict]:
         {
             "gameId": "2017090700", "playId": pid, "quarter": quarter,
             "down": down, "yardsToGo": "8", "possessionTeam": possession,
-            "gameClock": "09:28", "playDescription": "A charted source description.",
+            "GameClock": "09:28", "yardlineSide": possession, "yardlineNumber": "25",
+            "playDescription": "A charted source description.",
             "offenseFormation": "SHOTGUN", "personnel.offense": "1 RB, 3 WR, 1 TE",
         }
         for pid, quarter, down, possession in [
@@ -95,6 +96,9 @@ def test_joins_exact_verified_source_metadata_without_synthetic_drives(
     assert [r["possession_team"] for r in result["plays"]] == ["NE", "KC"]
     assert [r["offense_side"] for r in result["plays"]] == ["home", "away"]
     assert result["plays"][1]["quarter"] == 2
+    assert result["plays"][1]["game_clock_charted"] == "09:28"
+    assert result["plays"][1]["yardline_side_charted"] == "KC"
+    assert result["plays"][1]["yardline_number_charted"] == 25
     assert result["plays"][1]["description_charted"] == "A charted source description."
     assert all("players" not in row and "frames" not in row for row in result["plays"])
     output = write_game_timeline(result, tmp_path / "timeline.json")
