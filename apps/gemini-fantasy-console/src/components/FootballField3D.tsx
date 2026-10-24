@@ -6,6 +6,7 @@ import {
 } from './football3dMath';
 import '../football-field-3d.css';
 import { travelChevron } from './playerTravelGeometry';
+import {smoothOrbitTarget,type CameraCue} from './playCameraDirector';
 
 /** Source-facing types: coordinates in yards, not arbitrary screen positions. */
 export interface Field3DPlayer {
@@ -33,6 +34,8 @@ interface Props {
   onSelect: (id: string) => void;
   preset: CameraPreset;
   focus?: Vec3;
+  directorCue?:CameraCue|null;
+  directorActive?:boolean;
   showLabels?: boolean;
   showTrails?: boolean;
   showNearest?: boolean;
@@ -125,6 +128,11 @@ class Mesh {
 }
 function buildTurf():Float32Array {
   const m=new Mesh();
+  // Decorative stadium apron fills the viewport around the real 120 x 53.3-yard field.
+  // Nothing outside the source field is interpreted as player tracking.
+  m.rect(-110,-83,110,83,-.50,[.028,.061,.075]);
+  m.rect(-73,-39,73,39,-.32,[.078,.14,.157]);
+  m.rect(-64,-29,64,29,-.18,[.10,.19,.18]);
   m.rect(-60,-26.65,60,26.65,0, GREEN);
   for(let yard=0;yard<120;yard+=10){
     const x=yard-60;
@@ -216,7 +224,7 @@ function buildActors(p:Props):Float32Array {
     const color=player.side==='offense'?OFFENSE:player.side==='defense'?DEFENSE:UNKNOWN;
     // Stylized 3D figure: symmetric silhouette stays deliberately unrotated.
     // The separate turf chevron is measured TRAVEL, not true body orientation.
-    m.cylinder(x,z,.76,.035,.08,[.025,.085,.10]); // foot shadow
+    m.cylinder(x,z,.87,.035,.08,[.025,.085,.10]); // contact shadow
     const boot:Color=[.09,.16,.19];
     m.block(x,z-.21,.15,.16,.12,.43,boot);
     m.block(x,z+.21,.15,.16,.12,.43,boot);
@@ -224,10 +232,17 @@ function buildActors(p:Props):Float32Array {
     m.block(x,z-.22,.19,.19,.40,.98,leg);
     m.block(x,z+.22,.19,.19,.40,.98,leg);
     m.block(x,z,.38,.50,.92,1.64,color); // padded torso
-    m.block(x,z-.60,.24,.14,1.11,1.58,color); // shoulder sleeve
-    m.block(x,z+.60,.24,.14,1.11,1.58,color);
-    m.cylinder(x,z,.43,.39,1.65,[.81,.87,.89]); // neutral helmet
-    m.cylinder(x,z,.50,.09,1.81,color); // team helmet stripe
+    m.block(x,z-.60,.24,.16,1.11,1.60,color); // padded shoulder sleeve
+    m.block(x,z+.60,.24,.16,1.11,1.60,color);
+    const skin:Color=[.62,.49,.40];
+    m.block(x,z-.65,.14,.13,.79,1.10,skin); // forearms and gloves
+    m.block(x,z+.65,.14,.13,.79,1.10,skin);
+    m.block(x,z-.65,.17,.16,.75,.83,boot);
+    m.block(x,z+.65,.17,.16,.75,.83,boot);
+    m.cylinder(x,z,.47,.39,1.65,[.83,.87,.90]); // original neutral helmet shell
+    m.cylinder(x,z,.51,.085,1.87,color); // team accent
+    m.ring(x,z,.53,.075,1.74,[.21,.28,.32]); // helmet rim, orientation-neutral
+    m.block(x,z,.39,.48,1.32,1.39,[.92,.95,.96]); // jersey number panel
 
     if(player.id===p.selectedId){
       m.ring(x,z,1.35,.24,.13,SELECT);
@@ -371,6 +386,8 @@ export function FootballField3D(props:Props) {
   const rendererRef=useRef<Renderer|null>(null);
   const propsRef=useRef(props);propsRef.current=props;
   const [orbit,setOrbit]=useState<Orbit>(()=>defaultOrbit(props.preset,props.focus));
+  const [autoCamera,setAutoCamera]=useState(true);
+  const activeDirector=Boolean(props.directorActive&&autoCamera&&props.directorCue);
   const orbitRef=useRef(orbit);orbitRef.current=orbit;
   const [error,setError]=useState<string|null>(null);
   const drag=useRef<{x:number;y:number;button:number;moved:boolean}|null>(null);
@@ -378,7 +395,27 @@ export function FootballField3D(props:Props) {
     const renderer=rendererRef.current,canvas=canvasRef.current,overlay=labelsRef.current;
     if(renderer&&canvas&&overlay)renderer.draw(orbitRef.current,propsRef.current,canvas,overlay);
   },[]);
-  useEffect(()=>{setOrbit(defaultOrbit(props.preset,props.focus));},[props.preset,props.focus]);
+  useEffect(()=>{setOrbit(defaultOrbit(props.preset,props.focus));setAutoCamera(true);},[props.preset,props.focus]);
+  useEffect(()=>{
+    if(!activeDirector || !props.directorCue)return;
+    const cue=props.directorCue;
+    let id=0,last=0;
+    const tick=(now:number)=>{
+      const dt=last?(now-last)/1000:1/60;last=now;
+      const old=orbitRef.current;
+      const target=smoothOrbitTarget(old.target,cue.target,dt);
+      const alpha=1-Math.exp(-3.4*clamp(dt,0,.1));
+      const distance=old.distance+(cue.distance-old.distance)*alpha;
+      const finished=Math.hypot(target[0]-cue.target[0],target[2]-cue.target[2])<.02
+        &&Math.abs(distance-cue.distance)<.05;
+      const next={...old,target:finished?cue.target:target,distance:finished?cue.distance:distance};
+      orbitRef.current=next;
+      setOrbit(next);
+      if(!finished)id=requestAnimationFrame(tick);
+    };
+    id=requestAnimationFrame(tick);
+    return ()=>cancelAnimationFrame(id);
+  },[activeDirector,props.directorCue]);
   useEffect(()=>{draw();},[draw,orbit,props.players,props.ball,props.trails,props.selectedId,props.showTrails,props.showLabels,props.showNearest,props.showMotion,props.motion,props.snapPlayers,props.showSnap]);
   useEffect(()=>{
     const canvas=canvasRef.current;
@@ -413,6 +450,7 @@ export function FootballField3D(props:Props) {
   };
   const onPointerDown=(e:React.PointerEvent<HTMLCanvasElement>)=>{
     if(e.button!==0&&e.button!==2)return;
+    setAutoCamera(false);
     e.currentTarget.setPointerCapture(e.pointerId);
     drag.current={x:e.clientX,y:e.clientY,button:e.button,moved:false};
   };
@@ -440,6 +478,7 @@ export function FootballField3D(props:Props) {
     const canvas=canvasRef.current;if(!canvas)return;
     const onWheel=(e:WheelEvent)=>{
       e.preventDefault();
+      setAutoCamera(false);
       setOrbit(old=>({...old,distance:clamp(old.distance*Math.exp(e.deltaY*.0011),40,260)}));
     };
     canvas.addEventListener('wheel',onWheel,{passive:false});
@@ -454,10 +493,11 @@ export function FootballField3D(props:Props) {
       <div className="field3d-legend" aria-hidden="true"><span><i className="field3d-offense"/>Offense</span><span><i className="field3d-defense"/>Defense</span><span><i className="field3d-unknown"/>Unknown</span></div>
     </div>
     <div className="field3d-controls">
-      <span>Drag: orbit · Shift/right-drag: pan · Scroll: zoom · Click: inspect</span>
+      <span>{activeDirector?(props.directorCue?.label??'Auto camera')+' · ':''}Drag: orbit · Shift/right-drag: pan · Scroll: zoom · Click: inspect</span>
       <div>
-        <button type="button" aria-label="Zoom in on field" onClick={()=>setOrbit(o=>({...o,distance:clamp(o.distance*.78,40,260)}))}><ZoomIn size={16}/></button>
-        <button type="button" aria-label="Zoom out from field" onClick={()=>setOrbit(o=>({...o,distance:clamp(o.distance*1.24,40,260)}))}><ZoomOut size={16}/></button>
+        {props.directorActive&&<button type="button" className="field3d-auto-camera" aria-label="Toggle smart replay camera" aria-pressed={activeDirector} onClick={()=>setAutoCamera(value=>!value)}>{activeDirector?'Auto camera on':'Resume auto camera'}</button>}
+        <button type="button" aria-label="Zoom in on field" onClick={()=>{setAutoCamera(false);setOrbit(o=>({...o,distance:clamp(o.distance*.78,40,260)}));}}><ZoomIn size={16}/></button>
+        <button type="button" aria-label="Zoom out from field" onClick={()=>{setAutoCamera(false);setOrbit(o=>({...o,distance:clamp(o.distance*1.24,40,260)}));}}><ZoomOut size={16}/></button>
         <button type="button" aria-label="Reset field camera" onClick={()=>setOrbit(defaultOrbit(props.preset,props.focus))}><RotateCcw size={16}/></button>
       </div>
     </div>
