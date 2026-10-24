@@ -112,7 +112,7 @@ test('source-charted down, personnel and possession metadata must reconcile',()=
   assert.throws(()=>parseHistoricalReplay(team),/metadata is internally inconsistent/);
   const possession=structuredClone(r);possession.possession_team='NE';
   assert.throws(()=>parseHistoricalReplay(possession),/metadata is internally inconsistent/);
-  const chart=structuredClone(r);chart.source_play_metadata.offense_formation_charted='A'.repeat(91);
+  const chart=structuredClone(r);chart.source_play_metadata.offense_formation_charted='A'.repeat(121);
   assert.throws(()=>parseHistoricalReplay(chart),/metadata is internally inconsistent/);
   const special=structuredClone(r);
   special.source_play_metadata.down=null;
@@ -132,4 +132,20 @@ test('reject implausible source frame spans and invalid source row claims',()=>{
   assert.throws(()=>parseHistoricalReplay(badRows),/source row count/);
   const yesRows=valid();yesRows.rows=4;
   assert.equal(parseHistoricalReplay(yesRows).rows,4);
+});
+
+test('full timeline-compatible charting boundaries remain legal in the replay viewer',()=>{
+  const replay=valid();
+  replay.possession_team='KC';
+  replay.source_play_metadata={
+    provenance:'NONCANONICAL_TEST_FIXTURE',season:2017,week:22,
+    home_team:'NE',visitor_team:'KC',possession_team:'KC',offense_side:'away',
+    quarter:5,down:null,yards_to_go:100,
+    offense_formation_charted:'X'.repeat(120),
+    offense_personnel_charted:'1 RB, 3 WR, 1 TE',
+  };
+  assert.equal(parseHistoricalReplay(replay).source_play_metadata.yards_to_go,100);
+  const bad=structuredClone(replay);
+  bad.source_play_metadata.quarter=6;
+  assert.throws(()=>parseHistoricalReplay(bad),/metadata is internally inconsistent/);
 });
