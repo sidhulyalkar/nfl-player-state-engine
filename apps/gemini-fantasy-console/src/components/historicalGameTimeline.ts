@@ -94,14 +94,38 @@ export function parseGameTimeline(value:unknown,catalog:PlayCatalog):GameTimelin
   return root as GameTimeline;
 }
 
+/** Ensure any source-charted data accompanying a replay agrees with the
+ * independently loaded game timeline. This reconciles declarations; it does
+ * not authenticate user-supplied source files in the browser.
+ */
 export function timelineReplayMatch(play:GameTimelinePlay,catalog:PlayCatalog,replay:{
   game_id:string;play_id:string;frame_count:number;missing_frame_count:number;
   source_file_sha256:string;rows?:number;
-}):boolean {
+  possession_team?:string|null;
+  source_play_metadata?:{
+    season:number;week:number;home_team:string;visitor_team:string;
+    possession_team:string;offense_side:'home'|'away';
+    quarter:number;down:number|null;yards_to_go:number|null;
+    offense_formation_charted:string|null;offense_personnel_charted:string|null;
+  };
+},timeline?:GameTimeline):boolean {
   const catalogPlay=catalog.plays.find(p=>p.play_id===play.play_id);
-  return Boolean(catalogPlay&&play.game_id===replay.game_id
-    &&catalog.source_sha256===replay.source_file_sha256
-    &&catalogPlay.recorded_frames===replay.frame_count
-    &&catalogPlay.missing_frame_ids===replay.missing_frame_count
-    &&(replay.rows===undefined||play.source_tracking_rows===replay.rows));
+  if(!catalogPlay || play.game_id!==replay.game_id ||
+    catalog.source_sha256.toLowerCase()!==replay.source_file_sha256.toLowerCase() ||
+    catalogPlay.recorded_frames!==replay.frame_count ||
+    catalogPlay.missing_frame_ids!==replay.missing_frame_count ||
+    (replay.rows!==undefined&&play.source_tracking_rows!==replay.rows))return false;
+  if(replay.possession_team!=null&&replay.possession_team!==play.possession_team)return false;
+  const meta=replay.source_play_metadata;
+  if(!meta)return true; // Legacy standalone replay may have no official charting.
+  if(meta.possession_team!==play.possession_team||
+    meta.offense_side!==play.offense_side||
+    meta.quarter!==play.quarter||
+    meta.down!==(play.down===0?null:play.down)||
+    meta.yards_to_go!==play.yards_to_go||
+    meta.offense_formation_charted!==play.formation_charted||
+    meta.offense_personnel_charted!==play.personnel_charted)return false;
+  if(timeline&&(meta.season!==timeline.season||meta.week!==timeline.week||
+    meta.home_team!==timeline.home_team||meta.visitor_team!==timeline.away_team))return false;
+  return true;
 }
