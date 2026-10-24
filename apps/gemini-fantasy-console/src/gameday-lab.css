@@ -264,16 +264,36 @@
  .gameday-catalog-results{grid-template-columns:1fr;}
 }
 
-/* Source-joined charting: distinct from observed positions or inferred tactics. */
-.gameday-charted-meta {
-  display:grid; grid-template-columns:repeat(4,minmax(130px,1fr)); gap:10px 15px;
-  margin:0 0 14px; padding:11px 14px;
-  border:1px solid rgba(122,192,184,.25);
-  border-radius:11px;
-  background:rgba(19,48,56,.75);
+/* Verified historical game situation joined to recorded-play catalog. */
+.gameday-game-timeline{background:linear-gradient(145deg,#122934,#0c202b);border:1px solid #365563;border-radius:16px;padding:20px;margin:0 0 24px;color:#e5f4f7;}
+.gameday-game-timeline .gameday-catalog-heading h2{font-size:22px;margin:8px 0;}
+.gameday-game-timeline .gameday-catalog-heading p{font-size:12px;line-height:1.6;color:#9cb9c4;}
+.gameday-timeline-notice{display:flex;align-items:flex-start;gap:8px;background:#302b23;border:1px solid #645238;color:#f3d39b;border-radius:10px;padding:11px 13px;font-size:12px;line-height:1.5;margin-top:16px;}
+.gameday-timeline-notice svg{flex-shrink:0;margin-top:1px;}
+.gameday-timeline-list{display:grid;gap:6px;margin-top:10px;}
+.gameday-timeline-quarter{padding:13px 0 6px;font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#70d7bc;}
+.gameday-timeline-play{display:grid;grid-template-columns:65px minmax(0,1fr) 148px;align-items:center;gap:14px;border:1px solid #294553;border-radius:11px;padding:13px;background:#0d2330;}
+.gameday-timeline-id{display:flex;flex-direction:column;gap:4px;color:#e6f9f3;}
+.gameday-timeline-id strong{font-size:17px;font-variant-numeric:tabular-nums;}
+.gameday-timeline-id small{font-size:10px;color:#86a3b0;}
+.gameday-timeline-info{min-width:0;display:grid;gap:5px;}
+.gameday-timeline-situation{display:flex;align-items:center;gap:11px;flex-wrap:wrap;}
+.gameday-timeline-situation strong{color:#effbf5;font-size:13px;}
+.gameday-timeline-situation span{font-size:11px;color:#81cbbc;}
+.gameday-timeline-info p{margin:0;font-size:12px;line-height:1.5;color:#c8dbe4;overflow-wrap:anywhere;}
+.gameday-timeline-info small{font-size:10px;line-height:1.5;color:#8eacbc;}
+.gameday-timeline-action{justify-self:end;}
+.gameday-timeline-action button{background:#28775e;border:1px solid #78ceb0;border-radius:8px;padding:9px 11px;color:#eefff7;cursor:pointer;font-size:11px;font-weight:750;}
+.gameday-timeline-action span{font-size:10px;color:#8cabb7;max-width:145px;display:block;text-align:right;}
+.gameday-game-timeline button:focus-visible,.gameday-game-timeline select:focus-visible{outline:2px solid #8eeacb;outline-offset:3px;}
+@media(max-width:720px){.gameday-game-timeline{padding:13px;}.gameday-timeline-play{grid-template-columns:50px minmax(0,1fr);gap:10px;padding:12px;}.gameday-timeline-action{grid-column:2;justify-self:start;}.gameday-timeline-action span{text-align:left;}.gameday-timeline-id strong{font-size:14px;}}
+
+/* Independent measured-distance analysis: visual gaps stay gaps. */
+.gameday-observed-chart {
+  width:100%;
+  height:auto;
+  display:block;
+  margin:13px 0 10px;
+  border:1px solid rgba(120,180,185,.20);
+  border-radius:9px;
 }
-.gameday-charted-meta div{display:flex;flex-direction:column;gap:4px;min-width:0;}
-.gameday-charted-meta div span{font-size:10px;color:#94adb7;letter-spacing:.035em;}
-.gameday-charted-meta div strong{font-size:12px;color:#e2f3e9;line-height:1.3;overflow-wrap:anywhere;}
-.gameday-charted-meta small{grid-column:1/-1;font-size:10px;color:#8ca8af;line-height:1.5;}
-@media(max-width:780px){.gameday-charted-meta{grid-template-columns:repeat(2,minmax(0,1fr));}}
