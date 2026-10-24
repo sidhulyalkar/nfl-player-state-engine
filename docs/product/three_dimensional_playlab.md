@@ -185,3 +185,24 @@ recorded frames contain both the selected player and an opponent.
 
 Frontend regression:
 `cd apps/gemini-fantasy-console && npm run test:field3d && npm run build`.
+
+## Source-completeness ribbon
+
+The historical replay sidebar includes a bounded (at most 100 cells)
+source-frame quality overview:
+
+- Recorded source-frame IDs are separate from missing whole-frame IDs.
+- Frames with omitted off-field or missing-x/y player observations are
+  flagged independently of whole-frame gaps.
+- Frames with no recorded ball x/y are shown separately, without asserting
+  that the football physically vanished.
+- A shared playback cursor locates the current nominal time within the
+  observed source-frame span.
+
+Each cell represents an **aggregate range** of source frame IDs. Its dominant
+color highlights the strongest evidence limitation within that range;
+the exact counts remain in the hover title. This is an audit visualization,
+not a reconstructed video timeline or a coverage classification.
+
+Both `frameEvidence.test.mjs` and the synthetic Chromium smoke challenge
+the evidence layers, including a source gap spanning multiple frame IDs.
