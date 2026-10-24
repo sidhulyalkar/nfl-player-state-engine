@@ -8,6 +8,7 @@ import { displayClock, frameAtTime, stepFrame } from './trackingTimeline';
 
 import { type HistoricalReplay } from './historicalReplaySchema';
 import { replayKey, replayLabel } from './historicalReplayLibrary';
+import {recordedNote,opponentProximitySeries,replayChapters} from './recordedCommentary';
 import { recordedCameraCue } from './playCameraDirector';
 export { parseHistoricalReplay } from './historicalReplaySchema';
 export type { HistoricalReplay } from './historicalReplaySchema';
@@ -66,7 +67,6 @@ export function HistoricalReplayPanel({
   },[replay,currentIndex]);
   const directorCue=useMemo(()=>recordedCameraCue({...frame,events:lastSourceEvent},sourceGap,focus),
     [frame,lastSourceEvent,sourceGap,focus]);
-  const currentEvent=sourceGap?null:frame.events.find(e=>e.trim().length>0)??null;
   const measuredMotion=useMemo(()=>motionAtFrame(replay.frames,currentIndex),[replay,currentIndex]);
   const currentMotion=sourceGap?null:measuredMotion.find(p=>p.nfl_id===focus);
   const offenseNow=useMemo(()=>formationFootprint(frame.players,'offense'),[frame]);
@@ -82,7 +82,7 @@ export function HistoricalReplayPanel({
   })),[frame]);
   const sceneTrails=useMemo<Field3DTrail[]>(()=>observedTrailSegments(replay.frames,currentIndex),[currentIndex,replay]);
   const sceneMotion=useMemo(()=>measuredMotion.map(v=>({id:v.nfl_id,dx:v.dx,dy:v.dy,speed:v.computed_speed_yards_per_second})),[measuredMotion]);
-  const recordedEvents=useMemo(()=>replay.frames.flatMap(f=>f.events.map(label=>({t:f.t_seconds_nominal,label,frame_id:f.frame_id}))),[replay]);
+  const chapters=useMemo(()=>replayChapters(replay),[replay]);
   useEffect(()=>{
     if(!running)return;
     let handle=0;let last=0;
@@ -92,6 +92,13 @@ export function HistoricalReplayPanel({
   },[running,duration,playbackSpeed]);
   useEffect(()=>{if(running&&time>=duration)setRunning(false);},[time,duration,running]);
   const focused=frame.players.find(p=>p.nfl_id===focus);
+  const note=useMemo(()=>recordedNote(replay,currentIndex,sourceGap,focus),[replay,currentIndex,sourceGap,focus]);
+  const proximity=useMemo(()=>opponentProximitySeries(replay,focus,currentIndex),[replay,focus,currentIndex]);
+  const proximityMax=Math.max(5,proximity.max*1.12);
+  const graphStart=replay.frames[0].t_seconds_nominal;
+  const graphSpan=Math.max(.1,duration-graphStart);
+  const chartX=(t:number)=>30+340*(t-graphStart)/graphSpan;
+  const chartY=(yards:number)=>126-104*yards/proximityMax;
   const atSnap=focused&&snapFrame?snapFrame.players.find(p=>p.nfl_id===focused.nfl_id):null;
   const straightFromSnap=focused&&atSnap?Math.hypot(focused.x-atSnap.x,focused.y-atSnap.y):null;
   const nearest=focused && focused.side && (focused.side==='offense' || focused.side==='defense')
@@ -192,7 +199,7 @@ export function HistoricalReplayPanel({
             <text x="33" y="45" fill="#e8f4f6" fontSize="12" letterSpacing="1.5">SOURCE FRAMES · {frame.frame_id}</text>
             <text x="33" y="65" fill="#a3bbbf" fontSize="11">Ball elevation unavailable; movement is NOT interpolated.</text>
           </svg>}
-          {showCommentary&&<div className="gameday-director-commentary" role="status" aria-live="off"><span>REPLAY DIRECTOR · {sourceGap?'EVIDENCE GAP':directorCue?.evidence.replaceAll('_',' ')??'NO SPATIAL ANCHOR'}</span><strong>{sourceGap?'Recorded tracking unavailable at this timestamp':currentEvent?'Source event: '+currentEvent.replaceAll('_',' '):focused?'Selected observation: '+(focused.name??focused.nfl_id):'Following recorded field observations'}</strong><small>{sourceGap?'Camera holds its last verified position. No player or ball movement is fabricated.':nearest&&focused?`Nearest observed opponent ${nearest.distance.toFixed(1)} yd away. This is distance, not a coverage assignment.`:'Camera uses recorded ball or player positions. Tactical assignments require separate verified charting.'}</small></div>}
+          {showCommentary&&<div className="gameday-director-commentary" role="status" aria-live="off"><span>ANALYST LENS · {note.provenance.replaceAll('_',' ')}{note.sourceFrameId!==null?' · FRAME '+note.sourceFrameId:''}</span><strong>{note.title}</strong><small>{note.detail}</small></div>}
           {sourceGap&&<div role="status" className="gameday-gap-banner">No position sample at {displayClock(time)} · last observed frame {frame.frame_id} · source frame unavailable</div>}
         </div>
         <div className="gameday-controlbar"><div className="gameday-player-controls">
@@ -207,6 +214,7 @@ export function HistoricalReplayPanel({
             </select>
           </label>
           </div><input type="range" aria-label="Historical replay timeline, recorded frames may contain gaps" min="0" max={duration} step=".01" value={time} onChange={e=>{setTime(Number(e.target.value));setRunning(false);}}/></div>
+        {chapters.length>0&&<div className="gameday-replay-chapters" aria-label="Jump to source-annotated replay chapters"><span>EVENTS</span>{chapters.slice(0,24).map((chapter,i)=><button type="button" key={chapter.frameId+'-'+i} className={time>=chapter.time?'seen':''} onClick={()=>{setTime(chapter.time);setRunning(false);}} title={'Source event '+chapter.event+' at frame '+chapter.frameId}><small>{chapter.time.toFixed(1)}s</small>{chapter.title}</button>)}{chapters.length>24&&<small>{chapters.length-24} more annotated events</small>}</div>}
         <div className="gameday-overlays"><span>Recorded data layers</span><button onClick={()=>setTrails(!trails)} aria-pressed={trails} className={trails?'enabled':''}>Observed trails</button><button onClick={()=>setLabels(!labels)} aria-pressed={labels} className={labels?'enabled':''}>Jersey labels</button><button onClick={()=>setShowMotion(!showMotion)} aria-pressed={showMotion} className={showMotion?'enabled':''}>Observed movement</button>{snapFrame && <><button onClick={()=>setShowSnap(!showSnap)} aria-pressed={showSnap} className={showSnap?'enabled':''}>Snap alignment</button><button onClick={()=>{setTime(snapFrame.t_seconds_nominal);setRunning(false);}}>Jump to snap</button></>}<button onClick={()=>setShowNearest(!showNearest)} aria-pressed={showNearest} className={showNearest?'enabled':''}>Nearest opponent</button></div>
         <div className="gameday-lower">
           <div className="gameday-panel"><div className="gameday-section-name"><CircleAlert size={16}/> RESEARCH DATA BOUNDARY</div><h2>Not a live game feed</h2><p>Local contest frames are displayed without estimating formations, coverage, coaches' intent, player assignments, or ball height. Gaps in frames remain gaps.</p><div className="gameday-evidence">Data use requires independent source licensing and attribution review before any public product deployment.</div></div>
@@ -224,6 +232,7 @@ export function HistoricalReplayPanel({
           <div className="gameday-fact"><span>Observed path length</span><strong>{traveled?traveled.yards.toFixed(2)+' yd'+(traveled.complete?'':' (partial)'):'Unavailable'}</strong></div>
           <div className="gameday-fact"><span>Nearest recorded opponent</span><strong>{nearest?nearest.distance.toFixed(2)+' yd':'Unavailable'}</strong></div>
           <div className="gameday-fact"><span>Opponent identity</span><strong>{nearest?(nearest.player.name??nearest.player.nfl_id??'Unknown'):'Unavailable'}</strong></div>
+          {focus&&<div className="gameday-proximity-chart"><div className="gameday-proximity-head"><strong>Nearest-opponent distance over time</strong><span>{sourceGap?'GAP':proximity.latest?proximity.latest.distance.toFixed(1)+' yd':'unavailable'}</span></div><svg viewBox="0 0 400 150" role="img" aria-label="Recorded nearest-opponent separation in yards; disconnected lines mark evidence gaps"><line x1="30" x2="370" y1="126" y2="126" stroke="#536a78"/><line x1="30" x2="30" y1="12" y2="126" stroke="#536a78"/><text x="26" y="22" textAnchor="end" fill="#91b0bc" fontSize="11">{proximityMax.toFixed(0)}</text><text x="26" y="128" textAnchor="end" fill="#91b0bc" fontSize="11">0</text><text x="30" y="144" fill="#91b0bc" fontSize="10">Start</text><text x="370" y="144" textAnchor="end" fill="#91b0bc" fontSize="10">End</text>{proximity.paths.map((segment,i)=>segment.length>1?<path key={i} d={segment.map((v,j)=>(j?'L':'M')+chartX(v.time).toFixed(1)+' '+chartY(v.distance).toFixed(1)).join(' ')} fill="none" stroke="#75ddc4" strokeWidth="2"/>:<circle key={i} cx={chartX(segment[0].time)} cy={chartY(segment[0].distance)} r="2" fill="#75ddc4"/>)}{!sourceGap&&proximity.latest&&<circle cx={chartX(proximity.latest.time)} cy={chartY(proximity.latest.distance)} r="5" fill="#ffd18f" stroke="#202c33" strokeWidth="2"/>}</svg><small>Recorded opposite-side proximity, not defensive coverage. Lines break at missing frames, missing players, or missing side labels. {proximity.observed} valid observations.</small></div>}
           <p>Snap ghosts display only players recorded at the source-labeled snap event. Straight-line displacement is not total distance run. Movement arrows come from two adjacent recorded frames, not assumed orientation or coach assignment; source-reported and finite-difference speed are deliberately separate. Nearest opponent is geometric distance at a single recorded frame, not a coverage responsibility, matchup assignment, or player performance grade. Requires verified team possession labels.</p></div>
         </div>
       </section>
@@ -238,7 +247,7 @@ export function HistoricalReplayPanel({
           <div className="gameday-fact"><span>Offensive depth now</span><strong>{offenseNow?offenseNow.depth_yards.toFixed(1)+' yd':'Unavailable'}</strong></div>
           <p>Width is the measured sideline-to-sideline extent (max y minus min y); depth is max x minus min x. These depend on recorded players and independently verified team sides, not a named offensive formation.</p>
         </div>
-        <div className="gameday-panel"><div className="gameday-aside-heading"><div><Activity size={17}/><h2>Source events</h2></div></div><p className="gameday-muted">Only labels supplied by the original tracking CSV.</p><div className="gameday-event-list">{recordedEvents.length?recordedEvents.slice(0,50).map((m,i)=><button key={i} className={time>=m.t?'seen':''} onClick={()=>{setTime(m.t);setRunning(false);}}><span className="gameday-event-time">{m.t.toFixed(1)}s</span><div><strong>{m.label}</strong><small>Recorded frame {m.frame_id}</small></div></button>):<p>No annotated events available.</p>}</div></div>
+        <div className="gameday-panel"><div className="gameday-aside-heading"><div><Activity size={17}/><h2>Replay notes</h2></div></div><p className="gameday-muted">The analyst lens follows source-labeled events as playback advances. Use the event chapter strip beneath the field to jump to a recorded moment.</p><div className="gameday-fact"><span>Source annotations</span><strong>{chapters.length}</strong></div><div className="gameday-fact"><span>Current evidence</span><strong>{note.provenance.replaceAll('_',' ')}</strong></div><p>Proximity and formation plots are geometric observations only. Coaching strategy, routes, coverage responsibilities and blocking outcomes require separate verified labels.</p></div>
         <div className="gameday-panel"><div className="gameday-aside-heading"><div><CircleAlert size={17}/><h2>Coverage and evidence</h2></div></div><div className="gameday-fact"><span>Frame coverage</span><strong>{(replay.frame_coverage*100).toFixed(1)}%</strong></div>{replay.position_quality&&<><div className="gameday-fact"><span>Unrenderable source positions</span><strong>{replay.position_quality.omitted_total_position_rows} excluded</strong></div>
         {replay.position_quality.omitted_total_position_rows>0&&<p role="status">Actual source rows omitted from the on-field view: {replay.position_quality.omitted_off_field_position_rows} outside the field; {replay.position_quality.omitted_missing_position_rows} missing x/y. Affected source frames: {replay.position_quality.affected_source_frame_ids.length}. These observations were not clamped or interpolated.</p>}</>}<div className="gameday-fact"><span>Source</span><strong>{replay.source}</strong></div><div className="gameday-fact"><span>License declaration</span><strong>{replay.source_license_identifier}</strong></div><div className="gameday-fact"><span>Game</span><strong>{replay.game_id}/{replay.play_id}</strong></div><p>Data are user supplied, not independently authenticated. No player grades or coaching classifications are generated.</p></div>
       </aside>}
