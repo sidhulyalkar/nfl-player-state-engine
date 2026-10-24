@@ -16,24 +16,37 @@ coverage assignments or game-film alignment is implied.
 4. Create a **new** private session directory with
    `scripts/export_bdb2019_replay_batch.py` and 12 distinct play IDs.
 
-Example (replace the IDs based on your position-free catalog, do not copy the
-example as a scientifically selected sample):
+Example: select 12 actual source IDs from your local catalog. This takes the
+first 12 IDs in catalog order for **technical smoke testing only**, not as a
+representative statistical sample or a claim about coaching tactics.
 
 ```bash
+mapfile -t PLAY_IDS < <(python - <<'PY'
+import json
+with open('/tmp/pse-recorded-play-catalog.json', encoding='utf-8') as f:
+    catalog = json.load(f)
+plays = catalog['plays']
+if len(plays) < 12:
+    raise SystemExit('At least 12 recorded plays required')
+for play in plays[:12]:
+    print(play['play_id'])
+PY
+)
+ARGS=()
+for pid in "${PLAY_IDS[@]}"; do
+  ARGS+=(--play-id "$pid")
+done
 python scripts/export_bdb2019_replay_batch.py \
   --source-dir data/external/bdb2019-private \
   --output-dir /tmp/pse-private-2017-session-v1 \
-  --play-id 938 --play-id 2756 --play-id 3725 --play-id 4429 \
-  --play-id 100 --play-id 200 --play-id 300 --play-id 400 \
-  --play-id 500 --play-id 600 --play-id 700 --play-id 800 \
+  "${ARGS[@]}" \
   --license-id "YOUR_ACTUAL_REVIEWED_TERMS_IDENTIFIER" \
   --acknowledge-source-terms
 ```
 
-**Important:** Example play IDs beyond the first four are illustrative, not
-verified members of the recorded source. Pick existing IDs from the generated
-catalog. The entire export fails if any requested play is absent. Avoid
-committing the resulting JSON files or raw CSVs.
+Make sure the catalog file was generated from the same pinned source. The
+export fails atomically if any requested play is absent. Avoid committing the
+JSON, local source CSVs or private browser traces.
 
 ## Real Chromium session check
 
