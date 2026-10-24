@@ -20,8 +20,9 @@ export function publishedScoreSignals(before:PublishedBoard|null,after:Published
   // Never replay stale caches, same-source snapshots or a different football week as "new" news.
   if(!before||before.season!==after.season||before.week!==after.week
       ||!after.source.integrity_verified||after.source.stale||!at
-      ||!before.source.fetched_at_utc
-      ||Date.parse(at)<=Date.parse(before.source.fetched_at_utc))return [];
+      ||!before.source.fetched_at_utc)return [];
+  const nextTime=Date.parse(at),previousTime=Date.parse(before.source.fetched_at_utc);
+  if(!Number.isFinite(nextTime)||!Number.isFinite(previousTime)||nextTime<=previousTime)return [];
   const old=new Map(before.games.map(g=>[g.game_id,g]));
   const output:PublishedSignal[]=[];
   for(const game of after.games){
