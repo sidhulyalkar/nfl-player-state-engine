@@ -17,3 +17,9 @@
 .field3d-controls button:hover{background:#284d57;}
 .field3d-controls button:focus-visible{outline:2px solid #8deac9;outline-offset:2px;}
 @media(max-width:700px){.field3d-source{left:8px;top:8px;font-size:9px;letter-spacing:0;padding:6px}.field3d-legend{right:6px;bottom:6px;padding:7px;gap:7px;font-size:9px}.field3d-controls{padding:8px;flex-wrap:wrap}.field3d-controls>span{font-size:10px}.field3d-stage{min-height:260px;}}
+
+/* Replay theater: the canvas is the primary interface, not a dashboard thumbnail. */
+.gameday-theater .field3d-stage{aspect-ratio:auto;height:clamp(490px,69vh,900px);max-height:none;min-height:490px;background:radial-gradient(ellipse at center,#183e42,#0a1d27 82%);}
+.field3d-controls button.field3d-auto-camera{width:auto;min-width:108px;padding:0 12px;color:#baf0df;font-size:11px;white-space:nowrap;}
+.field3d-controls button.field3d-auto-camera[aria-pressed=true]{background:#1b554b;border-color:#64cfae;}
+@media(max-width:700px){.gameday-theater .field3d-stage{height:min(63vh,650px);min-height:310px;}.field3d-controls button.field3d-auto-camera{min-width:0;font-size:10px;}}
