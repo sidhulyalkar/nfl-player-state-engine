@@ -6,6 +6,7 @@ import { FootballField3D, type Field3DTrail } from './FootballField3D';
 import { MAX_REPLAY_FILE_BYTES, MAX_REPLAY_IMPORT_BYTES, MAX_REPLAY_LIBRARY, mergeReplayLibrary, replayKey, replayLabel, selectReplay } from './historicalReplayLibrary';
 import { parsePlayCatalog, type PlayCatalog } from './historicalPlayCatalog';
 import { HistoricalPlayCatalogPanel } from './HistoricalPlayCatalogPanel';
+import {syntheticCameraCue} from './playCameraDirector';
 
 /**
  * Illustrative data only. Production tracking adapters must carry a separate
@@ -263,6 +264,7 @@ export function GameDayLab() {
   const [overlays,setOverlays] = useState<Set<Overlay>>(new Set(['routes','labels']));
   const [selected,setSelected] = useState('wr1');
   const [quiet,setQuiet] = useState(false);
+  const [showRail,setShowRail] = useState(true);
   const play = plays[index];
   useEffect(()=>{
     if(!playing)return;
@@ -308,7 +310,8 @@ export function GameDayLab() {
     const u=Math.max(0,Math.min(1,(time-3.15)/1.2));
     return {x:a.x+(b.x-a.x)*u,y:a.y+(b.y-a.y)*u};
   },[time,play.kind]);
-  return historical ? <HistoricalReplayPanel key={replayKey(historical)} replay={historical} library={replayLibrary} onSelect={key=>setHistorical(selectReplay(replayLibrary,key))} onImportFiles={onReplayFile} importing={importing} importError={importError} onBack={()=>{setHistorical(null);setTime(0);setPlaying(true);}}/> : <main className="gameday-page">
+  const demoCue=useMemo(()=>syntheticCameraCue(sceneBall,time<.8?'presnap':time<4.35?'live':'outcome'),[sceneBall,time]);
+  return historical ? <HistoricalReplayPanel key={replayKey(historical)} replay={historical} library={replayLibrary} onSelect={key=>setHistorical(selectReplay(replayLibrary,key))} onImportFiles={onReplayFile} importing={importing} importError={importError} onBack={()=>{setHistorical(null);setTime(0);setPlaying(true);}}/> : <main className={'gameday-page gameday-theater '+(!showRail?'gameday-theater-expanded':'')}>
     <header className="gameday-head">
       <div><div className="gameday-kicker"><Activity size={15}/> FOURTH DOWN LAB / GAMEDAY</div><h1>See the game beneath the game.</h1><p>Replay the formation. Explore the decisions. Understand the contributions.</p></div>
       <div className="gameday-history-actions"><label className="gameday-history-upload">{importing?'Importing replay files…':'Load historical replay JSON(s)'}<input type="file" multiple disabled={importing} accept=".json,application/json" onChange={event=>{void onReplayFile(event);}}/></label><label className="gameday-history-upload">Load play catalog JSON<input type="file" accept=".json,application/json" onChange={event=>{void onCatalogFile(event);}}/></label>{replayLibrary.length>0&&<label className="gameday-library-picker">Loaded plays<select aria-label="Choose saved historical replay" value="" onChange={e=>setHistorical(selectReplay(replayLibrary,e.target.value))}><option value="" disabled>Select a play ({replayLibrary.length})</option>{replayLibrary.map(p=><option key={replayKey(p)} value={replayKey(p)}>{replayLabel(p)}</option>)}</select></label>}<div className="gameday-source"><span className="gameday-source-dot"/><div><strong>Synthetic demonstration</strong><small>Not a live game or licensed tracking feed</small></div></div></div>
@@ -319,10 +322,11 @@ export function GameDayLab() {
       onOpen={setHistorical} onClose={()=>setPlayCatalog(null)}/>}
     <div className="gameday-layout">
       <section className="gameday-main">
+        <div className="gameday-theater-topline"><span>ILLUSTRATIVE PLAY THEATER</span><button type="button" aria-pressed={showRail} onClick={()=>setShowRail(v=>!v)}>{showRail?'Expand field':'Show analysis rail'}</button></div>
         <div className="gameday-scoreline"><div><span className="gameday-team-mark">O</span><div><strong>{play.offense}</strong><small>OFFENSE</small></div><b>21</b></div><div className="gameday-situation"><span>DEMO PLAY</span><strong>{play.down}</strong><small>Q3 · 08:42 · ILLUSTRATIVE SCORE</small></div><div><b>17</b><div><strong>{play.defense}</strong><small>DEFENSE</small></div><span className="gameday-team-mark secondary">F</span></div></div>
         <div className="gameday-field-shell">
           <div className="gameday-toolbar"><strong><Maximize2 size={14}/> {renderMode==='3d'?'Interactive 3D stadium':'Projected 2D tactical field'}</strong><div className="gameday-display-options"><button aria-pressed={renderMode==='3d'} className={renderMode==='3d'?'selected':''} onClick={()=>setRenderMode('3d')}>3D Field</button><button aria-pressed={renderMode==='2d'} className={renderMode==='2d'?'selected':''} onClick={()=>setRenderMode('2d')}>2D Field</button><select aria-label="Camera angle" value={camera} onChange={e=>setCamera(e.target.value as Camera)}><option value="broadcast">Broadcast angle</option><option value="all22">All-22 perspective</option><option value="overhead">Overhead</option></select></div></div>
-          {renderMode==='3d' ? <FootballField3D players={scenePlayers} ball={sceneBall} trails={sceneTrails} selectedId={selected} onSelect={setSelected} preset={camera} focus={DEMO_FOCUS} showTrails showLabels={overlays.has('labels')} showNearest={false} synthetic onUnsupported={()=>setRenderMode('2d')}/> : <Field play={play} time={time} camera={camera} overlays={overlays} onPlayer={setSelected}/> }
+          {renderMode==='3d' ? <FootballField3D directorActive directorCue={demoCue} players={scenePlayers} ball={sceneBall} trails={sceneTrails} selectedId={selected} onSelect={setSelected} preset={camera} focus={DEMO_FOCUS} showTrails showLabels={overlays.has('labels')} showNearest={false} synthetic onUnsupported={()=>setRenderMode('2d')}/> : <Field play={play} time={time} camera={camera} overlays={overlays} onPlayer={setSelected}/> }
           {!quiet && currentMoment && <div className={'gameday-event-pill '+(currentMoment.type==='result'?'impact':'')}><Zap size={15}/><span><strong>{currentMoment.label}</strong> {currentMoment.detail}</span></div>}
         </div>
         <div className="gameday-controlbar"><div className="gameday-player-controls"><button aria-label={playing?'Pause replay':'Play replay'} onClick={()=>{if(time>=play.duration)setTime(0);setPlaying(!playing);}}>{playing?<Pause size={18}/>:<Play size={18}/>}</button><button aria-label="Restart replay" onClick={()=>{setTime(0);setPlaying(true);}}><RotateCcw size={17}/></button><span>{time.toFixed(1)}s / {play.duration.toFixed(1)}s</span></div><input aria-label="Replay timeline" type="range" min="0" max={play.duration} step=".05" value={time} onChange={e=>{setTime(Number(e.target.value));setPlaying(false);}}/><select aria-label="Playback speed" value={speed} onChange={e=>setSpeed(Number(e.target.value))}><option value=".5">0.5×</option><option value="1">1×</option><option value="2">2×</option></select></div>
@@ -332,11 +336,11 @@ export function GameDayLab() {
           <div className="gameday-panel"><div className="gameday-section-name"><Shield size={16}/> FORMATION READ</div><div className="gameday-fact"><span>Offense</span><strong>{play.formation}</strong></div><div className="gameday-fact"><span>Defense</span><strong>{play.defenseLook}</strong></div><div className="gameday-fact"><span>Selected player</span><strong>{focused.role} #{focused.jersey} · {focused.side}</strong></div></div>
         </div>
       </section>
-      <aside className="gameday-sidebar">
+      {showRail&&<aside className="gameday-sidebar">
         <div className="gameday-panel gameday-feed"><div className="gameday-aside-heading"><div><Bell size={17}/><h2>Game events</h2></div><button aria-label="Toggle notifications" aria-pressed={!quiet} onClick={()=>setQuiet(!quiet)}>{quiet?'Muted':'Highlights on'}</button></div><p className="gameday-muted">Clickable replay moments. No external alerts are sent in demo mode.</p><div className="gameday-event-list">{[...play.moments].reverse().map((m,i)=><button key={i} className={time>=m.t?'seen':''} onClick={()=>{setTime(m.t);setPlaying(false);}}><span className="gameday-event-time">{m.t.toFixed(1)}s</span><div><strong>{m.label}</strong><small>{m.detail}</small></div><ChevronRight size={15}/></button>)}</div></div>
         <div className="gameday-panel"><div className="gameday-aside-heading"><div><Activity size={17}/><h2>Play library</h2></div></div><p className="gameday-muted">Three deterministic teaching scenarios.</p><div className="gameday-play-list">{plays.map((p,i)=><button key={p.id} className={i===index?'active':''} onClick={()=>selectPlay(i)}><span>0{i+1}</span><div><strong>{p.title}</strong><small>{p.down} · {p.kind.toUpperCase()}</small></div><ChevronRight size={15}/></button>)}</div></div>
         <div className="gameday-panel gameday-rating"><div className="gameday-aside-heading"><div><Shield size={17}/><h2>Player impact</h2></div></div><div className="gameday-grade-unavailable">— <span>/ 10</span></div><strong>No verified rating available</strong><p>Real grades will need position-specific opportunity, execution, uncertainty, and play-context evidence. Do not assign precise-looking numbers from the demo animation.</p><div className="gameday-rating-cats"><span>Decision quality</span><span>Execution</span><span>Value added</span><span>Teamwork</span></div></div>
-      </aside>
+      </aside>}
     </div>
     <footer className="gameday-footer">DEMO / NO LIVE SOURCE CONNECTED · AUTHORITY: SYNTHETIC_DEMO · No NFL game or player grade represented</footer>
   </main>;
