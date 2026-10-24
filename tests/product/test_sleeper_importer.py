@@ -77,3 +77,25 @@ def test_sleeper_import_normalizes_league():
     assert snapshot.roster("1").players[0].canonical_player_id == "g1"
     assert snapshot.free_agents[0].player_name == "Free WR"
     assert snapshot.draft_picks[0].round == 1
+
+
+def test_sleeper_username_resolves_to_verified_league_roster():
+    class WithUsernames(FakeClient):
+        def get_json(self, url: str):
+            data = super().get_json(url)
+            if url.endswith("/league/L1/users"):
+                data[0]["username"] = "NeuralOwner"
+                data[1]["username"] = "OtherOwner"
+            return data
+
+    importer = SleeperImporter(WithUsernames())
+    snapshot = importer.import_league("L1", external_user_id="neuralowner")
+    assert snapshot.identity.external_user_id == "u1"
+    assert snapshot.metadata["external_roster_id"] == "1"
+    assert snapshot.metadata["external_user_resolved_in_league"] is True
+
+
+def test_sleeper_unknown_username_never_guesses_owner():
+    snapshot = SleeperImporter(FakeClient()).import_league("L1", external_user_id="not-in-league")
+    assert snapshot.metadata["external_roster_id"] is None
+    assert snapshot.metadata["external_user_resolved_in_league"] is False
