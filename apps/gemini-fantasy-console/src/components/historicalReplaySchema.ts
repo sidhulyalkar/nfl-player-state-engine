@@ -57,6 +57,8 @@ export interface HistoricalReplay {
   source_license_identifier: string;
   play_direction: string | null;
   frame_count: number;
+  /** Number of original source rows, when exported by the audited adapter. */
+  rows?: number;
   missing_frame_count: number;
   frame_coverage: number;
   frames: HistoricalFrame[];
@@ -74,9 +76,11 @@ export function parseHistoricalReplay(value: unknown): HistoricalReplay {
     throw new Error('Replay identity and source SHA-256 are required.');
   }
   if (o.frame_count !== o.frames.length) throw new Error('Recorded frame count does not match the payload.');
+  if (o.rows!==undefined && (!Number.isSafeInteger(o.rows)||o.rows<=0))
+    throw new Error('Invalid original source row count.');
   for (let i=0;i<o.frames.length;i++) {
     const f = o.frames[i];
-    if (!f || !Number.isInteger(f.frame_id) || !Number.isFinite(f.t_seconds_nominal) || f.t_seconds_nominal < 0 || !Array.isArray(f.players) || f.players.length > 30 || !Array.isArray(f.events)) {
+    if (!f || !Number.isSafeInteger(f.frame_id) || f.frame_id<1 || !Number.isFinite(f.t_seconds_nominal) || f.t_seconds_nominal < 0 || !Array.isArray(f.players) || f.players.length > 30 || !Array.isArray(f.events)) {
       throw new Error('Invalid recorded frame structure.');
     }
     if (i>0 && (f.frame_id <= o.frames[i-1].frame_id || f.t_seconds_nominal < o.frames[i-1].t_seconds_nominal)) {
@@ -103,6 +107,8 @@ export function parseHistoricalReplay(value: unknown): HistoricalReplay {
     }
   }
   const span=o.frames[o.frames.length-1].frame_id-o.frames[0].frame_id+1;
+  if(!Number.isSafeInteger(span)||span<o.frames.length||span>250_000)
+    throw new Error('Invalid or unreasonably large source frame span.');
   if (o.missing_frame_count!==span-o.frames.length || Math.abs(o.frame_coverage!-o.frames.length/span)>1e-5)throw new Error('Tracking coverage metadata disagrees with frame IDs.');
   if (typeof o.source!=='string' || !o.source.trim() || typeof o.source_license_identifier!=='string' || !o.source_license_identifier.trim())throw new Error('Tracking source attribution is required.');
   if (typeof o.frame_coverage!=='number' || !Number.isFinite(o.frame_coverage) || o.frame_coverage<=0 || o.frame_coverage>1)throw new Error('Invalid tracking coverage metadata.');
