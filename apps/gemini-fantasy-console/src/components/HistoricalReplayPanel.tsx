@@ -8,7 +8,7 @@ import { displayClock, frameAtTime, stepFrame } from './trackingTimeline';
 
 import { type HistoricalReplay } from './historicalReplaySchema';
 import { replayKey, replayLabel } from './historicalReplayLibrary';
-import {recordedNote,opponentProximitySeries,replayChapters} from './recordedCommentary';
+import {recordedNote,observedNearestOpponent,opponentProximitySeries,replayChapters} from './recordedCommentary';
 import { recordedCameraCue } from './playCameraDirector';
 export { parseHistoricalReplay } from './historicalReplaySchema';
 export type { HistoricalReplay } from './historicalReplaySchema';
@@ -93,7 +93,9 @@ export function HistoricalReplayPanel({
   useEffect(()=>{if(running&&time>=duration)setRunning(false);},[time,duration,running]);
   const focused=frame.players.find(p=>p.nfl_id===focus);
   const note=useMemo(()=>recordedNote(replay,currentIndex,sourceGap,focus),[replay,currentIndex,sourceGap,focus]);
-  const proximity=useMemo(()=>opponentProximitySeries(replay,focus,currentIndex),[replay,focus,currentIndex]);
+  const proximity=useMemo(()=>opponentProximitySeries(replay,focus,-1),[replay,focus]);
+  const currentProximity=sourceGap?null:observedNearestOpponent(frame,focus);
+  const proximityDot=currentProximity?{time:frame.t_seconds_nominal,distance:currentProximity.distance}:null;
   const proximityMax=Math.max(5,proximity.max*1.12);
   const graphStart=replay.frames[0].t_seconds_nominal;
   const graphSpan=Math.max(.1,duration-graphStart);
@@ -232,7 +234,7 @@ export function HistoricalReplayPanel({
           <div className="gameday-fact"><span>Observed path length</span><strong>{traveled?traveled.yards.toFixed(2)+' yd'+(traveled.complete?'':' (partial)'):'Unavailable'}</strong></div>
           <div className="gameday-fact"><span>Nearest recorded opponent</span><strong>{nearest?nearest.distance.toFixed(2)+' yd':'Unavailable'}</strong></div>
           <div className="gameday-fact"><span>Opponent identity</span><strong>{nearest?(nearest.player.name??nearest.player.nfl_id??'Unknown'):'Unavailable'}</strong></div>
-          {focus&&<div className="gameday-proximity-chart"><div className="gameday-proximity-head"><strong>Nearest-opponent distance over time</strong><span>{sourceGap?'GAP':proximity.latest?proximity.latest.distance.toFixed(1)+' yd':'unavailable'}</span></div><svg viewBox="0 0 400 150" role="img" aria-label="Recorded nearest-opponent separation in yards; disconnected lines mark evidence gaps"><line x1="30" x2="370" y1="126" y2="126" stroke="#536a78"/><line x1="30" x2="30" y1="12" y2="126" stroke="#536a78"/><text x="26" y="22" textAnchor="end" fill="#91b0bc" fontSize="11">{proximityMax.toFixed(0)}</text><text x="26" y="128" textAnchor="end" fill="#91b0bc" fontSize="11">0</text><text x="30" y="144" fill="#91b0bc" fontSize="10">Start</text><text x="370" y="144" textAnchor="end" fill="#91b0bc" fontSize="10">End</text>{proximity.paths.map((segment,i)=>segment.length>1?<path key={i} d={segment.map((v,j)=>(j?'L':'M')+chartX(v.time).toFixed(1)+' '+chartY(v.distance).toFixed(1)).join(' ')} fill="none" stroke="#75ddc4" strokeWidth="2"/>:<circle key={i} cx={chartX(segment[0].time)} cy={chartY(segment[0].distance)} r="2" fill="#75ddc4"/>)}{!sourceGap&&proximity.latest&&<circle cx={chartX(proximity.latest.time)} cy={chartY(proximity.latest.distance)} r="5" fill="#ffd18f" stroke="#202c33" strokeWidth="2"/>}</svg><small>Recorded opposite-side proximity, not defensive coverage. Lines break at missing frames, missing players, or missing side labels. {proximity.observed} valid observations.</small></div>}
+          {focus&&<div className="gameday-proximity-chart"><div className="gameday-proximity-head"><strong>Nearest-opponent distance over time</strong><span>{sourceGap?'GAP':proximityDot?proximityDot.distance.toFixed(1)+' yd':'unavailable'}</span></div><svg viewBox="0 0 400 150" role="img" aria-label="Recorded nearest-opponent separation in yards; disconnected lines mark evidence gaps"><line x1="30" x2="370" y1="126" y2="126" stroke="#536a78"/><line x1="30" x2="30" y1="12" y2="126" stroke="#536a78"/><text x="26" y="22" textAnchor="end" fill="#91b0bc" fontSize="11">{proximityMax.toFixed(0)}</text><text x="26" y="128" textAnchor="end" fill="#91b0bc" fontSize="11">0</text><text x="30" y="144" fill="#91b0bc" fontSize="10">Start</text><text x="370" y="144" textAnchor="end" fill="#91b0bc" fontSize="10">End</text>{proximity.paths.map((segment,i)=>segment.length>1?<path key={i} d={segment.map((v,j)=>(j?'L':'M')+chartX(v.time).toFixed(1)+' '+chartY(v.distance).toFixed(1)).join(' ')} fill="none" stroke="#75ddc4" strokeWidth="2"/>:<circle key={i} cx={chartX(segment[0].time)} cy={chartY(segment[0].distance)} r="2" fill="#75ddc4"/>)}{!sourceGap&&proximityDot&&<circle cx={chartX(proximityDot.time)} cy={chartY(proximityDot.distance)} r="5" fill="#ffd18f" stroke="#202c33" strokeWidth="2"/>}</svg><small>Recorded opposite-side proximity, not defensive coverage. Lines break at missing frames, missing players, or missing side labels. {proximity.observed} valid observations.</small></div>}
           <p>Snap ghosts display only players recorded at the source-labeled snap event. Straight-line displacement is not total distance run. Movement arrows come from two adjacent recorded frames, not assumed orientation or coach assignment; source-reported and finite-difference speed are deliberately separate. Nearest opponent is geometric distance at a single recorded frame, not a coverage responsibility, matchup assignment, or player performance grade. Requires verified team possession labels.</p></div>
         </div>
       </section>
