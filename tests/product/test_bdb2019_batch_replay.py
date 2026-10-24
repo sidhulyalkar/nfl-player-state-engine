@@ -12,7 +12,8 @@ from player_state_engine.product.bdb2019_batch_replay import (
     validate_play_ids,
 )
 from player_state_engine.product.bdb2019_source_qualification import (
-    SOURCE_FILES, file_identifiers,
+    SOURCE_FILES,
+    file_identifiers,
 )
 from player_state_engine.product.gameday_legacy_tracking import import_bdb_2019_example
 
