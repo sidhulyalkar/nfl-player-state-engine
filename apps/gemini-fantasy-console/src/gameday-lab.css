@@ -311,3 +311,14 @@
 .gameday-charted-meta div strong{font-size:12px;color:#e2f3e9;line-height:1.3;overflow-wrap:anywhere;}
 .gameday-charted-meta small{grid-column:1/-1;font-size:10px;color:#8ca8af;line-height:1.5;}
 @media(max-width:780px){.gameday-charted-meta{grid-template-columns:repeat(2,minmax(0,1fr));}}
+
+/* Bounded source-quality ribbon; measurements remain distinct from omissions. */
+.gameday-evidence-legend {
+  display:flex;flex-wrap:wrap;gap:7px 12px;margin:8px 0 15px;
+  font-size:10px;color:#aac9ce;
+}
+.gameday-evidence-legend span {display:inline-flex;align-items:center;gap:5px;}
+.gameday-evidence-legend i {
+  display:inline-block;width:10px;height:10px;border-radius:3px;
+  border:1px solid rgba(245,255,255,.2);
+}
