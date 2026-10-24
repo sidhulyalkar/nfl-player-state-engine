@@ -291,6 +291,7 @@ try {
         licenseIdentifier:process.env.PLAYLAB_SOURCE_LICENSE_ID,
       },
     );
+    const existingPlayCount=await evalPage("document.querySelectorAll('select[aria-label=\\\"Select loaded historical play\\\"] option').length",sid);
     const returned=await evalPage("(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent?.includes('Return to demo'));b?.click();return !!b})()",sid);
     assert.equal(returned,true,'Cannot return to demo for private research session');
     await until("document.querySelector('.gameday-head h1')?.textContent?.includes('See the game beneath the game')",sid,'private import starting view');
@@ -310,22 +311,34 @@ try {
     for(let attempt=0;attempt<180;attempt++){
       const result=await evalPage("(()=>({importing:document.querySelector('.gameday-history-actions')?.textContent?.includes('Importing'),historical:document.querySelector('.gameday-head h1')?.textContent?.includes('Recorded movement, not reconstructed guesses'),verified:document.querySelector('.gameday-history-meta')?.textContent?.includes('SHA-256 matches selected manifest'),options:document.querySelectorAll('select[aria-label=\\\"Select loaded historical play\\\"] option').length,error:document.querySelector('[role=\\\"alert\\\"]')?.textContent||null}))()",sid);
       if(result?.error)throw new Error('Local manifest import failed: '+result.error);
-      if(result?.historical&&result.verified&&result.options>=privateSession.play_count+2){
+      if(result?.historical&&result.verified&&result.options>=privateSession.play_count+existingPlayCount){
         complete=true;break;
       }
       await sleep(500);
     }
     assert.equal(complete,true,'Private session did not become available in Chromium');
     const loadedOptions=await evalPage("Array.from(document.querySelectorAll('select[aria-label=\\\"Select loaded historical play\\\"] option')).map(o=>o.value)",sid);
-    for(const play of privateSession.plays)
-      assert.ok(loadedOptions.some(value=>value.includes(play.play_id)),
-        'Missing locally imported replay '+play.play_id);
+    const expectedKeys=privateSession.plays.map(play=>
+      JSON.stringify([privateSession.game_id,play.play_id]));
+    for(const key of expectedKeys)
+      assert.ok(loadedOptions.includes(key),'Missing locally imported replay '+key);
+    let slowestSwitch=0;
+    for(const [index,play] of privateSession.plays.entries()){
+      const key=expectedKeys[index];
+      const renderStarted=performance.now();
+      const selected=await evalPage("(()=>{const input=document.querySelector('select[aria-label=\\\"Select loaded historical play\\\"]');if(!input)return false;input.value="+JSON.stringify(key)+";input.dispatchEvent(new Event('change',{bubbles:true}));return true})()",sid);
+      assert.equal(selected,true,'Cannot select research replay '+play.play_id);
+      await until("(()=>{const h=document.querySelector('.gameday-head p')?.textContent||'';const verified=document.querySelector('.gameday-history-meta')?.textContent||'';return h.includes('play '+"+JSON.stringify(play.play_id)+")&&verified.includes('SHA-256 matches selected manifest')&&!!document.querySelector('section[aria-label=\\\"Recorded frame evidence timeline\\\"]')})()",sid,'qualified replay '+play.play_id);
+      slowestSwitch=Math.max(slowestSwitch,performance.now()-renderStarted);
+    }
     const elapsed=performance.now()-started;
     const browserMemory=await evalPage("performance.memory?.usedJSHeapSize??null",sid);
     const redacted={
       qualification:'LOCAL_BROWSER_RESEARCH_SESSION',
       status:'PASS_BROWSER_FILE_AND_MANIFEST_CONSISTENCY_ONLY',
       play_count:privateSession.play_count,
+      full_replay_render_count:privateSession.play_count,
+      slowest_replay_switch_ms:Math.round(slowestSwitch),
       total_bytes:privateSession.total_bytes,
       import_wall_ms:Math.round(elapsed),
       browser_used_js_heap_bytes:browserMemory,
