@@ -242,6 +242,10 @@ def export_bdb2019_replay_batch(
                 "metadata_provenance": replay["source_play_metadata"]["provenance"],
             })
             csv_paths[pid].unlink()
+        # Fail closed on source edits occurring during the extraction or
+        # conversion. Never assign a previously verified hash to drifted CSVs.
+        if verify_file_identities(root, expectations=expected) != identities:
+            raise ValueError("Pinned source changed during the research replay export.")
         manifest = {
             "schema_version": 1, "data_mode": "HISTORICAL_RESEARCH_BATCH_MANIFEST",
             "qualification_status": (
