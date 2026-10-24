@@ -29,7 +29,24 @@ export interface PositionQuality {
   affected_source_frame_ids: number[];
   never_clamped_or_interpolated: true;
 }
+/** Source-joined official game/plays charting. Declared data, not browser-authenticated. */
+export interface HistoricalSourcePlayMetadata {
+  provenance: 'PINNED_OFFICIAL_PLAYS_AND_GAMES_CSV' | 'NONCANONICAL_TEST_FIXTURE';
+  season: number;
+  week: number;
+  home_team: string;
+  visitor_team: string;
+  possession_team: string;
+  offense_side: 'home' | 'away';
+  quarter: number;
+  down: number | null;
+  yards_to_go: number | null;
+  offense_formation_charted: string | null;
+  offense_personnel_charted: string | null;
+}
 export interface HistoricalReplay {
+  source_play_metadata?: HistoricalSourcePlayMetadata;
+  possession_team?: string | null;
   position_quality?: PositionQuality;
   data_mode: 'HISTORICAL_RESEARCH';
   tracking_fidelity: 'RECORDED_FRAMES';
@@ -89,6 +106,24 @@ export function parseHistoricalReplay(value: unknown): HistoricalReplay {
   if (o.missing_frame_count!==span-o.frames.length || Math.abs(o.frame_coverage!-o.frames.length/span)>1e-5)throw new Error('Tracking coverage metadata disagrees with frame IDs.');
   if (typeof o.source!=='string' || !o.source.trim() || typeof o.source_license_identifier!=='string' || !o.source_license_identifier.trim())throw new Error('Tracking source attribution is required.');
   if (typeof o.frame_coverage!=='number' || !Number.isFinite(o.frame_coverage) || o.frame_coverage<=0 || o.frame_coverage>1)throw new Error('Invalid tracking coverage metadata.');
+  if(o.source_play_metadata!==undefined){
+    const m=o.source_play_metadata;
+    const whole=(n:unknown,low:number,high:number)=>Number.isSafeInteger(n)&&Number(n)>=low&&Number(n)<=high;
+    const club=(s:unknown)=>typeof s==='string' && /^[A-Z]{2,3}$/.test(s);
+    const label=(s:unknown)=>s===null || (typeof s==='string' && s.length>0 && s.length<=90);
+    if(!m||typeof m!=='object'
+      ||!['PINNED_OFFICIAL_PLAYS_AND_GAMES_CSV','NONCANONICAL_TEST_FIXTURE'].includes(m.provenance)
+      ||!whole(m.season,2000,2100)||!whole(m.week,1,30)
+      ||!whole(m.quarter,1,6)||!(m.down===null||whole(m.down,1,4))
+      ||!(m.yards_to_go===null||whole(m.yards_to_go,0,99))
+      ||!club(m.home_team)||!club(m.visitor_team)||m.home_team===m.visitor_team
+      ||!club(m.possession_team)||![m.home_team,m.visitor_team].includes(m.possession_team)
+      ||m.offense_side!==(m.possession_team===m.home_team?'home':'away')
+      ||(o.possession_team!=null&&o.possession_team!==m.possession_team)
+      ||!label(m.offense_formation_charted)||!label(m.offense_personnel_charted)){
+      throw new Error('Recorded NFL play metadata is internally inconsistent.');
+    }
+  }
   if (o.position_quality !== undefined) {
     const q=o.position_quality;
     const whole=(n:unknown)=>Number.isSafeInteger(n)&&Number(n)>=0;
