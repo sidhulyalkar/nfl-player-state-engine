@@ -193,7 +193,7 @@ def test_requires_source_terms_and_all_metadata(tmp_path: Path) -> None:
 @pytest.mark.parametrize(("old", "new", "message"), [
     (",1,3,7,", ",0,3,7,", "Out-of-range source quarter"),
     (",1,3,7,", ",7,3,7,", "Out-of-range source quarter"),
-    (",1,3,7,", ",1,0,7,", "Out-of-range source down"),
+    (",1,3,7,", ",1,-1,7,", "Out-of-range source down"),
     (",1,3,7,", ",1,5,7,", "Out-of-range source down"),
     (",1,3,7,", ",1,3,101,", "Out-of-range source yards to go"),
 ])
