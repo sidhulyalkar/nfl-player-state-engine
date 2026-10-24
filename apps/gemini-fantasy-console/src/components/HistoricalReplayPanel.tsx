@@ -56,7 +56,16 @@ export function HistoricalReplayPanel({
   const currentIndex=timeline.index;
   const sourceGap=timeline.is_gap;
   const frame=replay.frames[currentIndex];
-  const directorCue=useMemo(()=>recordedCameraCue(frame,sourceGap,focus),[frame,sourceGap,focus]);
+  // Hold the most recently SOURCE-LABELED event's framing phase until another
+  // labeled event arrives; never create a new event between recorded frames.
+  const lastSourceEvent=useMemo(()=>{
+    for(let i=currentIndex;i>=0;i--){
+      if(replay.frames[i].events.length)return replay.frames[i].events;
+    }
+    return [] as string[];
+  },[replay,currentIndex]);
+  const directorCue=useMemo(()=>recordedCameraCue({...frame,events:lastSourceEvent},sourceGap,focus),
+    [frame,lastSourceEvent,sourceGap,focus]);
   const currentEvent=sourceGap?null:frame.events.find(e=>e.trim().length>0)??null;
   const measuredMotion=useMemo(()=>motionAtFrame(replay.frames,currentIndex),[replay,currentIndex]);
   const currentMotion=sourceGap?null:measuredMotion.find(p=>p.nfl_id===focus);
