@@ -116,12 +116,12 @@ export function parseHistoricalReplay(value: unknown): HistoricalReplay {
     const m=o.source_play_metadata;
     const whole=(n:unknown,low:number,high:number)=>Number.isSafeInteger(n)&&Number(n)>=low&&Number(n)<=high;
     const club=(s:unknown)=>typeof s==='string' && /^[A-Z]{2,3}$/.test(s);
-    const label=(s:unknown)=>s===null || (typeof s==='string' && s.length>0 && s.length<=90);
+    const label=(s:unknown)=>s===null || (typeof s==='string' && s.length>0 && s.length<=120);
     if(!m||typeof m!=='object'
       ||!['PINNED_OFFICIAL_PLAYS_AND_GAMES_CSV','NONCANONICAL_TEST_FIXTURE'].includes(m.provenance)
-      ||!whole(m.season,2000,2100)||!whole(m.week,1,30)
-      ||!whole(m.quarter,1,6)||!(m.down===null||whole(m.down,1,4))
-      ||!(m.yards_to_go===null||whole(m.yards_to_go,0,99))
+      ||!whole(m.season,2000,2100)||!whole(m.week,1,22)
+      ||!whole(m.quarter,1,5)||!(m.down===null||whole(m.down,1,4))
+      ||!(m.yards_to_go===null||whole(m.yards_to_go,0,100))
       ||!club(m.home_team)||!club(m.visitor_team)||m.home_team===m.visitor_team
       ||!club(m.possession_team)||![m.home_team,m.visitor_team].includes(m.possession_team)
       ||m.offense_side!==(m.possession_team===m.home_team?'home':'away')
