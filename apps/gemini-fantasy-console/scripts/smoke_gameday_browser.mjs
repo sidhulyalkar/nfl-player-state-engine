@@ -319,6 +319,7 @@ try {
       await sleep(500);
     }
     assert.equal(complete,true,'Private session did not become available in Chromium');
+    const importElapsed=performance.now()-started;
     const loadedOptions=await evalPage("Array.from(document.querySelectorAll('select[aria-label=\\\"Select loaded historical play\\\"] option')).map(o=>o.value)",sid);
     const expectedKeys=privateSession.plays.map(play=>
       JSON.stringify([privateSession.game_id,play.play_id]));
@@ -342,7 +343,8 @@ try {
       full_replay_render_count:privateSession.play_count,
       slowest_replay_switch_ms:Math.round(slowestSwitch),
       total_bytes:privateSession.total_bytes,
-      import_wall_ms:Math.round(elapsed),
+      import_wall_ms:Math.round(importElapsed),
+      entire_session_navigation_wall_ms:Math.round(elapsed),
       browser_used_js_heap_bytes:browserMemory,
       source_video_alignment_verified:false,
       model_training_authorized:false,
