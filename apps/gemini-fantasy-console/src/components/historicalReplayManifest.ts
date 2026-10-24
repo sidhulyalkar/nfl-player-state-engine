@@ -1,7 +1,7 @@
 /** Local research bundle verification. Hashes authenticate exported JSON bytes
  * against their selected manifest; they DO NOT authenticate the original NFL CSVs.
  */
-import { parseHistoricalReplay, type HistoricalReplay } from './historicalReplaySchema';
+import { parseHistoricalReplay, type HistoricalReplay } from './historicalReplaySchema.ts';
 
 const sha256Pattern=/^[0-9a-f]{64}$/i;
 const sha1Pattern=/^[0-9a-f]{40}$/i;
