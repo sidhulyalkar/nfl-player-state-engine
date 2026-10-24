@@ -320,3 +320,18 @@ Run the frontend verification suite before merging:
     cd apps/gemini-fantasy-console
     npm run test:field3d
     npm run build
+
+## Shared source charting contract
+
+The game timeline, batch exporter, and historical replay parser now apply
+consistent bounds: season 2000–2100, week 1–22, quarter 1–5, down 1–4 for
+ordinary offensive downs, yards-to-go 0–100, and charted labels up to 120
+characters. An official source down of zero (e.g., special teams) is
+normalized to `null` in the replay because that is **not** an offensive down;
+the game timeline retains its charted zero. Missing values are not guessed.
+
+The synthetic Chromium smoke adds a local manifest/replay pair whose exact
+replay SHA-256 must be verified by Web Crypto. Altering those JSON bytes
+must reject the import atomically without altering the prior research
+playlist. This fixture is deliberately synthetic and is **not** the real
+2017 NFL data qualification.
