@@ -15,6 +15,8 @@ const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? '0.0.0.0';
 const pseBase = (process.env.PSE_API_BASE_URL ?? 'http://127.0.0.1:8000').replace(/\/$/, '');
 const pseTimeoutMs = Number(process.env.PSE_API_TIMEOUT_MS ?? 15_000);
+// Sleeper player-map/roster imports can take longer than ordinary read-only API calls.
+const leagueImportTimeoutMs = Number(process.env.PSE_LEAGUE_IMPORT_TIMEOUT_MS ?? 90_000);
 const sourceDirectory = path.dirname(fileURLToPath(import.meta.url));
 const isProduction = process.env.NODE_ENV === 'production' || process.argv.includes('--production');
 const clientRoot = path.resolve(sourceDirectory, isProduction ? '../..' : '..');
@@ -44,7 +46,8 @@ app.all('/api/pse/*path', async (request, response) => {
       method: request.method,
       headers: { 'Content-Type': 'application/json' },
       body: ['GET', 'HEAD'].includes(request.method) ? undefined : JSON.stringify(request.body),
-      signal: AbortSignal.timeout(pseTimeoutMs),
+      signal: AbortSignal.timeout(request.method==='POST' && targetPath.startsWith('/v1/draft/connections')
+        ? Math.max(pseTimeoutMs,leagueImportTimeoutMs) : pseTimeoutMs),
     });
     response.status(upstream.status);
     response.setHeader('Content-Type', upstream.headers.get('content-type') ?? 'application/json');
