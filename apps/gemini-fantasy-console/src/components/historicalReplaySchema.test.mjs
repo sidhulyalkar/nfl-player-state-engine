@@ -94,3 +94,29 @@ test('audited off-field source exclusions remain visible and validated',()=>{
   clamp.position_quality.never_clamped_or_interpolated=false;
   assert.throws(()=>parseHistoricalReplay(clamp),/observation exclusion audit/);
 });
+
+
+test('source-charted down, personnel and possession metadata must reconcile',()=>{
+  const r=valid();
+  r.possession_team='KC';
+  r.source_play_metadata={
+    provenance:'PINNED_OFFICIAL_PLAYS_AND_GAMES_CSV',
+    season:2017,week:1,home_team:'NE',visitor_team:'KC',
+    possession_team:'KC',offense_side:'away',
+    quarter:1,down:3,yards_to_go:7,
+    offense_formation_charted:'SHOTGUN',
+    offense_personnel_charted:'1 RB, 2 TE, 2 WR',
+  };
+  assert.equal(parseHistoricalReplay(r).source_play_metadata.offense_formation_charted,'SHOTGUN');
+  const team=structuredClone(r);team.source_play_metadata.offense_side='home';
+  assert.throws(()=>parseHistoricalReplay(team),/metadata is internally inconsistent/);
+  const possession=structuredClone(r);possession.possession_team='NE';
+  assert.throws(()=>parseHistoricalReplay(possession),/metadata is internally inconsistent/);
+  const chart=structuredClone(r);chart.source_play_metadata.offense_formation_charted='A'.repeat(91);
+  assert.throws(()=>parseHistoricalReplay(chart),/metadata is internally inconsistent/);
+  const special=structuredClone(r);
+  special.source_play_metadata.down=null;
+  special.source_play_metadata.yards_to_go=null;
+  special.source_play_metadata.offense_formation_charted=null;
+  assert.equal(parseHistoricalReplay(special).source_play_metadata.down,null);
+});

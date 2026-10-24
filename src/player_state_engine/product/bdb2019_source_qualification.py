@@ -167,6 +167,29 @@ def qualify_bdb2019_play(
     )
     if replay["source_file_sha256"] != identities["tracking"]["sha256"]:
         raise ValueError("Tracking CSV mutated after source identity check.")
+    canonical = dict(expectations) == SOURCE_FILES
+    replay["possession_team"] = possession
+    replay["source_play_metadata"] = {
+        "provenance": (
+            "PINNED_OFFICIAL_PLAYS_AND_GAMES_CSV" if canonical
+            else "NONCANONICAL_TEST_FIXTURE"
+        ),
+        "season": season, "week": week,
+        "home_team": home, "visitor_team": away,
+        "possession_team": possession, "offense_side": offense_side,
+        "quarter": quarter, "down": down if 1 <= down <= 4 else None,
+        "yards_to_go": yards_to_go,
+        "offense_formation_charted": (
+            play.get("offenseFormation")
+            if (play.get("offenseFormation") or "").strip().lower() not in {"", "na", "n/a"}
+            else None
+        ),
+        "offense_personnel_charted": (
+            play.get("personnel.offense")
+            if (play.get("personnel.offense") or "").strip().lower() not in {"", "na", "n/a"}
+            else None
+        ),
+    }
     if not replay["frames"]:
         raise ValueError("Source tracking yielded no frames.")
     observed_side: set[str] = set()
@@ -203,7 +226,6 @@ def qualify_bdb2019_play(
             f'{quality["omitted_total_position_rows"]} source x/y observations were excluded '
             "from on-field rendering (missing or out of bounds), not clamped or interpolated."
         )
-    canonical = dict(expectations) == SOURCE_FILES
     if canonical and play_id in KNOWN_TRACKING_PLAY_PROFILES:
         expected = KNOWN_TRACKING_PLAY_PROFILES[play_id]
         actual = {

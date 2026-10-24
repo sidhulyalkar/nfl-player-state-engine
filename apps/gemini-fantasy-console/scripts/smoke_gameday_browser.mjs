@@ -109,6 +109,14 @@ try {
     source:'CI GENERATED FIXTURE; NOT AN ACTUAL NFL PLAY',
     source_license_identifier:'internal-test-fixture-only',
     source_file_sha256:'c'.repeat(64),
+    possession_team:'KC',
+    source_play_metadata:{
+      provenance:'NONCANONICAL_TEST_FIXTURE',season:2017,week:1,
+      home_team:'NE',visitor_team:'KC',possession_team:'KC',offense_side:'away',
+      quarter:1,down:3,yards_to_go:7,
+      offense_formation_charted:'SHOTGUN',
+      offense_personnel_charted:'1 RB, 2 TE, 2 WR',
+    },
     position_quality:{
       policy:'omit_off_field_with_audit',
       omitted_missing_position_rows:0,omitted_off_field_position_rows:1,
@@ -134,6 +142,8 @@ try {
   await until("document.querySelector('.gameday-head h1')?.textContent?.includes('Recorded movement, not reconstructed guesses')",sid,'historical replay UI');
   const researchSource=await until("document.querySelector('.field3d-source')?.textContent?.includes('RECORDED X/Y')",sid,'research mode source badge');
   assert.equal(researchSource,true);
+  assert.equal(await evalPage("document.querySelector('.gameday-charted-meta')?.textContent?.includes('3 & 7')",sid),true,'Source-charted down and distance missing from historical view');
+  assert.equal(await evalPage("document.querySelector('.gameday-charted-meta')?.textContent?.includes('SHOTGUN')",sid),true,'Source-charted formation missing from historical view');
   assert.equal(await evalPage("document.body.textContent?.includes('1 excluded')",sid),true,'Missing source exclusion audit in research interface');
   const resetResearch=await evalPage("(()=>{const b=document.querySelector('button[aria-label=\"Reset replay\"]');b?.click();return !!b})()",sid);
   assert.equal(resetResearch,true);
