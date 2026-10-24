@@ -22,11 +22,14 @@ type PortfolioState = {
   credential_contract: string;
 };
 
+type ApiDiagnostic = {status?:string;python_api_reachable?:boolean;hint?:string|null;detail?:string;code?:string};
+
 async function responseDetail(response: Response) {
   const text = await response.text();
   try {
-    const payload = JSON.parse(text) as { detail?: string };
-    return payload.detail ?? text;
+    const payload = JSON.parse(text) as { detail?: string | object; hint?:string; error?:string; code?:string };
+    const detail = typeof payload.detail==='string' ? payload.detail : JSON.stringify(payload.detail??payload.error??text);
+    return `HTTP ${response.status}: ${detail}${payload.hint&&payload.hint!==detail?' · '+payload.hint:''}`;
   } catch {
     return text || response.statusText;
   }
@@ -43,6 +46,15 @@ export function LeagueOnboardingPanel() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [diagnostic,setDiagnostic] = useState<ApiDiagnostic|null>(null);
+  async function checkApi() {
+    try {
+      const response=await fetch('/api/pse/diagnostics');
+      setDiagnostic(await response.json() as ApiDiagnostic);
+    } catch {
+      setDiagnostic({status:'unreachable',python_api_reachable:false,hint:'Node service diagnostics are unavailable. Check the local frontend server.'});
+    }
+  }
 
   async function refresh() {
     const response = await fetch('/api/pse/v1/draft/connections');
@@ -58,6 +70,7 @@ export function LeagueOnboardingPanel() {
   useEffect(() => {
     void refresh().catch((reason) => {
       setError(reason instanceof Error ? reason.message : 'League connection status unavailable');
+      void checkApi();
       setExpanded(true);
     });
   }, []);
@@ -100,6 +113,7 @@ export function LeagueOnboardingPanel() {
     setBusy(true);
     setError(null);
     setMessage(null);
+    setDiagnostic(null);
     try {
       const response = await fetch('/api/pse/v1/draft/connections', {
         method: 'POST',
@@ -120,6 +134,7 @@ export function LeagueOnboardingPanel() {
       window.setTimeout(() => window.location.reload(), 700);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'League connection failed');
+      void checkApi();
     } finally {
       setBusy(false);
     }
@@ -156,7 +171,8 @@ export function LeagueOnboardingPanel() {
 
       {platform === 'espn' && <div className={`credential-note ${portfolio?.espn_private_auth_configured ? 'configured' : ''}`}><LockKeyhole size={15}/><span>{portfolio?.espn_private_auth_configured ? 'Private ESPN authentication is configured on the API server.' : 'Public ESPN leagues can connect now. Private leagues require PSE_ESPN_S2 and PSE_ESPN_SWID in the server environment.'} No cookie value is accepted by or returned to this browser.</span></div>}
       {message && <div className="connect-message success">{message}</div>}
-      {error && <div className="connect-message error">{error}</div>}
+      {error && <div className="connect-message error" role="alert"><strong>League connection issue</strong><span>{error}</span><button type="button" onClick={()=>void checkApi()}>Check backend health</button></div>}
+      {diagnostic&&<div className="league-api-diagnostic" role="status"><strong>Python API: {diagnostic.python_api_reachable===false?'offline':diagnostic.status??'unknown'}</strong><span>{diagnostic.hint??(diagnostic.python_api_reachable?'The Python API is reachable. Inspect the specific league import error above.':'Start the Python API with scripts/dev-local.sh from the repository root.')}</span><small>Only the local Python service can import Sleeper leagues. The Node development server alone cannot.</small></div>}
     </div>}
   </section>;
 }
