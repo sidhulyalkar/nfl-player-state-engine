@@ -67,3 +67,45 @@ test('three-dimensional replay selection requires matching recorded identity and
   assert.equal(timelineReplayMatch(t.plays[0],catalog,{...replay,source_file_sha256:'e'.repeat(64)}),false);
   assert.equal(timelineReplayMatch(t.plays[0],catalog,{...replay,frame_count:1}),false);
 });
+
+
+test('source-charted replay context must agree with timeline before opening',()=>{
+  const catalog=makeCatalog(),timeline=parseGameTimeline(makeTimeline(),catalog);
+  const play=timeline.plays[0];
+  const replay={
+    game_id:'2017090700',play_id:'4',frame_count:2,missing_frame_count:0,
+    rows:4,source_file_sha256:HEX,possession_team:'NE',
+    source_play_metadata:{
+      season:2017,week:1,home_team:'NE',visitor_team:'KC',
+      possession_team:'NE',offense_side:'home',
+      quarter:1,down:1,yards_to_go:8,offense_formation_charted:'SHOTGUN',
+      offense_personnel_charted:null,
+    },
+  };
+  assert.equal(timelineReplayMatch(play,catalog,replay,timeline),true);
+  for(const [key,value] of [
+    ['possession_team','KC'],['quarter',2],['down',3],
+    ['yards_to_go',10],['offense_formation_charted','PISTOL'],
+    ['season',2018],['home_team','KC'],['week',3],
+  ]){
+    const changed=structuredClone(replay);
+    changed.source_play_metadata[key]=value;
+    assert.equal(timelineReplayMatch(play,catalog,changed,timeline),false,key);
+  }
+  assert.equal(timelineReplayMatch(play,catalog,{...replay,possession_team:'KC'},timeline),false);
+  assert.equal(timelineReplayMatch(play,catalog,{...replay,rows:99},timeline),false);
+});
+
+test('timeline special-teams down zero matches replay null, not guessed normal down',()=>{
+  const catalog=makeCatalog(),source=makeTimeline();
+  source.plays[0].down=0;
+  const timeline=parseGameTimeline(source,catalog),play=timeline.plays[0];
+  const replay={game_id:'2017090700',play_id:'4',frame_count:2,missing_frame_count:0,
+    source_file_sha256:HEX,
+    source_play_metadata:{season:2017,week:1,home_team:'NE',visitor_team:'KC',
+      possession_team:'NE',offense_side:'home',quarter:1,down:null,yards_to_go:8,
+      offense_formation_charted:'SHOTGUN',offense_personnel_charted:null}};
+  assert.equal(timelineReplayMatch(play,catalog,replay,timeline),true);
+  assert.equal(timelineReplayMatch(play,catalog,{...replay,
+    source_play_metadata:{...replay.source_play_metadata,down:1}},timeline),false);
+});
