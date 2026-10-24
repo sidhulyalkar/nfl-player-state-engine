@@ -1,6 +1,6 @@
 # Recorded Game Timeline v1 (source-verified historical metadata)
 
-**Status:** stacked development branch on historical play catalog PR #101. Research-only. No live tracking, fabricated drives, fantasy grading or source redistribution.
+**Status:** integrated draft research workspace PR #109. Synthetic CI qualified only until official-source, end-to-end browser evidence is recorded. Research-only; no live tracking, fabricated drives, fantasy grading or source redistribution.
 
 ## Why
 
@@ -79,3 +79,20 @@ actual user-supplied source files, and original-video alignment remains pending.
 
 This implementation does not change any NFL projection, model serving,
 scoring, lineup, or fantasy champion-selection authority.
+
+## Replay-to-timeline consistency gate
+
+When a recorded replay contains source-charted play context, opening it from
+the game timeline now also requires its possession, offense side, quarter,
+down, yards-to-go, formation and personnel declarations to agree with the
+timeline. Season, week, and home/visitor teams must agree as well. A replay
+without source-charted context retains the weaker legacy identity/frame
+matching behavior; it is **not** upgraded to verified metadata.
+
+Special-teams `down=0` in the official game timeline is represented as
+`down=null` (unavailable) in normalized replay metadata. This does not
+invent an offensive down. Any contradiction hides the open-replay action
+rather than overwriting original evidence.
+
+This is cross-file consistency, **not** independent authentication of the
+NFL source CSVs or proof of coverage or tactical decisions.
