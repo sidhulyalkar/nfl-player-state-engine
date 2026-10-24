@@ -273,6 +273,8 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: apps/gemini-fantasy-console/package-lock.json
+      - name: Verify macOS/Linux/Windows native npm lock entries
+        run: node ../../scripts/check_workspace_native_lock.mjs
       - run: npm ci
       - name: Install Rollup Linux native binary
         run: |
