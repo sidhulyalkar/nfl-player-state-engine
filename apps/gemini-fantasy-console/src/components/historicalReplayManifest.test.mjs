@@ -76,7 +76,7 @@ test('raw-byte edits are rejected even when JSON is parseable',async()=>{
 });
 test('coherently rehashed but semantically conflicting replay fails closed',async()=>{
   const {manifest,filename}=fixture();
-  const corrupted=replay();corrupted.possession_team='NE';
+  const corrupted=replay();corrupted.source_license_identifier='different fixture declaration';
   const bytes=encode(corrupted);
   manifest.plays[0].sha256=createHash('sha256').update(bytes).digest('hex');
   await assert.rejects(
