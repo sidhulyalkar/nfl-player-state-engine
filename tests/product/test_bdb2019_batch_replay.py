@@ -195,7 +195,7 @@ def test_requires_source_terms_and_all_metadata(tmp_path: Path) -> None:
     (",1,3,7,", ",7,3,7,", "Out-of-range source quarter"),
     (",1,3,7,", ",1,0,7,", "Out-of-range source down"),
     (",1,3,7,", ",1,5,7,", "Out-of-range source down"),
-    (",1,3,7,", ",1,3,100,", "Out-of-range source yards to go"),
+    (",1,3,7,", ",1,3,101,", "Out-of-range source yards to go"),
 ])
 def test_invalid_source_charting_rolls_back_batch(
     tmp_path: Path, old: str, new: str, message: str
@@ -216,8 +216,42 @@ def test_oversized_source_charted_label_rejects_entire_batch(tmp_path: Path) -> 
     plays = root / "plays.csv"
     original = plays.read_text()
     assert "SHOTGUN" in original
-    plays.write_text(original.replace("SHOTGUN", "X" * 91, 1))
+    plays.write_text(original.replace("SHOTGUN", "X" * 121, 1))
     out = tmp_path / "bad-label"
-    with pytest.raises(ValueError, match="Source charted label exceeds 90 characters"):
+    with pytest.raises(ValueError, match="Source charted label exceeds 120 characters"):
         _export(root, out, _hashes(root))
     assert not out.exists()
+
+
+def test_special_teams_down_zero_is_explicitly_unavailable(tmp_path: Path) -> None:
+    root, _ = _source(tmp_path)
+    source = root / "plays.csv"
+    original = source.read_text()
+    assert ",1,3,7," in original
+    source.write_text(original.replace(",1,3,7,", ",1,0,7,", 1))
+    result = _export(root, tmp_path / "special-teams", _hashes(root))
+    assert result["play_count"] == 2
+    replay = json.loads(
+        (tmp_path / "special-teams" / "2017090700-938-research-replay.json").read_text()
+    )
+    assert replay["source_play_metadata"]["down"] is None
+    assert replay["source_play_metadata"]["yards_to_go"] == 7
+
+
+def test_charted_distance_hundred_and_long_personnel_match_viewer_limits(
+    tmp_path: Path,
+) -> None:
+    root, _ = _source(tmp_path)
+    source = root / "plays.csv"
+    original = source.read_text()
+    assert ",1,3,7," in original
+    source.write_text(
+        original.replace(",1,3,7,", ",1,3,100,", 1)
+        .replace("SHOTGUN", "X" * 120, 1)
+    )
+    _export(root, tmp_path / "edge", _hashes(root))
+    replay = json.loads(
+        (tmp_path / "edge" / "2017090700-938-research-replay.json").read_text()
+    )
+    assert replay["source_play_metadata"]["yards_to_go"] == 100
+    assert len(replay["source_play_metadata"]["offense_formation_charted"]) == 120
