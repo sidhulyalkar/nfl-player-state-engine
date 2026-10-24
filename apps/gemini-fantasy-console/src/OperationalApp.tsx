@@ -35,6 +35,9 @@ const surfaces: Array<{ key: Surface; label: string; description: string }> = [
 ];
 
 const surfaceKeys = new Set<Surface>(surfaces.map((item) => item.key));
+const primaryKeys = new Set<Surface>(['draft','sunday','gameday','league']);
+const primarySurfaces = surfaces.filter(item=>primaryKeys.has(item.key));
+const researchSurfaces = surfaces.filter(item=>!primaryKeys.has(item.key));
 
 function readWorkspaceRoute(): WorkspaceRoute {
   if (typeof window === 'undefined') return { surface: 'draft' };
@@ -72,8 +75,19 @@ export default function OperationalApp() {
   return <div className="workspace-root">
     <nav className="workspace-switcher" aria-label="Modelling workspace">
       <div className="workspace-identity"><div>4D</div><span><strong>Fourth Down Lab</strong><small>modelling workspace</small></span></div>
-      <div className="workspace-tabs">{surfaces.map((item) => <button key={item.key} className={route.surface === item.key ? 'active' : ''} onClick={() => navigate(item.key)}><strong>{item.label}</strong><small>{item.description}</small></button>)}</div>
-      <div className="workspace-status"><i/><span>Server-side model truth</span></div>
+      <div className="workspace-tabs">
+        {primarySurfaces.map(item=><button key={item.key} type="button" aria-current={route.surface===item.key?'page':undefined} className={route.surface===item.key?'active':''} onClick={()=>navigate(item.key)}><strong>{item.label}</strong><small>{item.description}</small></button>)}
+      </div>
+      <div className="workspace-secondary">
+        <details className="workspace-more" key={route.surface}>
+          <summary className={researchSurfaces.some(item=>item.key===route.surface)?'active':''} aria-label="Explore additional workspaces">Explore <span aria-hidden="true">▾</span></summary>
+          <div className="workspace-more-menu">
+            <p>Research and league intelligence</p>
+            {researchSurfaces.map(item=><button key={item.key} type="button" aria-current={route.surface===item.key?'page':undefined} className={route.surface===item.key?'active':''} onClick={()=>navigate(item.key)}><strong>{item.label}</strong><small>{item.description}</small></button>)}
+          </div>
+        </details>
+        <span className="workspace-source-status" title="Individual data surfaces report their own source reliability">Source-aware</span>
+      </div>
     </nav>
     <div className="workspace-surface">
       {route.surface === 'draft' && <><LeagueOnboardingPanel/><DraftLaunchPanel/><DraftDayDoctorBanner/><DraftDecisionConsole onOpenConsole={() => navigate('league')} /></>}
