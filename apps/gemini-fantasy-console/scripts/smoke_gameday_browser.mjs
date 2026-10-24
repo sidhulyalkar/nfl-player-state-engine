@@ -2,6 +2,7 @@
 /** Zero-dependency Chrome DevTools rendering smoke for built Fourth Down Lab. */
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
+import {inspectPrivateResearchSession} from './privateResearchSession.mjs';
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -273,6 +274,72 @@ try {
 
 
   console.log('PASS: real WebGL2 + 2D switch + synthetic CI replay import + recorded frame stepping + travel disclosure.');
+
+  // Opt-in private, complete batch verification. CDP sets the *local* file
+  // input directly: no HTTP upload, no serialized tracking bytes in messages,
+  // no real-source screenshots, and no raw source included in output logs.
+  if(process.env.PLAYLAB_REAL_SESSION_DIR){
+    if(process.env.PLAYLAB_SOURCE_TERMS_ACKNOWLEDGED!=='yes' ||
+      !process.env.PLAYLAB_SOURCE_LICENSE_ID)
+      throw new Error('Local source-use terms must be explicitly reviewed and acknowledged.');
+    const expected=Number(process.env.PLAYLAB_EXPECTED_PLAYS||'12');
+    if(!Number.isSafeInteger(expected)||expected<1||expected>12)
+      throw new Error('Expected local play count must be between 1 and 12.');
+    const privateSession=await inspectPrivateResearchSession(
+      process.env.PLAYLAB_REAL_SESSION_DIR,{
+        expectedPlayCount:expected,
+        licenseIdentifier:process.env.PLAYLAB_SOURCE_LICENSE_ID,
+      },
+    );
+    const returned=await evalPage("(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent?.includes('Return to demo'));b?.click();return !!b})()",sid);
+    assert.equal(returned,true,'Cannot return to demo for private research session');
+    await until("document.querySelector('.gameday-head h1')?.textContent?.includes('See the game beneath the game')",sid,'private import starting view');
+    const doc=await send('DOM.getDocument',{depth:1},sid);
+    const query=await send('DOM.querySelector',{
+      nodeId:doc.root.nodeId,
+      selector:'.gameday-history-actions input[type=file][multiple]',
+    },sid);
+    assert.ok(query.nodeId,'Private research file input is missing');
+    const started=performance.now();
+    await send('DOM.setFileInputFiles',{
+      files:[privateSession.manifest_file,...privateSession.replay_files],
+      nodeId:query.nodeId,
+    },sid);
+    await evalPage("document.querySelector('.gameday-history-actions input[type=file][multiple]')?.dispatchEvent(new Event('change',{bubbles:true}))",sid);
+    let complete=false;
+    for(let attempt=0;attempt<180;attempt++){
+      const result=await evalPage("(()=>({importing:document.querySelector('.gameday-history-actions')?.textContent?.includes('Importing'),historical:document.querySelector('.gameday-head h1')?.textContent?.includes('Recorded movement, not reconstructed guesses'),verified:document.querySelector('.gameday-history-meta')?.textContent?.includes('SHA-256 matches selected manifest'),options:document.querySelectorAll('select[aria-label=\\\"Select loaded historical play\\\"] option').length,error:document.querySelector('[role=\\\"alert\\\"]')?.textContent||null}))()",sid);
+      if(result?.error)throw new Error('Local manifest import failed: '+result.error);
+      if(result?.historical&&result.verified&&result.options>=privateSession.play_count+2){
+        complete=true;break;
+      }
+      await sleep(500);
+    }
+    assert.equal(complete,true,'Private session did not become available in Chromium');
+    const loadedOptions=await evalPage("Array.from(document.querySelectorAll('select[aria-label=\\\"Select loaded historical play\\\"] option')).map(o=>o.value)",sid);
+    for(const play of privateSession.plays)
+      assert.ok(loadedOptions.some(value=>value.includes(play.play_id)),
+        'Missing locally imported replay '+play.play_id);
+    const elapsed=performance.now()-started;
+    const browserMemory=await evalPage("performance.memory?.usedJSHeapSize??null",sid);
+    const redacted={
+      qualification:'LOCAL_BROWSER_RESEARCH_SESSION',
+      status:'PASS_BROWSER_FILE_AND_MANIFEST_CONSISTENCY_ONLY',
+      play_count:privateSession.play_count,
+      total_bytes:privateSession.total_bytes,
+      import_wall_ms:Math.round(elapsed),
+      browser_used_js_heap_bytes:browserMemory,
+      source_video_alignment_verified:false,
+      model_training_authorized:false,
+      commercial_reuse_authorized:false,
+      note:'Original source-byte authorization and film alignment are separate gates.',
+    };
+    if(process.env.PLAYLAB_LOCAL_REPORT_PATH){
+      const target=path.resolve(process.env.PLAYLAB_LOCAL_REPORT_PATH);
+      await writeFile(target,JSON.stringify(redacted,null,2)+'\\n',{flag:'wx',mode:0o600});
+    }
+    console.log('PASS: PRIVATE browser session: '+JSON.stringify(redacted));
+  }
 
   // Optional local source-data check. Never exercised by push/PR CI:
   // PLAYLAB_REAL_REPLAY_PATH must be a user-authorized local research file.
