@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runCopilot } from './gemini.js';
+import { proxyFailure } from './proxyDiagnostics.js';
 
 try {
   process.loadEnvFile();
@@ -12,7 +13,7 @@ try {
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? '0.0.0.0';
-const pseBase = process.env.PSE_API_BASE_URL ?? 'http://localhost:8000';
+const pseBase = (process.env.PSE_API_BASE_URL ?? 'http://127.0.0.1:8000').replace(/\/$/, '');
 const pseTimeoutMs = Number(process.env.PSE_API_TIMEOUT_MS ?? 15_000);
 const sourceDirectory = path.dirname(fileURLToPath(import.meta.url));
 const isProduction = process.env.NODE_ENV === 'production' || process.argv.includes('--production');
@@ -20,6 +21,21 @@ const clientRoot = path.resolve(sourceDirectory, isProduction ? '../..' : '..');
 const clientDist = path.join(clientRoot, 'dist');
 
 app.use(express.json({ limit: '2mb' }));
+
+app.get('/api/pse/diagnostics', async (_request, response) => {
+  try {
+    const upstream = await fetch(`${pseBase}/health`, {signal:AbortSignal.timeout(Math.min(4000,pseTimeoutMs))});
+    const body = await upstream.json() as {status?:string;projection_source_mode?:string;projection_integrity_verified?:boolean};
+    response.status(upstream.ok?200:503).json({
+      status:upstream.ok?(body.status==='degraded'?'degraded':'reachable'):'unhealthy',
+      python_api_reachable:true,
+      python_http_status:upstream.status,
+      model_source_mode:body.projection_source_mode??null,
+      projection_integrity_verified:body.projection_integrity_verified??null,
+      hint:body.status==='degraded'?'API reachable, but projection artifacts need qualification. League metadata imports can still be investigated separately.':null,
+    });
+  } catch(error){response.status(503).json({status:'offline',python_api_reachable:false,...proxyFailure(error)});}
+});
 
 app.all('/api/pse/*path', async (request, response) => {
   try {
@@ -34,10 +50,7 @@ app.all('/api/pse/*path', async (request, response) => {
     response.setHeader('Content-Type', upstream.headers.get('content-type') ?? 'application/json');
     response.send(await upstream.text());
   } catch (error) {
-    response.status(502).json({
-      error: 'Player State Engine unavailable',
-      detail: error instanceof Error ? error.message : 'Upstream request failed',
-    });
+    response.status(502).json(proxyFailure(error));
   }
 });
 
