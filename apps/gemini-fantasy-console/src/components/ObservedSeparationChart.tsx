@@ -15,6 +15,16 @@ export function ObservedSeparationChart({frames,selectedId,time}:{
   const yMax=Math.max(1,Math.ceil((summary.farthest_yards??1)/2)*2);
   const x=(t:number)=>35+(t-first)/duration*465;
   const y=(distance:number)=>139-distance/yMax*108;
+  // Expensive geometry is stable while the playback cursor updates at 60 Hz.
+  const paths=useMemo(()=>segments.map((seg,i)=>({
+    key:i,
+    points:seg.map(sample=>
+      (35+(sample.t_seconds_nominal-first)/duration*465).toFixed(2)+','+
+      (139-sample.distance_yards!/yMax*108).toFixed(2)).join(' '),
+    single:seg.length===1,
+    cx:35+(seg[0].t_seconds_nominal-first)/duration*465,
+    cy:139-seg[0].distance_yards!/yMax*108,
+  })),[segments,first,duration,yMax]);
   return <section className="gameday-panel" aria-label="Observed nearest opponent separation">
     <div className="gameday-aside-heading"><div><h2>Observed proximity timeline</h2></div></div>
     <p className="gameday-muted">Field-space distance to the nearest *recorded opposing player* by source frame. Opponent identity may change. No assigned coverage or tactical grade.</p>
@@ -29,14 +39,10 @@ export function ObservedSeparationChart({frames,selectedId,time}:{
             {(yMax*fraction).toFixed(1)}
           </text>
         </g>)}
-        {segments.map((seg,i)=>{
-          const points=seg.map(s=>x(s.t_seconds_nominal).toFixed(2)+','+y(s.distance_yards!).toFixed(2)).join(' ');
-          return seg.length===1?
-            <circle key={i} cx={x(seg[0].t_seconds_nominal)} cy={y(seg[0].distance_yards!)}
-              r="2.7" fill="#90e5cd"/>:
-            <polyline key={i} points={points} fill="none" stroke="#90e5cd" strokeWidth="2.4"
-              strokeLinejoin="round" strokeLinecap="round"/>;
-        })}
+        {paths.map(path=>path.single?
+          <circle key={path.key} cx={path.cx} cy={path.cy} r="2.7" fill="#90e5cd"/>:
+          <polyline key={path.key} points={path.points} fill="none" stroke="#90e5cd" strokeWidth="2.4"
+            strokeLinejoin="round" strokeLinecap="round"/>)}
         <line x1={x(Math.min(last,Math.max(first,time)))} y1="18"
           x2={x(Math.min(last,Math.max(first,time)))} y2="142"
           stroke="#f6d18c" strokeWidth="1.4" strokeDasharray="4 4"/>
