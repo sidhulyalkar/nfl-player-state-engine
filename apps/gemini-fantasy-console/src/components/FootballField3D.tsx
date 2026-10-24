@@ -402,15 +402,15 @@ export function FootballField3D(props:Props) {
     let id=0,last=0;
     const tick=(now:number)=>{
       const dt=last?(now-last)/1000:1/60;last=now;
-      let finished=false;
-      setOrbit(old=>{
-        const target=smoothOrbitTarget(old.target,cue.target,dt);
-        const alpha=1-Math.exp(-3.4*clamp(dt,0,.1));
-        const distance=old.distance+(cue.distance-old.distance)*alpha;
-        finished=Math.hypot(target[0]-cue.target[0],target[2]-cue.target[2])<.02
-          &&Math.abs(distance-cue.distance)<.05;
-        return finished?{...old,target:cue.target,distance:cue.distance}:{...old,target,distance};
-      });
+      const old=orbitRef.current;
+      const target=smoothOrbitTarget(old.target,cue.target,dt);
+      const alpha=1-Math.exp(-3.4*clamp(dt,0,.1));
+      const distance=old.distance+(cue.distance-old.distance)*alpha;
+      const finished=Math.hypot(target[0]-cue.target[0],target[2]-cue.target[2])<.02
+        &&Math.abs(distance-cue.distance)<.05;
+      const next={...old,target:finished?cue.target:target,distance:finished?cue.distance:distance};
+      orbitRef.current=next;
+      setOrbit(next);
       if(!finished)id=requestAnimationFrame(tick);
     };
     id=requestAnimationFrame(tick);
