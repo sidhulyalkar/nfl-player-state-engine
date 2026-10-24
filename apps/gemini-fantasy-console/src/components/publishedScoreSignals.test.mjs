@@ -41,3 +41,8 @@ test('source identity failure never emits commentary',()=>{
   newBoard.source.integrity_verified=false;
   assert.deepEqual(publishedScoreSignals(board(first,0,0),newBoard),[]);
 });
+
+test('invalid publication timestamps cannot create false fresh commentary',()=>{
+  assert.deepEqual(publishedScoreSignals(board('not-a-date',0,0),board(second,7,0)),[]);
+  assert.deepEqual(publishedScoreSignals(board(first,0,0),board('not-a-date',7,0)),[]);
+});
