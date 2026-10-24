@@ -9,6 +9,7 @@ import { displayClock, frameAtTime, stepFrame } from './trackingTimeline';
 import { type HistoricalReplay } from './historicalReplaySchema';
 import { replayKey, replayLabel } from './historicalReplayLibrary';
 import { ObservedSeparationChart } from './ObservedSeparationChart';
+import { FrameEvidenceRibbon } from './FrameEvidenceRibbon';
 export { parseHistoricalReplay } from './historicalReplaySchema';
 export type { HistoricalReplay } from './historicalReplaySchema';
 type Angle = 'broadcast' | 'all22' | 'overhead';
@@ -214,6 +215,7 @@ export function HistoricalReplayPanel({
         </div>
       </section>
       <aside className="gameday-sidebar">
+        <FrameEvidenceRibbon replay={replay} time={time}/>
         <ObservedSeparationChart frames={replay.frames} selectedId={focus} time={time}/>
         <div className="gameday-panel">
           <div className="gameday-aside-heading"><div><Activity size={17}/><h2>Formation geometry</h2></div></div>
