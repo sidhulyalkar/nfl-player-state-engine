@@ -54,10 +54,14 @@ def _positive(value: str | None, label: str, *, optional: bool = False) -> int |
         raise ValueError("Invalid source " + label) from exc
     # Keep exporter output within the viewer's HistoricalSourcePlayMetadata
     # contract. Optional fields may be absent, never silently out of range.
+    # Official special-teams records may chart down=0. A replay represents
+    # that as unavailable, not as an offensive down or an invalid source.
+    if label == "down" and optional and number == 0:
+        return None
     ranges = {
-        "season": (2000, 2100), "week": (1, 30),
-        "quarter": (1, 6), "down": (1, 4),
-        "yards to go": (0, 99),
+        "season": (2000, 2100), "week": (1, 22),
+        "quarter": (1, 5), "down": (1, 4),
+        "yards to go": (0, 100),
     }
     lower, upper = ranges.get(label, (0, 2**31 - 1))
     if not lower <= number <= upper:
@@ -105,8 +109,8 @@ def _nullable_label(value: str | None) -> str | None:
     if value is None or value.strip().lower() in {"", "na", "n/a", "null", "none"}:
         return None
     label = value.strip()
-    if len(label) > 90:
-        raise ValueError("Source charted label exceeds 90 characters.")
+    if len(label) > 120:
+        raise ValueError("Source charted label exceeds 120 characters.")
     return label
 
 
