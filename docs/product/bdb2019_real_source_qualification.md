@@ -233,3 +233,60 @@ NOT cryptographically recomputed there against the 31 MB original source.
 The local Python generator requires the original pinned Git object bytes
 before declaring its source. Never publish raw tracking as a demo asset or
 label catalog-only summaries as reconstructed NFL player coordinates.
+
+
+## Batch qualification: open up to 12 source-verified plays in one pass
+
+The single-play CLI above still works. For repeated comparison, the batch
+exporter avoids rescanning and hashing the full 31 MB original file for each
+selected play. It verifies all **three pinned source CSVs**, reconciles the
+play IDs and official possession teams, partitions selected rows during a
+single CSV scan, then reuses the existing audited replay adapter.
+
+After independently reviewing applicable terms and placing the original
+NFL files in your private `data/external/bdb2019-private/` directory:
+
+    python scripts/export_bdb2019_replay_batch.py \
+      --source-dir data/external/bdb2019-private \
+      --output-dir /tmp/pse-nfl-2017-session-new \
+      --play-id 938 \
+      --play-id 2756 \
+      --play-id 3725 \
+      --play-id 4429 \
+      --license-id "ACTUAL_SOURCE_TERMS_IDENTIFIER_YOU_REVIEWED" \
+      --acknowledge-source-terms
+
+The `--output-dir` path must **not already exist**. The exporter stages
+everything in a sibling temporary directory and creates the final directory
+only after all selected replays pass integrity and source-role checks.
+A malformed, missing or conflicting play means **no session is produced**.
+At most 12 distinct ASCII-numeric play IDs are accepted per batch; each is
+limited to 25,000 original rows, with a 400,000-row source scan cap.
+
+The output contains one `<game>-<play>-research-replay.json` per play and
+a `manifest.json` with each output's SHA-256, frame/position counts,
+source-file identities, and research-only disclaimers. No filtered raw CSVs
+remain in the final directory. No positions are committed to the repo,
+uploaded to a server, or incorporated into the production prediction model.
+
+Each replay keeps its full original *tracking-file* SHA-256, not the hash
+of its temporary selected-row CSV. The exact official `games.csv` and
+`plays.csv` records are joined to derive `possession_team`,
+`offense_side`, and the source-charted quarter, down, yards-to-go,
+offense formation and personnel. The 3D viewer displays those fields in
+a dedicated charting strip, explicitly **not** as inferred coaching tactics.
+
+The source hashes are checked once before reading and again before the
+batch directory is committed. The additional temporary filtered CSV
+files are destroyed at the end of execution. The program does not grant
+distribution, commercial use, live data access, or source-video alignment.
+
+Some special teams entries have unavailable `down`, `yardsToGo`, or
+`offenseFormation` metadata. These remain null and are displayed as
+unavailable rather than guessed. The batch does require an explicit
+home/visitor possession mapping for each selected play.
+
+The four replay JSONs can then be multi-selected through **Load historical
+replay JSON(s)**. If a local 177-play catalog is loaded, its play IDs can be
+searched first, followed by exporting the selected play IDs using the
+same batch command.
