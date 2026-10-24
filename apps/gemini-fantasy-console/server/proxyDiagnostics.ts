@@ -9,7 +9,7 @@ export interface ProxyFailure {
 }
 export function proxyFailure(error:unknown):ProxyFailure {
   const message=error instanceof Error?error.message:String(error);
-  const code= /timeout|abort/i.test(message)
+  const code= /timeout|timed out|abort/i.test(message)
     ? 'PSE_UPSTREAM_TIMEOUT'
     : /ECONNREFUSED|fetch failed|ENOTFOUND|EHOSTUNREACH|ECONNRESET/i.test(message)
       ? 'PSE_UPSTREAM_OFFLINE' : 'PSE_UPSTREAM_UNAVAILABLE';
