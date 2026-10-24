@@ -12,7 +12,7 @@
     "preview": "vite preview",
     "server": "tsx server/index.ts",
     "start": "node dist-server/server/index.js --production",
-    "test:field3d": "node --experimental-strip-types --test src/components/football3dMath.test.mjs src/components/trackingMotion.test.mjs src/components/historicalReplaySchema.test.mjs src/components/trackingTimeline.test.mjs src/components/playerTravelGeometry.test.mjs src/components/historicalReplayLibrary.test.mjs src/components/historicalPlayCatalog.test.mjs"
+    "test:field3d": "node --experimental-strip-types --test src/components/football3dMath.test.mjs src/components/trackingMotion.test.mjs src/components/historicalReplaySchema.test.mjs src/components/trackingTimeline.test.mjs src/components/playerTravelGeometry.test.mjs src/components/historicalReplayLibrary.test.mjs src/components/historicalPlayCatalog.test.mjs src/components/playCameraDirector.test.mjs server/proxyDiagnostics.test.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.0.0",
