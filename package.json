@@ -14,6 +14,7 @@
     "start": "npm run frontend:start",
     "frontend:dev": "npm run dev --workspace pse-gemini-fantasy-console",
     "frontend:build": "npm run build --workspace pse-gemini-fantasy-console",
-    "frontend:start": "npm run start --workspace pse-gemini-fantasy-console"
+    "frontend:start": "npm run start --workspace pse-gemini-fantasy-console",
+    "dev:full": "bash scripts/dev-local.sh"
   }
 }
