@@ -8,6 +8,7 @@ import { displayClock, frameAtTime, stepFrame } from './trackingTimeline';
 
 import { type HistoricalReplay } from './historicalReplaySchema';
 import { replayKey, replayLabel } from './historicalReplayLibrary';
+import { recordedCameraCue } from './playCameraDirector';
 export { parseHistoricalReplay } from './historicalReplaySchema';
 export type { HistoricalReplay } from './historicalReplaySchema';
 type Angle = 'broadcast' | 'all22' | 'overhead';
@@ -43,6 +44,8 @@ export function HistoricalReplayPanel({
   const [showMotion,setShowMotion]=useState(true);
   const [showSnap,setShowSnap]=useState(true);
   const [focus,setFocus]=useState<string|null>(null);
+  const [showRail,setShowRail]=useState(true);
+  const [showCommentary,setShowCommentary]=useState(true);
   const duration=replay.frames[replay.frames.length-1].t_seconds_nominal;
   const snapFrame=useMemo(()=>{const i=sourceSnapIndex(replay.frames);return i<0?null:replay.frames[i];},[replay]);
   const snapPlayers=useMemo<Field3DPlayer[]>(()=>snapFrame?snapFrame.players.filter(p=>p.nfl_id).map(p=>({
@@ -53,6 +56,8 @@ export function HistoricalReplayPanel({
   const currentIndex=timeline.index;
   const sourceGap=timeline.is_gap;
   const frame=replay.frames[currentIndex];
+  const directorCue=useMemo(()=>recordedCameraCue(frame,sourceGap,focus),[frame,sourceGap,focus]);
+  const currentEvent=sourceGap?null:frame.events.find(e=>e.trim().length>0)??null;
   const measuredMotion=useMemo(()=>motionAtFrame(replay.frames,currentIndex),[replay,currentIndex]);
   const currentMotion=sourceGap?null:measuredMotion.find(p=>p.nfl_id===focus);
   const offenseNow=useMemo(()=>formationFootprint(frame.players,'offense'),[frame]);
@@ -108,7 +113,7 @@ export function HistoricalReplayPanel({
     }
     return result;
   },[frame,replay,start,currentIndex,trails,camera]);
-  return <main className="gameday-page">
+  return <main className={'gameday-page gameday-theater '+(!showRail?'gameday-theater-expanded':'')}>
     <header className="gameday-head">
       <div><div className="gameday-kicker"><Activity size={15}/> FOURTH DOWN LAB / HISTORICAL TRACKING</div><h1>Recorded movement, not reconstructed guesses.</h1><p>Game {replay.game_id} · play {replay.play_id} · recorded historical tracking</p></div>
       <div className="gameday-history-actions">
@@ -125,6 +130,7 @@ export function HistoricalReplayPanel({
     {importError&&<div className="gameday-import-error" role="alert">{importError}</div>}
     <div className="gameday-layout">
       <section className="gameday-main">
+        <div className="gameday-theater-topline"><span>RECORDED FOOTBALL REPLAY · FRAME {frame.frame_id}</span><div><button type="button" aria-pressed={showCommentary} onClick={()=>setShowCommentary(v=>!v)}>{showCommentary?'Hide insights':'Show insights'}</button><button type="button" aria-pressed={showRail} onClick={()=>setShowRail(v=>!v)}>{showRail?'Expand field':'Show analysis rail'}</button></div></div>
         <div className="gameday-history-meta"><span><CheckCircle2 size={14}/> Recorded x/y coordinates</span><span>{replay.frame_count} frames</span><span>{replay.missing_frame_count} missing frames</span><span>Direction: {replay.play_direction ?? 'unknown'}</span></div>
         {replay.source_play_metadata&&<div className="gameday-charted-meta" aria-label="Source-declared play charting">
           <div><span>Game / possession</span><strong>{replay.source_play_metadata.visitor_team} @ {replay.source_play_metadata.home_team} · {replay.source_play_metadata.possession_team} ball</strong></div>
@@ -135,7 +141,7 @@ export function HistoricalReplayPanel({
         </div>}
         <div className="gameday-field-shell">
           <div className="gameday-toolbar"><strong>Source positions only · no inferred coverage</strong><div className="gameday-display-options"><button aria-label="Use three dimensional recorded field" aria-pressed={renderMode==='3d'} className={renderMode==='3d'?'selected':''} onClick={()=>setRenderMode('3d')}>3D Field</button><button aria-label="Use two dimensional fallback field" aria-pressed={renderMode==='2d'} className={renderMode==='2d'?'selected':''} onClick={()=>setRenderMode('2d')}>2D Field</button><select aria-label="Historical replay camera" value={camera} onChange={e=>setCamera(e.target.value as Angle)}><option value="broadcast">Broadcast angle</option><option value="all22">All-22 perspective</option><option value="overhead">Overhead</option></select></div></div>
-          {renderMode==='3d' ? <FootballField3D key={replay.game_id+':'+replay.play_id} players={sourceGap?[]:scenePlayers} ball={!sourceGap&&frame.ball?{x:frame.ball.x,y:frame.ball.y}:null} trails={sceneTrails} selectedId={focus} onSelect={setFocus} preset={camera} focus={fieldFocus} showLabels={labels} showTrails={trails} showNearest={showNearest} showMotion={showMotion&&!sourceGap} motion={sourceGap?[]:sceneMotion} snapPlayers={snapPlayers} showSnap={showSnap} onUnsupported={()=>setRenderMode('2d')} /> : <svg className="gameday-field" viewBox="0 0 1040 590" role="img" aria-label="Recorded historical player tracking in a projected field">
+          {renderMode==='3d' ? <FootballField3D key={replay.game_id+':'+replay.play_id} directorActive directorCue={directorCue} players={sourceGap?[]:scenePlayers} ball={!sourceGap&&frame.ball?{x:frame.ball.x,y:frame.ball.y}:null} trails={sceneTrails} selectedId={focus} onSelect={setFocus} preset={camera} focus={fieldFocus} showLabels={labels} showTrails={trails} showNearest={showNearest} showMotion={showMotion&&!sourceGap} motion={sourceGap?[]:sceneMotion} snapPlayers={snapPlayers} showSnap={showSnap} onUnsupported={()=>setRenderMode('2d')} /> : <svg className="gameday-field" viewBox="0 0 1040 590" role="img" aria-label="Recorded historical player tracking in a projected field">
             <rect width="1040" height="590" fill="#0b1420"/>
             <polygon points={quad(0,120,camera)} fill="#17473b" stroke="#a3d8ba" strokeWidth="2"/>
             <polygon points={quad(0,10,camera)} fill="#4ea9ac" opacity=".25"/>
@@ -177,6 +183,7 @@ export function HistoricalReplayPanel({
             <text x="33" y="45" fill="#e8f4f6" fontSize="12" letterSpacing="1.5">SOURCE FRAMES · {frame.frame_id}</text>
             <text x="33" y="65" fill="#a3bbbf" fontSize="11">Ball elevation unavailable; movement is NOT interpolated.</text>
           </svg>}
+          {showCommentary&&<div className="gameday-director-commentary" role="status" aria-live="off"><span>REPLAY DIRECTOR · {sourceGap?'EVIDENCE GAP':directorCue?.evidence.replaceAll('_',' ')??'NO SPATIAL ANCHOR'}</span><strong>{sourceGap?'Recorded tracking unavailable at this timestamp':currentEvent?'Source event: '+currentEvent.replaceAll('_',' '):focused?'Selected observation: '+(focused.name??focused.nfl_id):'Following recorded field observations'}</strong><small>{sourceGap?'Camera holds its last verified position. No player or ball movement is fabricated.':nearest&&focused?`Nearest observed opponent ${nearest.distance.toFixed(1)} yd away. This is distance, not a coverage assignment.`:'Camera uses recorded ball or player positions. Tactical assignments require separate verified charting.'}</small></div>}
           {sourceGap&&<div role="status" className="gameday-gap-banner">No position sample at {displayClock(time)} · last observed frame {frame.frame_id} · source frame unavailable</div>}
         </div>
         <div className="gameday-controlbar"><div className="gameday-player-controls">
@@ -211,7 +218,7 @@ export function HistoricalReplayPanel({
           <p>Snap ghosts display only players recorded at the source-labeled snap event. Straight-line displacement is not total distance run. Movement arrows come from two adjacent recorded frames, not assumed orientation or coach assignment; source-reported and finite-difference speed are deliberately separate. Nearest opponent is geometric distance at a single recorded frame, not a coverage responsibility, matchup assignment, or player performance grade. Requires verified team possession labels.</p></div>
         </div>
       </section>
-      <aside className="gameday-sidebar">
+      {showRail&&<aside className="gameday-sidebar">
         <div className="gameday-panel">
           <div className="gameday-aside-heading"><div><Activity size={17}/><h2>Formation geometry</h2></div></div>
           <p className="gameday-muted">Measured team spacing. No coverage or play-call inference.</p>
@@ -225,7 +232,7 @@ export function HistoricalReplayPanel({
         <div className="gameday-panel"><div className="gameday-aside-heading"><div><Activity size={17}/><h2>Source events</h2></div></div><p className="gameday-muted">Only labels supplied by the original tracking CSV.</p><div className="gameday-event-list">{recordedEvents.length?recordedEvents.slice(0,50).map((m,i)=><button key={i} className={time>=m.t?'seen':''} onClick={()=>{setTime(m.t);setRunning(false);}}><span className="gameday-event-time">{m.t.toFixed(1)}s</span><div><strong>{m.label}</strong><small>Recorded frame {m.frame_id}</small></div></button>):<p>No annotated events available.</p>}</div></div>
         <div className="gameday-panel"><div className="gameday-aside-heading"><div><CircleAlert size={17}/><h2>Coverage and evidence</h2></div></div><div className="gameday-fact"><span>Frame coverage</span><strong>{(replay.frame_coverage*100).toFixed(1)}%</strong></div>{replay.position_quality&&<><div className="gameday-fact"><span>Unrenderable source positions</span><strong>{replay.position_quality.omitted_total_position_rows} excluded</strong></div>
         {replay.position_quality.omitted_total_position_rows>0&&<p role="status">Actual source rows omitted from the on-field view: {replay.position_quality.omitted_off_field_position_rows} outside the field; {replay.position_quality.omitted_missing_position_rows} missing x/y. Affected source frames: {replay.position_quality.affected_source_frame_ids.length}. These observations were not clamped or interpolated.</p>}</>}<div className="gameday-fact"><span>Source</span><strong>{replay.source}</strong></div><div className="gameday-fact"><span>License declaration</span><strong>{replay.source_license_identifier}</strong></div><div className="gameday-fact"><span>Game</span><strong>{replay.game_id}/{replay.play_id}</strong></div><p>Data are user supplied, not independently authenticated. No player grades or coaching classifications are generated.</p></div>
-      </aside>
+      </aside>}
     </div>
   </main>;
 }
