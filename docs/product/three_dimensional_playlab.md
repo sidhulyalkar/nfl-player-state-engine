@@ -168,3 +168,20 @@ separate remaining qualification gates.
 
 Official historical source dictionary:
 https://github.com/nfl-football-ops/Big-Data-Bowl/blob/master/schema.md
+
+
+## Measured nearest-opponent proximity over time
+
+The historical replay sidebar can plot the Euclidean field-space distance
+from the selected player to the nearest *recorded opposing player* in every
+available source frame. It uses only source-declared offense/defense sides and
+recorded x/y positions. A different player can be nearest at each frame.
+
+The curve **breaks** whenever the selected player or all opposing players
+are absent, or when source frame IDs skip. It does not interpolate, smooth,
+infer coverage matchups or generate tactical grades. The playback cursor
+aligns the chart to the 3D/2D field view, and the summary counts how many
+recorded frames contain both the selected player and an opponent.
+
+Frontend regression:
+`cd apps/gemini-fantasy-console && npm run test:field3d && npm run build`.
