@@ -62,13 +62,16 @@ export function recordedNote(
     provenance:'EVIDENCE_GAP',sourceFrameId:frame?.frame_id??null,sourceTimeSeconds:null,rawEvent:null,
   };
   const latest=latestEvent(replay.frames,currentIndex);
+  const nearest=observedNearestOpponent(frame,selectedId);
   if(latest){
+    const measurement=nearest
+      ? ` Current observed nearest opponent: ${nearest.distance.toFixed(1)} yd. Proximity does not establish the assignment.`
+      : '';
     return {title:titleForEvent(latest.event),
-      detail:`Source tag “${label(latest.event)}” at frame ${latest.frame.frame_id}. This is an annotated event, not proof of player intent, coverage responsibility or blocking quality.`,
+      detail:`Source tag “${label(latest.event)}” at frame ${latest.frame.frame_id}.${measurement} Neither tag nor distance proves coaching intent, coverage responsibility or blocking quality.`,
       provenance:'SOURCE_EVENT',sourceFrameId:latest.frame.frame_id,
       sourceTimeSeconds:latest.frame.t_seconds_nominal,rawEvent:latest.event};
   }
-  const nearest=observedNearestOpponent(frame,selectedId);
   if(nearest)return {
     title:'Observed separation',
     detail:`Nearest opposite-side player ${nearest.name} is ${nearest.distance.toFixed(1)} yards away. Spatial proximity alone does not establish a defensive assignment or a successful block.`,
