@@ -967,3 +967,24 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Four direct destinations. Secondary research tools stay discoverable without crowding the header. */
+.workspace-switcher{grid-template-columns:auto minmax(0,1fr) auto;gap:clamp(10px,1.3vw,22px);}
+.workspace-tabs{justify-content:flex-start;min-width:0;}
+.workspace-tabs button{min-width:clamp(125px,10vw,170px);}
+.workspace-secondary{position:relative;display:flex;align-items:center;gap:12px;flex-shrink:0;}
+.workspace-more{position:relative;}
+.workspace-more>summary{display:flex;align-items:center;gap:6px;list-style:none;cursor:pointer;border:1px solid #2b4550;background:#10232d;padding:10px 12px;border-radius:9px;color:#b6d6df;font-size:12px;font-weight:700;}
+.workspace-more>summary::-webkit-details-marker{display:none;}
+.workspace-more>summary:hover,.workspace-more>summary.active{color:#e9fff8;border-color:rgba(100,232,196,.42);background:#173d39;}
+.workspace-more>summary:focus-visible,.workspace-more-menu button:focus-visible,.workspace-tabs button:focus-visible{outline:2px solid #7ae9c5;outline-offset:2px;}
+.workspace-more-menu{position:absolute;right:0;top:calc(100% + 9px);z-index:100;width:min(310px,calc(100vw - 24px));max-height:min(70vh,520px);overflow-y:auto;padding:7px;border:1px solid #395565;border-radius:12px;background:#0a1a25;box-shadow:0 16px 45px #0009;}
+.workspace-more-menu p{margin:5px 9px 8px;font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:#7195a6;}
+.workspace-more-menu button{display:grid;gap:3px;padding:11px;width:100%;text-align:left;border:1px solid transparent;border-radius:8px;background:none;color:#bed3df;cursor:pointer;}
+.workspace-more-menu button strong{font-size:12px;}
+.workspace-more-menu button small{font-size:10px;color:#7e97a7;}
+.workspace-more-menu button:hover,.workspace-more-menu button.active{background:#173039;border-color:#386060;color:#f2fff9;}
+.workspace-source-status{font-size:10px;color:#83baa9;letter-spacing:.07em;white-space:nowrap;}
+@media(max-width:1180px){.workspace-source-status{display:none;}}
+@media(max-width:860px){.workspace-switcher{grid-template-columns:minmax(0,1fr) auto;align-items:center;}.workspace-identity{display:none;}.workspace-tabs{justify-content:flex-start;}.workspace-secondary{grid-column:2;grid-row:1;}.workspace-tabs{grid-column:1;grid-row:1;}}
+@media(max-width:520px){.workspace-tabs button{min-width:105px;}.workspace-more>summary{padding:9px;font-size:11px;}}

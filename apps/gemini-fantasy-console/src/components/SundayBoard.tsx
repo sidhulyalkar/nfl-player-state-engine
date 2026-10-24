@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Activity, AlertTriangle, Bell, Clock3, ExternalLink, RefreshCcw, ShieldCheck, Star, WifiOff } from 'lucide-react';
 import '../sunday-board.css';
+import {publishedScoreSignals,type PublishedSignal} from './publishedScoreSignals';
 
 type Game = {
   game_id: string; away_team: string; home_team: string;
@@ -16,7 +17,7 @@ type Board = {
   };
   served_at_utc:string;
 };
-type Change = { key:string; game_id:string; team:string; text:string; at:string };
+type Change = PublishedSignal;
 const RECHECK_MS = 300000;
 
 function kickoff(iso:string|null) {
@@ -40,11 +41,10 @@ export function SundayBoard() {
   const [busy,setBusy]=useState(false);
   const [favorites,setFavorites]=useState<string[]>(getFavorites);
   const [watchOnly,setWatchOnly]=useState(false);
-  const [alerts,setAlerts]=useState(false);
+  const [alerts,setAlerts]=useState(true);
   const [changes,setChanges]=useState<Change[]>([]);
   const [tick,setTick]=useState(0);
-  const previous=useRef<Map<string,{a:number|null;h:number|null}>>(new Map());
-  const ready=useRef(false);
+  const previousBoard=useRef<Board|null>(null);
   const pending=useRef<AbortController|null>(null);
 
   const load=useCallback(async (refresh:boolean)=>{
@@ -58,18 +58,9 @@ export function SundayBoard() {
       const next=await response.json() as Board;
       if(next.authority!=='PUBLIC_SCHEDULE_NOT_LIVE_PBP'||!Array.isArray(next.games))throw new Error('Unexpected data authority');
       if(controller.signal.aborted)return;
-      if(ready.current){
-        const found:Change[]=[];
-        for(const g of next.games){
-          const p=previous.current.get(g.game_id);
-          if(!p||g.home_score==null||g.away_score==null)continue;
-          if(p.a!==null&&p.a!==g.away_score)found.push({key:g.game_id+'a'+g.away_score+next.served_at_utc,game_id:g.game_id,team:g.away_team,text:'Published score: '+p.a+' to '+g.away_score+'. Play and timing unknown.',at:next.served_at_utc});
-          if(p.h!==null&&p.h!==g.home_score)found.push({key:g.game_id+'h'+g.home_score+next.served_at_utc,game_id:g.game_id,team:g.home_team,text:'Published score: '+p.h+' to '+g.home_score+'. Play and timing unknown.',at:next.served_at_utc});
-        }
-        if(found.length)setChanges(old=>[...found,...old].slice(0,30));
-      }
-      previous.current=new Map(next.games.map(g=>[g.game_id,{a:g.away_score,h:g.home_score}]));
-      ready.current=true;
+      const found=publishedScoreSignals(previousBoard.current,next);
+      if(found.length)setChanges(old=>[...found,...old.filter(item=>!found.some(f=>f.key===item.key))].slice(0,30));
+      previousBoard.current=next;
       setBoard(next);
       setError(next.source.refresh.error);
       setTick(v=>v+1);
@@ -80,7 +71,8 @@ export function SundayBoard() {
   useEffect(()=>{
     void load(true);
     const id=window.setInterval(()=>void load(true),RECHECK_MS);
-    return ()=>{window.clearInterval(id);pending.current?.abort();};
+    const ageTick=window.setInterval(()=>setTick(v=>v+1),60000);
+    return ()=>{window.clearInterval(id);window.clearInterval(ageTick);pending.current?.abort();};
   },[load]);
   const toggle=(id:string)=>setFavorites(old=>{
     const next=old.includes(id)?old.filter(x=>x!==id):[...old,id];
@@ -90,10 +82,9 @@ export function SundayBoard() {
   const games=(board?.games??[]).filter(g=>!watchOnly||favorites.includes(g.game_id))
     .sort((a,b)=>Number(favorites.includes(b.game_id))-Number(favorites.includes(a.game_id))||(a.kickoff_utc??'').localeCompare(b.kickoff_utc??''));
   const visibleChanges=changes.filter(c=>!watchOnly||favorites.includes(c.game_id));
-  const age=board?.source.age_seconds;
-  const freshness=age==null?'unknown age':Math.round(age/60)+' min old';
-  const _tick=tick;
-  void _tick;
+  const age=board?.source.fetched_at_utc?Math.max(0,(Date.now()-Date.parse(board.source.fetched_at_utc))/1000):board?.source.age_seconds;
+  const freshness=age==null||!Number.isFinite(age)?'unknown age':Math.round(age/60)+' min old';
+  void tick;
   return <main className="sunday-root">
     <header className="sunday-head">
       <div><div className="sunday-kicker"><Activity size={15}/> FOURTH DOWN LAB / REDZONE COMPANION</div><h1>Every game. One command center.</h1>
@@ -120,9 +111,9 @@ export function SundayBoard() {
         <div className="sunday-trust"><ShieldCheck size={18}/><div><strong>Source truth, not cinematic guesswork</strong><p>We don't fabricate snap timing, possession, touchdowns, player routes, coaches' play calls, or player grades. The separate GameDay Lab houses synthetic teaching plays and authorized historical tracking imports.</p></div></div>
       </section>
       <aside className="sunday-side">
-        <div className="sunday-panel"><div className="sunday-panel-title"><Bell size={17}/><h3>Score-change feed</h3></div><p>Updates are derived from differences between public snapshots, including possible corrections. No play types are inferred.</p>
-          <label className="sunday-toggle"><input type="checkbox" checked={alerts} onChange={e=>setAlerts(e.target.checked)}/> Show in-page alerts</label>
-          {alerts&&visibleChanges.length?<div className="sunday-events">{visibleChanges.map(e=><div className="sunday-event" key={e.key}><strong>{e.team} · Published score change</strong><p>{e.text}</p><small>{new Date(e.at).toLocaleTimeString()}</small></div>)}</div>:<div className="sunday-empty-small">{alerts?'No observed updates since loading the board.':'Alerts are currently off.'}</div>}
+        <div className="sunday-panel"><div className="sunday-panel-title"><Bell size={17}/><h3>Published update digest</h3></div><p>Changes are checked at most every five minutes from source-verified snapshots. These describe score revisions, not observed touchdowns or possession changes.</p>
+          <label className="sunday-toggle"><input type="checkbox" checked={alerts} onChange={e=>setAlerts(e.target.checked)}/> Show published updates</label>
+          {alerts&&visibleChanges.length?<div className="sunday-events">{visibleChanges.map(e=><div className="sunday-event" key={e.key}><strong>{e.team} · {e.kind==='FIRST_PUBLISHED_SCORE'?'First published score':'Score revision'}</strong><p>{e.text}</p><small>Source fetched: {new Date(e.at).toLocaleTimeString()}</small></div>)}</div>:<div className="sunday-empty-small">{alerts?'No published score changes detected since this page was opened.':'Published updates are hidden.'}</div>}
         </div>
         <div className="sunday-panel"><div className="sunday-panel-title"><ShieldCheck size={17}/><h3>Source health</h3></div>
           <div className="sunday-fact"><span>Provider</span><b>nflverse / Lee Sharpe</b></div>
