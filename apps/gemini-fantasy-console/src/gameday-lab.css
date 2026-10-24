@@ -277,3 +277,33 @@
 .gameday-charted-meta div strong{font-size:12px;color:#e2f3e9;line-height:1.3;overflow-wrap:anywhere;}
 .gameday-charted-meta small{grid-column:1/-1;font-size:10px;color:#8ca8af;line-height:1.5;}
 @media(max-width:780px){.gameday-charted-meta{grid-template-columns:repeat(2,minmax(0,1fr));}}
+
+/* The Play Lab becomes a full-viewport replay surface with a removable data rail. */
+.gameday-page.gameday-theater{max-width:none;padding:14px clamp(10px,1.6vw,30px) 32px;}
+.gameday-theater .gameday-head{margin-bottom:14px;flex-wrap:wrap;}
+.gameday-theater .gameday-head h1{font-size:clamp(22px,2.3vw,34px);}
+.gameday-theater .gameday-layout{grid-template-columns:minmax(0,1fr) minmax(250px,290px);gap:12px;}
+.gameday-theater.gameday-theater-expanded .gameday-layout{grid-template-columns:minmax(0,1fr);}
+.gameday-theater .gameday-main{border-radius:13px;overflow:hidden;}
+.gameday-theater .gameday-scoreline{padding:9px 18px;}
+.gameday-theater .gameday-field-shell{min-width:0;}
+.gameday-theater .gameday-field{aspect-ratio:auto;height:clamp(490px,69vh,900px);max-height:none;}
+.gameday-theater-topline{display:flex;justify-content:space-between;align-items:center;padding:8px 15px;background:#10232d;border-bottom:1px solid rgba(160,211,214,.16);gap:10px;}
+.gameday-theater-topline>span{font-size:10px;font-weight:800;letter-spacing:.13em;color:#8cdfc8;}
+.gameday-theater-topline>div{display:flex;gap:6px;flex-wrap:wrap;}
+.gameday-theater-topline button{background:#1b3945;color:#c2ebe0;padding:7px 11px;border-radius:7px;border:1px solid #335e68;cursor:pointer;font-size:11px;}
+.gameday-theater-topline button:focus-visible{outline:2px solid #8deac9;outline-offset:2px;}
+.gameday-theater .gameday-sidebar{max-height:calc(100vh - 140px);overflow:auto;scrollbar-width:thin;}
+.gameday-director-commentary{position:absolute;z-index:2;top:65px;left:18px;pointer-events:none;max-width:min(365px,calc(100% - 36px));display:grid;gap:6px;padding:11px 13px;border:1px solid rgba(102,203,184,.5);border-radius:11px;background:rgba(5,25,35,.84);backdrop-filter:blur(10px);box-shadow:0 12px 35px rgba(0,0,0,.18);}
+.gameday-director-commentary span{font-size:9px;font-weight:800;letter-spacing:.11em;color:#71e2c4;}
+.gameday-director-commentary strong{font-size:13px;line-height:1.3;color:#e4f9f3;}
+.gameday-director-commentary small{font-size:11px;line-height:1.5;color:#aac8cb;}
+.league-api-diagnostic{display:grid;gap:6px;background:rgba(20,61,78,.48);border:1px solid #386778;border-radius:9px;padding:12px;margin-top:8px;font-size:12px;color:#d7eff0;}
+.league-api-diagnostic strong{color:#a1e2cc;}
+.league-api-diagnostic span{line-height:1.55;}
+.league-api-diagnostic small{color:#8aa8b5;}
+.connect-message.error{display:flex;gap:9px;flex-wrap:wrap;align-items:center;}
+.connect-message.error span{flex:1;min-width:260px;overflow-wrap:anywhere;}
+.connect-message.error button{background:#26343b;color:#ffe3d8;border:1px solid #8b6163;border-radius:6px;padding:7px 9px;cursor:pointer;}
+@media(max-width:1050px){.gameday-theater .gameday-layout{grid-template-columns:1fr;}.gameday-theater .gameday-sidebar{max-height:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));}}
+@media(max-width:700px){.gameday-theater .gameday-field{height:min(63vh,650px);min-height:310px;}.gameday-director-commentary{top:68px;padding:9px;max-width:min(260px,calc(100% - 20px));left:8px;}.gameday-director-commentary strong{font-size:11px;}.gameday-director-commentary small{font-size:10px;}.gameday-theater-topline{align-items:start;flex-direction:column;}.gameday-theater .gameday-sidebar{grid-template-columns:1fr;}}
