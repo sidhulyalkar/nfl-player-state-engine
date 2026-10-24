@@ -8,6 +8,8 @@ import { displayClock, frameAtTime, stepFrame } from './trackingTimeline';
 
 import { type HistoricalReplay } from './historicalReplaySchema';
 import { replayKey, replayLabel } from './historicalReplayLibrary';
+import { ObservedSeparationChart } from './ObservedSeparationChart';
+import { FrameEvidenceRibbon } from './FrameEvidenceRibbon';
 export { parseHistoricalReplay } from './historicalReplaySchema';
 export type { HistoricalReplay } from './historicalReplaySchema';
 type Angle = 'broadcast' | 'all22' | 'overhead';
@@ -22,7 +24,7 @@ function quad(x0:number,x1:number,mode:Angle){
     .map(p=>p.x.toFixed(1)+','+p.y.toFixed(1)).join(' ');
 }
 export function HistoricalReplayPanel({
-  replay,library,onSelect,onImportFiles,importing,importError,onBack,
+  replay,library,onSelect,onImportFiles,importing,importError,exportHashVerified,onBack,
 }: {
   replay:HistoricalReplay;
   library:readonly HistoricalReplay[];
@@ -30,6 +32,7 @@ export function HistoricalReplayPanel({
   onImportFiles:(event:ChangeEvent<HTMLInputElement>)=>void;
   importing:boolean;
   importError:string|null;
+  exportHashVerified:boolean;
   onBack:()=>void;
 }) {
   const [time,setTime]=useState(0);
@@ -117,7 +120,7 @@ export function HistoricalReplayPanel({
             {library.map(p=><option key={replayKey(p)} value={replayKey(p)}>{replayLabel(p)}</option>)}
           </select>
         </label>
-        <label className="gameday-history-upload">{importing?'Importing…':'Add replay JSON(s)'}
+        <label className="gameday-history-upload">{importing?'Importing…':'Add replay JSON(s) + optional manifest'}
           <input type="file" multiple disabled={importing} accept=".json,application/json" onChange={onImportFiles}/>
         </label>
         <button onClick={onBack}><ArrowLeft size={15}/> Return to demo</button><div className="gameday-source"><span className="gameday-source-dot"/><div><strong>Historical research only</strong><small>Not live · rights not independently verified</small></div></div></div>
@@ -125,7 +128,7 @@ export function HistoricalReplayPanel({
     {importError&&<div className="gameday-import-error" role="alert">{importError}</div>}
     <div className="gameday-layout">
       <section className="gameday-main">
-        <div className="gameday-history-meta"><span><CheckCircle2 size={14}/> Recorded x/y coordinates</span><span>{replay.frame_count} frames</span><span>{replay.missing_frame_count} missing frames</span><span>Direction: {replay.play_direction ?? 'unknown'}</span></div>
+        <div className="gameday-history-meta"><span><CheckCircle2 size={14}/> Recorded x/y coordinates</span><span aria-label="Local export manifest integrity">{exportHashVerified?'Replay JSON SHA-256 matches selected manifest':'Standalone JSON: export hash not checked'}</span><span>{replay.frame_count} frames</span><span>{replay.missing_frame_count} missing frames</span><span>Direction: {replay.play_direction ?? 'unknown'}</span></div>
         {replay.source_play_metadata&&<div className="gameday-charted-meta" aria-label="Source-declared play charting">
           <div><span>Game / possession</span><strong>{replay.source_play_metadata.visitor_team} @ {replay.source_play_metadata.home_team} · {replay.source_play_metadata.possession_team} ball</strong></div>
           <div><span>Source down / distance</span><strong>Q{replay.source_play_metadata.quarter} · {replay.source_play_metadata.down===null?'N/A':replay.source_play_metadata.down+' & '+(replay.source_play_metadata.yards_to_go===null?'?':replay.source_play_metadata.yards_to_go)}</strong></div>
@@ -212,6 +215,8 @@ export function HistoricalReplayPanel({
         </div>
       </section>
       <aside className="gameday-sidebar">
+        <FrameEvidenceRibbon replay={replay} time={time}/>
+        <ObservedSeparationChart frames={replay.frames} selectedId={focus} time={time}/>
         <div className="gameday-panel">
           <div className="gameday-aside-heading"><div><Activity size={17}/><h2>Formation geometry</h2></div></div>
           <p className="gameday-muted">Measured team spacing. No coverage or play-call inference.</p>
@@ -224,7 +229,7 @@ export function HistoricalReplayPanel({
         </div>
         <div className="gameday-panel"><div className="gameday-aside-heading"><div><Activity size={17}/><h2>Source events</h2></div></div><p className="gameday-muted">Only labels supplied by the original tracking CSV.</p><div className="gameday-event-list">{recordedEvents.length?recordedEvents.slice(0,50).map((m,i)=><button key={i} className={time>=m.t?'seen':''} onClick={()=>{setTime(m.t);setRunning(false);}}><span className="gameday-event-time">{m.t.toFixed(1)}s</span><div><strong>{m.label}</strong><small>Recorded frame {m.frame_id}</small></div></button>):<p>No annotated events available.</p>}</div></div>
         <div className="gameday-panel"><div className="gameday-aside-heading"><div><CircleAlert size={17}/><h2>Coverage and evidence</h2></div></div><div className="gameday-fact"><span>Frame coverage</span><strong>{(replay.frame_coverage*100).toFixed(1)}%</strong></div>{replay.position_quality&&<><div className="gameday-fact"><span>Unrenderable source positions</span><strong>{replay.position_quality.omitted_total_position_rows} excluded</strong></div>
-        {replay.position_quality.omitted_total_position_rows>0&&<p role="status">Actual source rows omitted from the on-field view: {replay.position_quality.omitted_off_field_position_rows} outside the field; {replay.position_quality.omitted_missing_position_rows} missing x/y. Affected source frames: {replay.position_quality.affected_source_frame_ids.length}. These observations were not clamped or interpolated.</p>}</>}<div className="gameday-fact"><span>Source</span><strong>{replay.source}</strong></div><div className="gameday-fact"><span>License declaration</span><strong>{replay.source_license_identifier}</strong></div><div className="gameday-fact"><span>Game</span><strong>{replay.game_id}/{replay.play_id}</strong></div><p>Data are user supplied, not independently authenticated. No player grades or coaching classifications are generated.</p></div>
+        {replay.position_quality.omitted_total_position_rows>0&&<p role="status">Actual source rows omitted from the on-field view: {replay.position_quality.omitted_off_field_position_rows} outside the field; {replay.position_quality.omitted_missing_position_rows} missing x/y. Affected source frames: {replay.position_quality.affected_source_frame_ids.length}. These observations were not clamped or interpolated.</p>}</>}<div className="gameday-fact"><span>Source</span><strong>{replay.source}</strong></div><div className="gameday-fact"><span>License declaration</span><strong>{replay.source_license_identifier}</strong></div><div className="gameday-fact"><span>Game</span><strong>{replay.game_id}/{replay.play_id}</strong></div><p>{exportHashVerified?'The browser matched these JSON bytes to a locally supplied exporter manifest. Original NFL tracking CSV bytes and permission claims were not independently verified by this browser.':'Data are user supplied and no replay-file hash has been checked against an export manifest.'} No player grades or coaching classifications are generated.</p></div>
       </aside>
     </div>
   </main>;

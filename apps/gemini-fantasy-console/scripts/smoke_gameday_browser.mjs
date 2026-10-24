@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /** Zero-dependency Chrome DevTools rendering smoke for built Fourth Down Lab. */
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {inspectPrivateResearchSession} from './privateResearchSession.mjs';
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -215,8 +217,146 @@ try {
   await until("document.querySelector('.gameday-head')?.textContent?.includes('CI_NEXT_PLAY')",sid,'catalog-selected actual session replay');
   console.log('PASS: position-free catalog imported, searched by recorded event, matching replay opened.');
 
+  // Visual regression for observed proximity and quality provenance.
+  const selectedObserved=await evalPage("(()=>{const select=document.querySelector('select[aria-label=\\\"Inspect tracked player\\\"]');if(!select)return false;select.value='CI_WR';select.dispatchEvent(new Event('change',{bubbles:true}));return true})()",sid);
+  assert.equal(selectedObserved,true,'Historical player selection unavailable');
+  await until("!!document.querySelector('section[aria-label=\\\"Observed nearest opponent separation\\\"] svg')",sid,'observed proximity visualization');
+  assert.equal(await evalPage("document.querySelector('section[aria-label=\\\"Recorded frame evidence timeline\\\"]')?.textContent?.includes('Missing source frame IDs')",sid),true,'Evidence ribbon not mounted');
+  assert.equal(await evalPage("document.querySelector('section[aria-label=\\\"Recorded frame evidence timeline\\\"]')?.textContent?.includes('Frames with excluded position rows')",sid),true,'Position exclusion not distinguished from frame gaps');
+  await capture(sid,'playlab-ci-evidence-layers.png');
+  console.log('PASS: selected-player proximity plot and source-quality ribbon rendered in Chromium.');
+
+  // Synthetic manifest package: assert real browser Web Crypto import and
+  // rejection of tampered bytes without overwriting the current session.
+  const verifiedPlay={
+    ...structuredClone(fixture),game_id:'2017090700',play_id:'938',rows:6,
+  };
+  const verifiedBytes=JSON.stringify(verifiedPlay);
+  const verifiedName='2017090700-938-research-replay.json';
+  const verifiedSha=createHash('sha256').update(verifiedBytes).digest('hex');
+  const origin=(file,sha)=>({
+    file,bytes:1024,sha256:sha,git_blob_sha1:'a'.repeat(40),identity_match:true,
+  });
+  const sessionManifest={
+    schema_version:1,data_mode:'HISTORICAL_RESEARCH_BATCH_MANIFEST',
+    qualification_status:'NONCANONICAL_FIXTURE_ONLY',
+    game_id:'2017090700',source_file_sha256:'c'.repeat(64),
+    source_identities:{
+      tracking:origin('tracking_gameId_2017090700.csv','c'.repeat(64)),
+      plays:origin('plays.csv','b'.repeat(64)),
+      games:origin('games.csv','a'.repeat(64)),
+    },
+    source_video_alignment_verified:false,model_training_authorized:false,
+    commercial_reuse_authorized:false,license_declaration:'internal-test-fixture-only',
+    play_count:1,plays:[{
+      play_id:'938',file:verifiedName,sha256:verifiedSha,source_rows:6,
+      recorded_frames:3,missing_source_frames:2,omitted_position_rows:1,
+      possession_team:'KC',metadata_provenance:'NONCANONICAL_TEST_FIXTURE',
+    }],
+  };
+  const filesInBrowser=(replayBytes)=>"(()=>{const input=document.querySelector('input[type=file][accept*=\\\"json\\\"]');if(!input)return false;const dt=new DataTransfer();dt.items.add(new File(["+
+    JSON.stringify(JSON.stringify(sessionManifest))+
+    "],'manifest.json',{type:'application/json'}));dt.items.add(new File(["+
+    JSON.stringify(replayBytes)+
+    "],"+JSON.stringify(verifiedName)+",{type:'application/json'}));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));return true})()";
+  assert.equal(await evalPage(filesInBrowser(verifiedBytes),sid),true,'Manifest importer unavailable');
+  await until("document.querySelector('.gameday-head')?.textContent?.includes('2017090700')",sid,'manifest imported replay');
+  assert.equal(await evalPage("document.querySelector('.gameday-history-meta')?.textContent?.includes('SHA-256 matches selected manifest')",sid),true,
+    'Browser did not label verified package bytes');
+  const beforeTamper=await evalPage("document.querySelectorAll('select[aria-label=\\\"Select loaded historical play\\\"] option').length",sid);
+  assert.equal(beforeTamper,3,'Expected initial research session plus one verified fixture');
+  assert.equal(await evalPage(filesInBrowser(verifiedBytes+' '),sid),true);
+  await until("document.querySelector('[role=\\\"alert\\\"]')?.textContent?.includes('SHA-256 mismatch')",sid,'tampered manifest import rejection');
+  assert.equal(await evalPage("document.querySelectorAll('select[aria-label=\\\"Select loaded historical play\\\"] option').length",sid),beforeTamper,
+    'Tampered package modified research session library');
+  console.log('PASS: browser SHA-256 manifest import and atomic tamper rejection.');
+
+
 
   console.log('PASS: real WebGL2 + 2D switch + synthetic CI replay import + recorded frame stepping + travel disclosure.');
+
+  // Opt-in private, complete batch verification. CDP sets the *local* file
+  // input directly: no HTTP upload, no serialized tracking bytes in messages,
+  // no real-source screenshots, and no raw source included in output logs.
+  if(process.env.PLAYLAB_REAL_SESSION_DIR){
+    if(process.env.PLAYLAB_SOURCE_TERMS_ACKNOWLEDGED!=='yes' ||
+      !process.env.PLAYLAB_SOURCE_LICENSE_ID)
+      throw new Error('Local source-use terms must be explicitly reviewed and acknowledged.');
+    const expected=Number(process.env.PLAYLAB_EXPECTED_PLAYS||'12');
+    if(!Number.isSafeInteger(expected)||expected<1||expected>12)
+      throw new Error('Expected local play count must be between 1 and 12.');
+    const privateSession=await inspectPrivateResearchSession(
+      process.env.PLAYLAB_REAL_SESSION_DIR,{
+        expectedPlayCount:expected,
+        licenseIdentifier:process.env.PLAYLAB_SOURCE_LICENSE_ID,
+      },
+    );
+    // CI synthetic fixture already holds two play slots. The private batch
+    // requires the full 12-slot quota, so reload to create a fresh isolated
+    // browser-only research session before selecting any private source file.
+    await send('Page.reload',{ignoreCache:true},sid);
+    await until("document.querySelector('.gameday-head h1')?.textContent?.includes('See the game beneath the game')",sid,'isolated private import starting view');
+    const existingPlayCount=0;
+    const doc=await send('DOM.getDocument',{depth:1},sid);
+    const query=await send('DOM.querySelector',{
+      nodeId:doc.root.nodeId,
+      selector:'.gameday-history-actions input[type=file][multiple]',
+    },sid);
+    assert.ok(query.nodeId,'Private research file input is missing');
+    const started=performance.now();
+    await send('DOM.setFileInputFiles',{
+      files:[privateSession.manifest_file,...privateSession.replay_files],
+      nodeId:query.nodeId,
+    },sid);
+    await evalPage("document.querySelector('.gameday-history-actions input[type=file][multiple]')?.dispatchEvent(new Event('change',{bubbles:true}))",sid);
+    let complete=false;
+    for(let attempt=0;attempt<180;attempt++){
+      const result=await evalPage("(()=>({importing:document.querySelector('.gameday-history-actions')?.textContent?.includes('Importing'),historical:document.querySelector('.gameday-head h1')?.textContent?.includes('Recorded movement, not reconstructed guesses'),verified:document.querySelector('.gameday-history-meta')?.textContent?.includes('SHA-256 matches selected manifest'),options:document.querySelectorAll('select[aria-label=\\\"Select loaded historical play\\\"] option').length,error:document.querySelector('[role=\\\"alert\\\"]')?.textContent||null}))()",sid);
+      if(result?.error)throw new Error('Local manifest import failed: '+result.error);
+      if(result?.historical&&result.verified&&result.options>=privateSession.play_count+existingPlayCount){
+        complete=true;break;
+      }
+      await sleep(500);
+    }
+    assert.equal(complete,true,'Private session did not become available in Chromium');
+    const importElapsed=performance.now()-started;
+    const loadedOptions=await evalPage("Array.from(document.querySelectorAll('select[aria-label=\\\"Select loaded historical play\\\"] option')).map(o=>o.value)",sid);
+    const expectedKeys=privateSession.plays.map(play=>
+      JSON.stringify([privateSession.game_id,play.play_id]));
+    for(const key of expectedKeys)
+      assert.ok(loadedOptions.includes(key),'Missing locally imported replay '+key);
+    let slowestSwitch=0;
+    for(const [index,play] of privateSession.plays.entries()){
+      const key=expectedKeys[index];
+      const renderStarted=performance.now();
+      const selected=await evalPage("(()=>{const input=document.querySelector('select[aria-label=\\\"Select loaded historical play\\\"]');if(!input)return false;input.value="+JSON.stringify(key)+";input.dispatchEvent(new Event('change',{bubbles:true}));return true})()",sid);
+      assert.equal(selected,true,'Cannot select research replay '+play.play_id);
+      await until("(()=>{const h=document.querySelector('.gameday-head p')?.textContent||'';const verified=document.querySelector('.gameday-history-meta')?.textContent||'';return h.includes('play '+"+JSON.stringify(play.play_id)+")&&verified.includes('SHA-256 matches selected manifest')&&!!document.querySelector('section[aria-label=\\\"Recorded frame evidence timeline\\\"]')})()",sid,'qualified replay '+play.play_id);
+      slowestSwitch=Math.max(slowestSwitch,performance.now()-renderStarted);
+    }
+    const elapsed=performance.now()-started;
+    const browserMemory=await evalPage("performance.memory?.usedJSHeapSize??null",sid);
+    const redacted={
+      qualification:'LOCAL_BROWSER_RESEARCH_SESSION',
+      status:'PASS_BROWSER_FILE_AND_MANIFEST_CONSISTENCY_ONLY',
+      play_count:privateSession.play_count,
+      full_replay_render_count:privateSession.play_count,
+      slowest_replay_switch_ms:Math.round(slowestSwitch),
+      total_bytes:privateSession.total_bytes,
+      import_wall_ms:Math.round(importElapsed),
+      entire_session_navigation_wall_ms:Math.round(elapsed),
+      browser_used_js_heap_bytes:browserMemory,
+      source_video_alignment_verified:false,
+      model_training_authorized:false,
+      commercial_reuse_authorized:false,
+      note:'Original source-byte authorization and film alignment are separate gates.',
+    };
+    if(process.env.PLAYLAB_LOCAL_REPORT_PATH){
+      const target=path.resolve(process.env.PLAYLAB_LOCAL_REPORT_PATH);
+      await writeFile(target,JSON.stringify(redacted,null,2)+'\\n',{flag:'wx',mode:0o600});
+    }
+    console.log('PASS: PRIVATE browser session: '+JSON.stringify(redacted));
+  }
 
   // Optional local source-data check. Never exercised by push/PR CI:
   // PLAYLAB_REAL_REPLAY_PATH must be a user-authorized local research file.
