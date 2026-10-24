@@ -120,3 +120,16 @@ test('source-charted down, personnel and possession metadata must reconcile',()=
   special.source_play_metadata.offense_formation_charted=null;
   assert.equal(parseHistoricalReplay(special).source_play_metadata.down,null);
 });
+
+test('reject implausible source frame spans and invalid source row claims',()=>{
+  const invalid=valid();
+  invalid.frames[1].frame_id=250003;
+  invalid.frames[1].t_seconds_nominal=25000.2;
+  invalid.missing_frame_count=250001;
+  invalid.frame_coverage=2/250003;
+  assert.throws(()=>parseHistoricalReplay(invalid),/unreasonably large source frame span/);
+  const badRows=valid();badRows.rows=-1;
+  assert.throws(()=>parseHistoricalReplay(badRows),/source row count/);
+  const yesRows=valid();yesRows.rows=4;
+  assert.equal(parseHistoricalReplay(yesRows).rows,4);
+});
