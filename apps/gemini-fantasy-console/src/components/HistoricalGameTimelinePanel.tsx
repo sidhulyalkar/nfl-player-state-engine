@@ -23,7 +23,7 @@ export function HistoricalGameTimelinePanel({timeline,catalog,library,onOpen,onB
   const matches=useMemo(()=>timeline.plays.filter(p=>{
     const q=search.trim().toLowerCase();
     const replay=byPlayId.get(p.play_id);
-    const available=Boolean(replay&&timelineReplayMatch(p,catalog,replay));
+    const available=Boolean(replay&&timelineReplayMatch(p,catalog,replay,timeline));
     return (quarter==='all'||String(p.quarter)===quarter)
       &&(filter==='all'||(filter==='loaded'?available:!available))
       &&(!q||[p.play_id,p.possession_team,p.description_charted,p.formation_charted,
@@ -59,7 +59,7 @@ export function HistoricalGameTimelinePanel({timeline,catalog,library,onOpen,onB
       {shown.map(p=>{
         const newQuarter=lastQuarter!==p.quarter;lastQuarter=p.quarter;
         const replay=byPlayId.get(p.play_id);
-        const loadable=Boolean(replay&&timelineReplayMatch(p,catalog,replay));
+        const loadable=Boolean(replay&&timelineReplayMatch(p,catalog,replay,timeline));
         const quality=catalog.plays.find(v=>v.play_id===p.play_id);
         return <div key={p.play_id}>
           {newQuarter&&<div className="gameday-timeline-quarter">Quarter {p.quarter} · charted game context</div>}
