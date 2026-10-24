@@ -265,13 +265,28 @@ class SleeperImporter(LeagueImporter):
                 player_map = self.get_player_map()
             draft_picks_live = self._normalize_live_draft_picks(raw_live_picks, player_map)
 
-        external_roster_id = None
+        # The onboarding form accepts either a Sleeper user ID or a username.
+        # Resolve against this league's already-fetched user list rather than
+        # silently comparing a username with numeric owner_id values.
+        resolved_user_id = external_user_id
+        user_resolved = False
         if external_user_id:
+            entered = str(external_user_id).strip().casefold()
+            matches = [
+                user for user in users
+                if str(user.get("user_id") or "").casefold() == entered
+                or (user.get("username") and str(user["username"]).casefold() == entered)
+            ]
+            if len(matches) == 1:
+                resolved_user_id = str(matches[0]["user_id"])
+                user_resolved = True
+        external_roster_id = None
+        if resolved_user_id:
             external_roster_id = next(
                 (
                     str(roster.get("roster_id"))
                     for roster in rosters
-                    if str(roster.get("owner_id")) == str(external_user_id)
+                    if str(roster.get("owner_id")) == str(resolved_user_id)
                 ),
                 None,
             )
@@ -288,7 +303,7 @@ class SleeperImporter(LeagueImporter):
                 name=str(league.get("name") or f"Sleeper League {league_id}"),
                 season=int(league.get("season") or state.get("season")),
                 source_url=f"https://sleeper.com/leagues/{league_id}",
-                external_user_id=external_user_id,
+                external_user_id=resolved_user_id,
             ),
             settings=LeagueSettings(
                 teams=int(league.get("total_rosters") or len(normalized_rosters)),
@@ -321,5 +336,6 @@ class SleeperImporter(LeagueImporter):
                 "active_draft": active_draft,
                 "live_draft_picks": draft_picks_live,
                 "external_roster_id": external_roster_id,
+                "external_user_resolved_in_league": user_resolved,
             },
         )
