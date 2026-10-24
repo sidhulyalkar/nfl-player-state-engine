@@ -188,3 +188,36 @@ def test_requires_source_terms_and_all_metadata(tmp_path: Path) -> None:
     (root / "plays.csv").unlink()
     with pytest.raises(ValueError, match="Missing plays source CSV"):
         _export(root, tmp_path / "batch", pins)
+
+
+@pytest.mark.parametrize(("old", "new", "message"), [
+    (",1,3,7,", ",0,3,7,", "Out-of-range source quarter"),
+    (",1,3,7,", ",7,3,7,", "Out-of-range source quarter"),
+    (",1,3,7,", ",1,0,7,", "Out-of-range source down"),
+    (",1,3,7,", ",1,5,7,", "Out-of-range source down"),
+    (",1,3,7,", ",1,3,100,", "Out-of-range source yards to go"),
+])
+def test_invalid_source_charting_rolls_back_batch(
+    tmp_path: Path, old: str, new: str, message: str
+) -> None:
+    root, _ = _source(tmp_path)
+    plays = root / "plays.csv"
+    original = plays.read_text()
+    assert old in original
+    plays.write_text(original.replace(old, new, 1))
+    out = tmp_path / "bad-charting"
+    with pytest.raises(ValueError, match=message):
+        _export(root, out, _hashes(root))
+    assert not out.exists()
+
+
+def test_oversized_source_charted_label_rejects_entire_batch(tmp_path: Path) -> None:
+    root, _ = _source(tmp_path)
+    plays = root / "plays.csv"
+    original = plays.read_text()
+    assert "SHOTGUN" in original
+    plays.write_text(original.replace("SHOTGUN", "X" * 91, 1))
+    out = tmp_path / "bad-label"
+    with pytest.raises(ValueError, match="Source charted label exceeds 90 characters"):
+        _export(root, out, _hashes(root))
+    assert not out.exists()
