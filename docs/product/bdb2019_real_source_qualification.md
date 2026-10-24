@@ -290,3 +290,33 @@ The four replay JSONs can then be multi-selected through **Load historical
 replay JSON(s)**. If a local 177-play catalog is loaded, its play IDs can be
 searched first, followed by exporting the selected play IDs using the
 same batch command.
+
+
+## Manifest-verified browser research session
+
+In GameDay Lab, select **Load replay JSON(s) + optional manifest**. Select
+`manifest.json` **and every JSON replay listed inside it**, together in the
+same file-picker operation (at most 12 replay files plus the manifest).
+
+The browser now re-computes SHA-256 of **each replay JSON's exact bytes**
+using the platform Web Crypto API and compares each to `manifest.json`.
+It also checks the manifest's play identities, possession, frame and source-row
+counts, excluded-position counts, license declaration and metadata provenance.
+Missing, extra, duplicated, tampered or semantically conflicting files reject
+the **entire** import without changing the loaded library. Import still works
+without a manifest, but the viewer clearly marks those standalone JSONs as
+**not checked against an export manifest**.
+
+**Trust boundary:** A self-supplied manifest and matching hashes establish
+internal package consistency, *not* authenticity of NFL-source CSV files.
+Only the offline Python exporter checks the whole pinned source CSV identities.
+An attacker could replace the manifest and replay bytes together. The browser
+does **not** claim official NFL certification, video synchronization, rights
+approval, verified tactics or authorization to train models. All imports stay
+in browser memory and are not uploaded by this workflow.
+
+Run the frontend verification suite before merging:
+
+    cd apps/gemini-fantasy-console
+    npm run test:field3d
+    npm run build
