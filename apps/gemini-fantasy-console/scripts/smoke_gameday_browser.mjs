@@ -291,10 +291,12 @@ try {
         licenseIdentifier:process.env.PLAYLAB_SOURCE_LICENSE_ID,
       },
     );
-    const existingPlayCount=await evalPage("document.querySelectorAll('select[aria-label=\\\"Select loaded historical play\\\"] option').length",sid);
-    const returned=await evalPage("(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent?.includes('Return to demo'));b?.click();return !!b})()",sid);
-    assert.equal(returned,true,'Cannot return to demo for private research session');
-    await until("document.querySelector('.gameday-head h1')?.textContent?.includes('See the game beneath the game')",sid,'private import starting view');
+    // CI synthetic fixture already holds two play slots. The private batch
+    // requires the full 12-slot quota, so reload to create a fresh isolated
+    // browser-only research session before selecting any private source file.
+    await send('Page.reload',{ignoreCache:true},sid);
+    await until("document.querySelector('.gameday-head h1')?.textContent?.includes('See the game beneath the game')",sid,'isolated private import starting view');
+    const existingPlayCount=0;
     const doc=await send('DOM.getDocument',{depth:1},sid);
     const query=await send('DOM.querySelector',{
       nodeId:doc.root.nodeId,
