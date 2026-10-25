@@ -60,7 +60,7 @@ test('selected players are independent and geometry only comes from present fram
   const missing=compareObservedPlayer(right,.1,'WR');
   assert.equal(missing.geometry_available,false);
 });
-test('window intersection is empty when snap events occupy disjoint nominal domains',()=>{
+test('a shared snap-only instant is allowed but has zero observed duration',()=>{
   const r=replay('500',[
     frame(1,0,[player('WR','offense',30)]),
     frame(2,.1,[player('WR','offense',30)]),
@@ -69,5 +69,7 @@ test('window intersection is empty when snap events occupy disjoint nominal doma
   const l=replay('501',[
     frame(10,0,[player('WR','offense',30)],['ball_snap']),
   ]);
-  assert.equal(snapAlignedComparison(r,l).reason,'no-overlap');
+  const window=snapAlignedComparison(r,l);
+  assert.equal(window.available,true);
+  assert.equal(window.shared_seconds,0);
 });
