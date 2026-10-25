@@ -24,11 +24,12 @@ function quad(x0:number,x1:number,mode:Angle){
     .map(p=>p.x.toFixed(1)+','+p.y.toFixed(1)).join(' ');
 }
 export function HistoricalReplayPanel({
-  replay,library,onSelect,onImportFiles,importing,importError,exportHashVerified,onBack,
+  replay,library,onSelect,onCompare,onImportFiles,importing,importError,exportHashVerified,onBack,
 }: {
   replay:HistoricalReplay;
   library:readonly HistoricalReplay[];
   onSelect:(key:string)=>void;
+  onCompare:()=>void;
   onImportFiles:(event:ChangeEvent<HTMLInputElement>)=>void;
   importing:boolean;
   importError:string|null;
@@ -123,6 +124,7 @@ export function HistoricalReplayPanel({
         <label className="gameday-history-upload">{importing?'Importing…':'Add replay JSON(s) + optional manifest'}
           <input type="file" multiple disabled={importing} accept=".json,application/json" onChange={onImportFiles}/>
         </label>
+        {library.length>1&&<button type="button" aria-label="Compare recorded plays" onClick={onCompare}>Compare plays</button>}
         <button onClick={onBack}><ArrowLeft size={15}/> Return to demo</button><div className="gameday-source"><span className="gameday-source-dot"/><div><strong>Historical research only</strong><small>Not live · rights not independently verified</small></div></div></div>
     </header>
     {importError&&<div className="gameday-import-error" role="alert">{importError}</div>}
