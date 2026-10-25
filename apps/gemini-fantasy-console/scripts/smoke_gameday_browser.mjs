@@ -166,6 +166,25 @@ try {
   assert.equal(anotherImported,true,'Add replay JSON control missing in historical viewer');
   await until("document.querySelector('.gameday-head')?.textContent?.includes('CI_NEXT_PLAY')",sid,'second research play loaded');
   assert.equal(await evalPage("document.querySelectorAll('select[aria-label=\"Select loaded historical play\"] option').length",sid),2,'Research play list should have two entries');
+  // Two independently recorded play fields. Source snap events are required,
+  // and both fields must be empty during an identical unrecorded frame window.
+  const compareClicked=await evalPage("(()=>{const b=document.querySelector('button[aria-label=\\\"Compare recorded plays\\\"]');b?.click();return !!b})()",sid);
+  assert.equal(compareClicked,true,'Two-play comparison navigation missing');
+  await until("document.querySelector('main[aria-label=\\\"Two-play historical research comparison\\\"]')?.querySelectorAll('.gameday-compare-field').length===2",sid,'two observed overhead fields');
+  assert.equal(await evalPage("document.querySelector('input[aria-label=\\\"Snap-relative comparison timeline\\\"]')!=null",sid),true);
+  for(let step=1;step<=2;step++){
+    const advanced=await evalPage("(()=>{const b=document.querySelector('button[aria-label=\\\"Step comparison forward one nominal frame\\\"]');b?.click();return !!b})()",sid);
+    assert.equal(advanced,true);
+    await until("document.querySelector('.gameday-compare-controls')?.textContent?.includes('Snap-relative '+("+step+"/10).toFixed(2)+'s')",sid,'comparison nominal step '+step);
+  }
+  assert.equal(await evalPage("document.querySelectorAll('.gameday-compare-field svg[aria-label*=\\\"source position unavailable\\\"]').length",sid),2,
+    'Both plays must show a missing recorded source sample rather than holding a player position');
+  await capture(sid,'playlab-synthetic-snap-comparison.png');
+  const compareClosed=await evalPage("(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent?.includes('Back to replay'));b?.click();return !!b})()",sid);
+  assert.equal(compareClosed,true);
+  await until("document.querySelector('.gameday-head h1')?.textContent?.includes('Recorded movement, not reconstructed guesses')",sid,'return from compared replay');
+  console.log('PASS: snap-relative twin-field rendering and missing-source-frame neutrality.');
+
   const switchedBack=await evalPage("(()=>{const selector=document.querySelector('select[aria-label=\"Select loaded historical play\"]');if(!selector)return false;selector.selectedIndex=0;selector.dispatchEvent(new Event('change',{bubbles:true}));return true})()",sid);
   assert.equal(switchedBack,true);
   await until("document.querySelector('.gameday-head')?.textContent?.includes('CI_TEST_PLAY')",sid,'switching to first recorded play');
