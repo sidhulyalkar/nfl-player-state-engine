@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import { Activity, Bell, ChevronRight, CircleAlert, Maximize2, Pause, Play, RotateCcw, Shield, SlidersHorizontal, Target, Zap } from 'lucide-react';
 import '../gameday-lab.css';
 import { HistoricalReplayPanel, parseHistoricalReplay, type HistoricalReplay } from './HistoricalReplayPanel';
+import { HistoricalPlayComparison } from './HistoricalPlayComparison';
 import { FootballField3D, type Field3DTrail } from './FootballField3D';
 import { MAX_REPLAY_FILE_BYTES, MAX_REPLAY_IMPORT_BYTES, MAX_REPLAY_LIBRARY, mergeReplayLibrary, replayKey, replayLabel, selectReplay } from './historicalReplayLibrary';
 import { parsePlayCatalog, type PlayCatalog } from './historicalPlayCatalog';
@@ -202,6 +203,7 @@ function Field({ play, time, camera, overlays, onPlayer }: {
 }
 export function GameDayLab() {
   const [historical,setHistorical] = useState<HistoricalReplay|null>(null);
+  const [comparisonRight,setComparisonRight] = useState<string|null>(null);
   const [replayLibrary,setReplayLibrary] = useState<HistoricalReplay[]>([]);
   const [importError,setImportError] = useState<string|null>(null);
   const [importing,setImporting] = useState(false);
@@ -338,7 +340,22 @@ export function GameDayLab() {
     const u=Math.max(0,Math.min(1,(time-3.15)/1.2));
     return {x:a.x+(b.x-a.x)*u,y:a.y+(b.y-a.y)*u};
   },[time,play.kind]);
-  return historical ? <HistoricalReplayPanel key={replayKey(historical)} replay={historical} library={replayLibrary} onSelect={key=>setHistorical(selectReplay(replayLibrary,key))} onImportFiles={onReplayFile} importing={importing} importError={importError} exportHashVerified={verifiedReplayKeys.has(replayKey(historical))} onBack={()=>{setHistorical(null);setTime(0);setPlaying(true);}}/> : <main className="gameday-page">
+  return historical ? (comparisonRight && selectReplay(replayLibrary,comparisonRight)
+    ? <HistoricalPlayComparison left={historical} right={selectReplay(replayLibrary,comparisonRight)!}
+        library={replayLibrary} leftVerified={verifiedReplayKeys.has(replayKey(historical))}
+        rightVerified={verifiedReplayKeys.has(comparisonRight)}
+        onLeft={key=>{setHistorical(selectReplay(replayLibrary,key));}}
+        onRight={setComparisonRight} onBack={()=>setComparisonRight(null)}/>
+    : <HistoricalReplayPanel key={replayKey(historical)} replay={historical} library={replayLibrary}
+        onSelect={key=>setHistorical(selectReplay(replayLibrary,key))}
+        onCompare={()=>{const candidate=replayLibrary.find(p=>replayKey(p)!==replayKey(historical)
+          &&p.game_id===historical.game_id
+          &&p.source_file_sha256.toLowerCase()===historical.source_file_sha256.toLowerCase());
+          setComparisonRight(replayKey(candidate??replayLibrary.find(p=>replayKey(p)!==replayKey(historical))!));}}
+        onImportFiles={onReplayFile} importing={importing} importError={importError}
+        exportHashVerified={verifiedReplayKeys.has(replayKey(historical))}
+        onBack={()=>{setComparisonRight(null);setHistorical(null);setTime(0);setPlaying(true);}}/>
+  ) : <main className="gameday-page">
     <header className="gameday-head">
       <div><div className="gameday-kicker"><Activity size={15}/> FOURTH DOWN LAB / GAMEDAY</div><h1>See the game beneath the game.</h1><p>Replay the formation. Explore the decisions. Understand the contributions.</p></div>
       <div className="gameday-history-actions"><label className="gameday-history-upload">{importing?'Importing replay files…':'Load replay JSON(s) + optional manifest'}<input type="file" multiple disabled={importing} accept=".json,application/json" onChange={event=>{void onReplayFile(event);}}/></label><label className="gameday-history-upload">Load play catalog JSON<input type="file" accept=".json,application/json" onChange={event=>{void onCatalogFile(event);}}/></label>{playCatalog&&<label className="gameday-history-upload">Load verified game timeline JSON<input type="file" accept=".json,application/json" onChange={event=>{void onTimelineFile(event);}}/></label>}{replayLibrary.length>0&&<label className="gameday-library-picker">Loaded plays<select aria-label="Choose saved historical replay" value="" onChange={e=>setHistorical(selectReplay(replayLibrary,e.target.value))}><option value="" disabled>Select a play ({replayLibrary.length})</option>{replayLibrary.map(p=><option key={replayKey(p)} value={replayKey(p)}>{replayLabel(p)}</option>)}</select></label>}<div className="gameday-source"><span className="gameday-source-dot"/><div><strong>Synthetic demonstration</strong><small>Not a live game or licensed tracking feed</small></div></div></div>
