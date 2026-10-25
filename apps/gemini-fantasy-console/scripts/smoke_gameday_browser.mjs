@@ -53,15 +53,16 @@ try {
   let stderr='';
   browser.stderr?.on('data',chunk=>{stderr=(stderr+String(chunk)).slice(-4000);});
   let port;
-  for(let i=0;i<100;i++){
-    if(browser.exitCode!==null)throw new Error('Chrome exited: '+stderr);
+  // Allow slow GitHub runners up to 36 seconds to expose CDP; never silently skip.
+  for(let i=0;i<300;i++){
+    if(browser.exitCode!==null)throw new Error('Chrome exited before CDP startup: '+stderr);
     try {
       port=Number((await readFile(path.join(profile,'DevToolsActivePort'),'utf8')).split('\n')[0]);
       if(Number.isInteger(port)&&port>0)break;
     } catch { /* Browser writes port after startup. */ }
     await sleep(120);
   }
-  if(!port)throw new Error('Chrome debugging port unavailable: '+stderr);
+  if(!port)throw new Error('Chrome CDP startup timeout after 36s: exitCode='+browser.exitCode+'; stderr='+stderr);
   const version=await (await fetch('http://127.0.0.1:'+port+'/json/version')).json();
   ws=new WebSocket(version.webSocketDebuggerUrl);
   await new Promise((resolve,reject)=>{
