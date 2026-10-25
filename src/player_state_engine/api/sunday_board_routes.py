@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Query
 
 from player_state_engine.product.sunday_board import build_sunday_board
+from player_state_engine.product.experimental_live_scores import live_score_pilot
 
 
 def install_sunday_board_routes(app: FastAPI) -> None:
@@ -30,3 +31,19 @@ def install_sunday_board_routes(app: FastAPI) -> None:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except (ValueError, OSError) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.get("/v1/gameday/experimental-live-scores")
+    def experimental_live_scores(
+        season: int = Query(2026, ge=2000, le=2100),
+        week: int | None = Query(None, ge=1, le=18),
+    ) -> dict[str, Any]:
+        """Private local source evaluation. Not approved production live NFL data."""
+        try:
+            return live_score_pilot(season=season, week=week)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Experimental scoreboard unavailable or source validation failed",
+            ) from exc
