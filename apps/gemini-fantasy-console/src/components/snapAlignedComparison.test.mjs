@@ -73,3 +73,11 @@ test('a shared snap-only instant is allowed but has zero observed duration',()=>
   assert.equal(window.available,true);
   assert.equal(window.shared_seconds,0);
 });
+
+test('precomputed snap anchors match direct evaluation and reject invalid indexes',()=>{
+  for(const sec of [0,.1,.2,.3]){
+    assert.deepEqual(observedAtRelativeTime(right,sec,0),observedAtRelativeTime(right,sec));
+    assert.deepEqual(compareObservedPlayer(right,sec,'RB',0),compareObservedPlayer(right,sec,'RB'));
+  }
+  assert.throws(()=>observedAtRelativeTime(right,.1,100),/Source-marked snap/);
+});
