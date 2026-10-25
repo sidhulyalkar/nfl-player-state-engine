@@ -322,3 +322,32 @@
   display:inline-block;width:10px;height:10px;border-radius:3px;
   border:1px solid rgba(245,255,255,.2);
 }
+
+
+/* Two-play source-observed research workspace. Two fixed overhead canvases;
+   gaps remain empty instead of silently holding previous geometry. */
+.gameday-compare-page{max-width:1520px;}
+.gameday-compare-selector{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:16px 0;}
+.gameday-compare-selector label,.gameday-compare-player{display:flex;flex-direction:column;gap:7px;color:#b9d4d7;font-size:12px;font-weight:700;min-width:0;}
+.gameday-compare-selector select,.gameday-compare-player select{
+  background:#132d39;color:#e2f2ef;border:1px solid #50737b;border-radius:8px;
+  padding:10px;min-width:0;max-width:100%;
+}
+.gameday-compare-controls{background:#102731;border:1px solid #37515b;border-radius:14px;padding:13px 17px;margin:14px 0 18px;}
+.gameday-compare-controls .gameday-player-controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;}
+.gameday-compare-controls input[type=range]{width:100%;margin:12px 0 6px;}
+.gameday-compare-evidence{font-size:11px;color:#9fb9be;line-height:1.5;}
+.gameday-compare-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start;}
+.gameday-compare-grid>.gameday-panel{min-width:0;padding:16px;}
+.gameday-compare-grid h2{font-size:20px;color:#e5f4ef;margin:0 0 6px;}
+.gameday-compare-grid .gameday-muted{font-size:11px;margin:5px 0 11px;}
+.gameday-compare-field svg{display:block;width:100%;height:auto;}
+.gameday-compare-provenance{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;
+  color:#c6d7d8;font-size:11px;margin:9px 0;}
+.gameday-compare-integrity{color:#d7cf9d;font-size:11px;}
+.gameday-compare-stats{padding-top:12px;}
+.gameday-compare-stats strong{font-variant-numeric:tabular-nums;}
+@media(max-width:860px){
+  .gameday-compare-grid,.gameday-compare-selector{grid-template-columns:1fr;}
+  .gameday-compare-controls{padding:11px;}
+}
