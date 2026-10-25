@@ -5,17 +5,18 @@ import {replayKey,replayLabel} from './historicalReplayLibrary';
 import {snapAlignedComparison,observedAtRelativeTime,compareObservedPlayer,
   comparisonUnavailableMessage} from './snapAlignedComparison';
 import {displayClock} from './trackingTimeline';
+import {sourceSnapIndex} from './football3dMath';
 
 const FIELD={left:43,top:23,width:714,height:315};
 const fx=(x:number)=>FIELD.left+x/120*FIELD.width;
 const fy=(y:number)=>FIELD.top+y/53.3*FIELD.height;
 type Pane='left'|'right';
 
-function RecordedOverhead({replay,seconds,selectedId,onSelect}:{
-  replay:HistoricalReplay;seconds:number;selectedId:string|null;
+function RecordedOverhead({replay,seconds,snapIndex,selectedId,onSelect}:{
+  replay:HistoricalReplay;seconds:number;snapIndex:number;selectedId:string|null;
   onSelect:(id:string|null)=>void;
 }){
-  const sample=observedAtRelativeTime(replay,seconds);
+  const sample=observedAtRelativeTime(replay,seconds,snapIndex);
   const frame=sample.frame;
   return <div className="gameday-compare-field">
     <svg viewBox="0 0 800 370" role="img"
@@ -65,10 +66,10 @@ function sourcePlayerOptions(replay:HistoricalReplay){
     for(const p of frame.players)if(p.nfl_id&&!map.has(p.nfl_id))map.set(p.nfl_id,p);
   return [...map.entries()].map(([id,p])=>({id,label:(p.name??id)+(p.jersey?' #'+p.jersey:'')}));
 }
-function ObservedStats({replay,time,selectedId}:{
-  replay:HistoricalReplay;time:number;selectedId:string|null;
+function ObservedStats({replay,time,snapIndex,selectedId}:{
+  replay:HistoricalReplay;time:number;snapIndex:number;selectedId:string|null;
 }){
-  const stats=compareObservedPlayer(replay,time,selectedId);
+  const stats=compareObservedPlayer(replay,time,selectedId,snapIndex);
   return <div className="gameday-compare-stats">
     <div className="gameday-fact"><span>Selected player</span><strong>{selectedId??'None'}</strong></div>
     <div className="gameday-fact"><span>Recorded frame</span><strong>{stats.frame_id??'Unavailable'}</strong></div>
@@ -90,6 +91,8 @@ export function HistoricalPlayComparison({left,right,library,leftVerified,rightV
   const [selectedLeft,setSelectedLeft]=useState<string|null>(null);
   const [selectedRight,setSelectedRight]=useState<string|null>(null);
   const alignment=useMemo(()=>snapAlignedComparison(left,right),[left,right]);
+  const leftSnapIndex=useMemo(()=>sourceSnapIndex(left.frames),[left]);
+  const rightSnapIndex=useMemo(()=>sourceSnapIndex(right.frames),[right]);
   const optionsLeft=useMemo(()=>sourcePlayerOptions(left),[left]);
   const optionsRight=useMemo(()=>sourcePlayerOptions(right),[right]);
   const min=alignment.available?alignment.min_relative_seconds:0;
@@ -164,20 +167,20 @@ export function HistoricalPlayComparison({left,right,library,leftVerified,rightV
       </div>
       <div className="gameday-compare-grid">
         {([
-          {slot:'left' as Pane,replay:left,selected:selectedLeft,setSelected:setSelectedLeft,verified:leftVerified,options:optionsLeft},
-          {slot:'right' as Pane,replay:right,selected:selectedRight,setSelected:setSelectedRight,verified:rightVerified,options:optionsRight},
+          {slot:'left' as Pane,replay:left,snapIndex:leftSnapIndex,selected:selectedLeft,setSelected:setSelectedLeft,verified:leftVerified,options:optionsLeft},
+          {slot:'right' as Pane,replay:right,snapIndex:rightSnapIndex,selected:selectedRight,setSelected:setSelectedRight,verified:rightVerified,options:optionsRight},
         ]).map(p=><section key={p.slot} className="gameday-panel" aria-label={p.slot+' compared replay'}>
           <h2>Play {p.replay.play_id}</h2>
           <p className="gameday-muted">{p.replay.game_id} · {p.replay.frame_count} observed frames · {p.replay.missing_frame_count} missing frames</p>
           <p className="gameday-compare-integrity">{p.verified?'Local replay bytes match selected manifest':'Standalone: export file SHA-256 not verified'}</p>
-          <RecordedOverhead replay={p.replay} seconds={display} selectedId={p.selected} onSelect={p.setSelected}/>
+          <RecordedOverhead replay={p.replay} seconds={display} snapIndex={p.snapIndex} selectedId={p.selected} onSelect={p.setSelected}/>
           <label className="gameday-compare-player">Inspect one recorded player
             <select aria-label={p.slot+' comparison player'} value={p.selected??''} onChange={e=>p.setSelected(e.target.value||null)}>
               <option value="">Choose player</option>
               {p.options.map(v=><option key={v.id} value={v.id}>{v.label}</option>)}
             </select>
           </label>
-          <ObservedStats replay={p.replay} time={display} selectedId={p.selected}/>
+          <ObservedStats replay={p.replay} time={display} snapIndex={p.snapIndex} selectedId={p.selected}/>
         </section>)}
       </div>
       <p className="gameday-muted">No player matching across plays is assumed. Neither nearest-opponent separation nor straight-line displacement establishes coverage responsibility, successful execution, or causal player value. A blank field denotes an unrecorded sample, not zero movement.</p>
