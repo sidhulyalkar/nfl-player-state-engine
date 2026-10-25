@@ -58,10 +58,10 @@ export interface ObservedComparisonFrame {
   frame:HistoricalFrame|null;
 }
 export function observedAtRelativeTime(
-  replay:HistoricalReplay,relativeSeconds:number,
+  replay:HistoricalReplay,relativeSeconds:number,snapIndex?:number,
 ):ObservedComparisonFrame{
-  const snap=sourceSnapIndex(replay.frames);
-  if(snap<0||!Number.isFinite(relativeSeconds))
+  const snap=snapIndex??sourceSnapIndex(replay.frames);
+  if(snap<0||snap>=replay.frames.length||!Number.isFinite(relativeSeconds))
     throw new Error('Source-marked snap and finite relative time are required.');
   const nominal=replay.frames[snap].t_seconds_nominal+relativeSeconds;
   const sample=frameAtTime(replay.frames,nominal);
@@ -78,15 +78,16 @@ export interface ObservedPlayerComparison {
 }
 export function compareObservedPlayer(
   replay:HistoricalReplay,relativeSeconds:number,playerId:string|null,
+  snapIndex?:number,
 ):ObservedPlayerComparison{
   const value:ObservedPlayerComparison={player_id:playerId,frame_id:null,
     distance_from_snap_yards:null,nearest_recorded_opponent_yards:null,
     geometry_available:false};
-  const current=observedAtRelativeTime(replay,relativeSeconds);
+  const current=observedAtRelativeTime(replay,relativeSeconds,snapIndex);
   if(!current.frame||!playerId)return value;
   const player=current.frame.players.find(p=>p.nfl_id===playerId);
   if(!player)return value;
-  const snap=replay.frames[sourceSnapIndex(replay.frames)];
+  const snap=replay.frames[snapIndex??sourceSnapIndex(replay.frames)];
   const initial=snap.players.find(p=>p.nfl_id===playerId);
   const opponents=current.frame.players.filter(p=>
     p.nfl_id&&p.side!=='unknown'&&
