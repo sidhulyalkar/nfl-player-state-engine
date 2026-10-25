@@ -7,8 +7,8 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
 
-from player_state_engine.product.sunday_board import build_sunday_board
 from player_state_engine.product.experimental_live_scores import live_score_pilot
+from player_state_engine.product.sunday_board import build_sunday_board
 
 
 def install_sunday_board_routes(app: FastAPI) -> None:
