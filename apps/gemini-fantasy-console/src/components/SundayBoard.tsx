@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Activity, AlertTriangle, Bell, Clock3, ExternalLink, RefreshCcw, ShieldCheck, Star, WifiOff } from 'lucide-react';
 import '../sunday-board.css';
 import {publishedScoreSignals,type PublishedSignal} from './publishedScoreSignals';
+import {LiveScorePilot} from './LiveScorePilot';
 
 type Game = {
   game_id: string; away_team: string; home_team: string;
@@ -35,7 +36,7 @@ function getFavorites():string[] {
   catch{return [];}
 }
 
-export function SundayBoard() {
+function PublishedSundayBoard() {
   const [board,setBoard]=useState<Board|null>(null);
   const [error,setError]=useState<string|null>(null);
   const [busy,setBusy]=useState(false);
@@ -128,4 +129,16 @@ export function SundayBoard() {
     </div>
     <footer className="sunday-footer">PUBLIC DELAYED SOURCE · NO LIVE PBP · NO TRACKING · <a href="?workspace=gameday">GameDay field lab</a></footer>
   </main>;
+}
+
+/** Two truthfully separate views: a 5-min nflverse release or an opt-in experimental source. */
+export function SundayBoard(){
+  const [view,setView]=useState<'experiment'|'published'>('experiment');
+  return <div className="sunday-board-choice">
+    <div className="sunday-view-switch" role="group" aria-label="RedZone scoreboard source">
+      <button type="button" onClick={()=>setView('experiment')} className={view==='experiment'?'active':''} aria-pressed={view==='experiment'}>Experimental live scores</button>
+      <button type="button" onClick={()=>setView('published')} className={view==='published'?'active':''} aria-pressed={view==='published'}>Delayed verified schedule</button>
+    </div>
+    {view==='experiment'?<LiveScorePilot/>:<PublishedSundayBoard/>}
+  </div>;
 }

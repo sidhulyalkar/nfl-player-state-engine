@@ -247,6 +247,49 @@ try {
   }
 
 
+  // RedZone CI browser fixture is synthetic and cannot establish live NFL accuracy.
+  // Stub only the experimental endpoint; never publish scores derived from this test.
+  const browserNow=new Date().toISOString();
+  const ciGame=(id,away,home,state,awayScore,homeScore,period,clock)=>({
+    game_id:id,provider_event_id:'CI_SYNTHETIC_'+id,
+    away_team:away,home_team:home,away_score:awayScore,home_score:homeScore,
+    kickoff_utc:browserNow,state,period,clock,status_text:'CI GENERATED STATUS',
+    possession:null,down:null,distance:null,play_by_play_available:false,tracking_available:false,
+  });
+  const ciScoreboard={
+    schema_version:1,authority:'EXPERIMENTAL_UNLICENSED_SCOREBOARD_EVALUATION',
+    data_mode:'EXPERIMENTAL_LIVE_SCORE_STATUS_ONLY',
+    season:2026,week:7,served_at_utc:browserNow,
+    games:[
+      ciGame('2026_07_CI_A_CI_B','GB','DET','in',7,10,2,'12:53'),
+      ciGame('2026_07_CI_C_CI_D','DEN','ARI','pre',null,null,null,null),
+    ],
+    source:{
+      name:'CI GENERATED FIXTURE; NOT REAL NFL DATA',url:'local:synthetic',
+      fetched_at_utc:browserNow,age_seconds:0,stale:false,throttled:false,
+      refresh_error:null,rights_status:'CI_TEST_ONLY',official_api_contract:false,
+      live_play_by_play:false,live_tracking:false,
+    },
+  };
+  await send('Page.addScriptToEvaluateOnNewDocument',{
+    source: `(()=>{const actual=window.fetch.bind(window);const synthetic=${JSON.stringify(ciScoreboard)};window.fetch=(input,init)=>{const path=typeof input==='string'?input:input.url;if(path.includes('/api/pse/v1/gameday/experimental-live-scores'))return Promise.resolve(new Response(JSON.stringify(synthetic),{status:200,headers:{'Content-Type':'application/json'}}));return actual(input,init);};})();`,
+  },sid);
+  const sundayUrl=new URL(url);
+  sundayUrl.searchParams.set('workspace','sunday');
+  await send('Page.navigate',{url:sundayUrl.toString()},sid);
+  await until("document.querySelectorAll('.sunday-live-game').length===2",sid,'RedZone synthetic live score cards');
+  const ui=await evalPage("(()=>({cards:document.querySelectorAll('.sunday-live-game').length,clock:document.querySelector('.sunday-live-game.in-progress .sunday-live-game-bottom')?.textContent||'',source:document.querySelector('.sunday-live-root')?.textContent||''}))()",sid);
+  assert.equal(ui.cards,2);
+  assert.match(ui.clock,/Q2/);
+  assert.match(ui.clock,/12:53/);
+  assert.match(ui.source,/CI GENERATED FIXTURE/);
+  await capture(sid,'redzone-synthetic-scoreboard.png');
+  const swapped=await evalPage("(()=>{const button=[...document.querySelectorAll('.sunday-view-switch button')].find(x=>x.textContent?.includes('Delayed verified schedule'));button?.click();return Boolean(button);})()",sid);
+  assert.equal(swapped,true,'Delayed public source toggle missing');
+  await until("!!document.querySelector('.sunday-root')",sid,'delayed verified schedule board');
+  console.log('PASS: RedZone experimental 2-game synthetic score/status render, 30s mode labeling and source switch.');
+
+
 } finally {
   for(const job of pending.values())job.reject(new Error('Browser shutdown'));
   pending.clear();
