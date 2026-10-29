@@ -128,6 +128,40 @@ To reference an official viewer **without ingesting video**, use an angle with
 This does not imply that video is publicly downloadable, film-aligned, or
 licensed for the local processing pipeline.
 
+
+## Automatic offline candidate shot segmentation
+
+The next pipeline stage is already scaffolded as a working deterministic
+FFmpeg research operator. It scans an **authorized local** MP4/WebM file,
+samples up to 8 frames/second by default, and reports scene-change candidate
+timestamps, explicit clip intervals, original file SHA-256, analyzed duration,
+sampling rate and threshold.
+
+```bash
+python scripts/detect_angleiq_shots.py \
+  --video /private/permitted-camera-footage/your-authorized-angle.mp4 \
+  --output /private/angleiq-shot-candidates.json \
+  --max-seconds 45 --fps 8 --threshold 0.32 \
+  --acknowledge-source-terms
+```
+
+A maximum 40 MB file is accepted; the bounded scan defaults to the first
+45 seconds, with a configurable cap of 120 seconds. Results are metadata only,
+saved to a new permission-restricted file; it does not download content,
+export frames, re-encode media, or identify player actions.
+
+**Important:** A scene cut is not necessarily a new camera angle, an exciting
+moment, or an on-field event. The scanner does not classify camera types,
+determine rulings, or claim temporal alignment to tracking. Use its candidate
+intervals to accelerate human review. The `entire_source_scanned` flag
+explicitly discloses truncated analysis, and all timestamps use **video PTS**
+rather than play-snap time.
+
+Before an automatic angle ranker can replace reviewed annotations, we need
+licensed multi-camera training/evaluation clips, labeled cut boundaries,
+angle types, event times, object visibility, blinded human judgments and
+out-of-event holdouts. That evaluation is not complete.
+
 ## Scoring and validation
 
 The score for an annotated camera at a research question is a weighted sum of
