@@ -10,8 +10,8 @@ function formatTime(t:number|null){return t===null?'Not synchronized':t.toFixed(
 function readableScore(x:number|null){
   return x===null?'Unranked':Math.round(x*100)+'/100';
 }
-export function AngleIQPanel({gameId,playId,onBack}:{
-  gameId:string;playId:string;onBack:()=>void;
+export function AngleIQPanel({gameId,playId,trackingSourceSha256,onBack}:{
+  gameId:string;playId:string;trackingSourceSha256:string;onBack:()=>void;
 }){
   const [manifest,setManifest]=useState<AngleIQManifest|null>(null);
   const [manifestError,setManifestError]=useState<string|null>(null);
@@ -64,8 +64,9 @@ export function AngleIQPanel({gameId,playId,onBack}:{
     try{
       if(f.size>ANGLEIQ_MAX_MANIFEST_BYTES)throw new Error('AngleIQ manifest exceeds 250 KB.');
       const parsed=parseAngleIQManifest(JSON.parse(await f.text()) as unknown);
-      if(parsed.game_id!==gameId||parsed.play_id!==playId)
-        throw new Error('Video manifest belongs to a different game/play; choose the matching replay.');
+      if(parsed.game_id!==gameId||parsed.play_id!==playId||
+        parsed.tracking_source_sha256.toLowerCase()!==trackingSourceSha256.toLowerCase())
+        throw new Error('Video manifest belongs to a different game/play or tracking source; choose the matching replay.');
       // Replace the complete source session atomically rather than borrowing files
       // or rights declarations from a previous imported source.
       setMedia(new Map());setRightsConfirmed(false);setManifest(parsed);
