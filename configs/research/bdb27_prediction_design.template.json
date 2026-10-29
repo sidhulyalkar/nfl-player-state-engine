@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "authority": "RESEARCH_ONLY_NO_PROMOTION",
+  "notes": "TEMPLATE ONLY. Before using real outcomes: replace drill and labels with qualified official drill identifier and predeclare a position-specific count-over-opportunities target. Never choose based on the 2025 holdout.",
+  "position": "DB",
+  "drill": "REPLACE_WITH_QUALIFIED_DB_DRILL",
+  "outcome": "REPLACE_WITH_REVIEWED_ROOKIE_COVERAGE_EVENT_RATE",
+  "baseline_features": ["REPLACE_WITH_VERIFIED_COMBINE_TIME_COLUMN", "REPLACE_WITH_VERIFIED_COMBINE_SIZE_COLUMN"],
+  "train_years": [2023, 2024],
+  "test_year": 2025,
+  "min_train": 25,
+  "min_test": 12,
+  "min_opportunities": 20,
+  "ridge_alpha": 10.0,
+  "bootstrap_samples": 500,
+  "permutations": 200,
+  "opportunity_weight_cap": 150,
+  "seed": 2027,
+  "candidate_feature": "abs_asymmetry_pct"
+}
