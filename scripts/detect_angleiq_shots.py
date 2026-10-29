@@ -50,7 +50,7 @@ def shot_intervals(cuts: list[float], seconds: float) -> list[dict]:
     return [
         {"start_video_s":a, "end_video_s":b,
          "duration_s":round(b - a, 3), "qualification":"SCENE_BOUNDARY_CANDIDATE_ONLY"}
-        for a, b in zip(boundaries, boundaries[1:])
+        for a, b in zip(boundaries, boundaries[1:], strict=False)
         if b > a
     ]
 
