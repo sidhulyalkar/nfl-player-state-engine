@@ -119,6 +119,8 @@ test('supplemental camera adds missing evidence instead of duplicating the top v
   nearCopy.id='near_copy';nearCopy.name='Near-duplicate sideline';
   nearCopy.source={type:'external_link',url:'https://example.com/duplicate'};
   nearCopy.anchors=[];
+  nearCopy.evidence[0].clarity=.7;
+  nearCopy.evidence[0].boundary=.95;
   const complement=structuredClone(m.angles[0]);
   complement.id='ground';complement.name='Complementary angle';
   complement.kind='end_zone';
