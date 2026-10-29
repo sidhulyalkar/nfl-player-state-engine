@@ -8,7 +8,10 @@ import pandas as pd
 import pytest
 
 from player_state_engine.research.bdb27_prediction import (
-    StudyDesign, build_panel, evaluate_panel, movement_features,
+    StudyDesign,
+    build_panel,
+    evaluate_panel,
+    movement_features,
 )
 
 
