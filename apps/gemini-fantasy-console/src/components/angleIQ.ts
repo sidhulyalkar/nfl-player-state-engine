@@ -35,7 +35,7 @@ export interface CameraAngle {
 export interface AngleIQManifest {
   schema_version:1;
   data_mode:'RIGHTS_DECLARED_VIDEO_RESEARCH';
-  game_id:string;play_id:string;
+  game_id:string;play_id:string;tracking_source_sha256:string;
   rights:RightsDeclaration;
   events:AngleEvent[];angles:CameraAngle[];
 }
@@ -68,6 +68,7 @@ export function parseAngleIQManifest(input:unknown):AngleIQManifest{
   assert(m.schema_version===1&&m.data_mode==='RIGHTS_DECLARED_VIDEO_RESEARCH','unsupported version or data mode');
   assert(typeof m.game_id==='string'&&/^\d{10}$/.test(m.game_id),'invalid official game ID');
   assert(typeof m.play_id==='string'&&/^\d{1,10}$/.test(m.play_id),'invalid play ID');
+  assert(typeof m.tracking_source_sha256==='string'&&SHA.test(m.tracking_source_sha256),'invalid tracking source SHA-256');
   const r=m.rights;
   assert(!!r&&validString(r.declaration,250)&&
     typeof r.local_playback_authorized==='boolean'&&
