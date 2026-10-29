@@ -197,19 +197,39 @@ export function rankAngleIQ(manifest:AngleIQManifest,eventId:string,objective:Vi
   }).sort((a,b)=>(b.score??-1)-(a.score??-1)||b.coverage-a.coverage||
     a.camera_id.localeCompare(b.camera_id));
 }
+/** Greedy set coverage: the second view should expose details the first misses.
+ * Human-annotated dimensions are coverage claims, NOT adjudicated outcomes.
+ */
 export function complementaryAngleIQ(manifest:AngleIQManifest,eventId:string,objective:ViewObjective='evidence',count=3):AngleRank[]{
   const ranked=rankAngleIQ(manifest,eventId,objective).filter(r=>r.score!==null);
-  if(!ranked.length)return [];
-  const result=[ranked[0]];
-  while(result.length<Math.min(count,ranked.length)){
-    const candidates=ranked.filter(r=>!result.some(x=>x.camera_id===r.camera_id));
-    candidates.sort((a,b)=>(
-      ((b.score??0)+(!result.some(x=>x.kind===b.kind)?0.07:0))-
-      ((a.score??0)+(!result.some(x=>x.kind===a.kind)?0.07:0))
-    )||a.camera_id.localeCompare(b.camera_id));
-    result.push(candidates[0]);
+  if(!ranked.length||count<1)return [];
+  const selected=[ranked[0]];
+  const event=manifest.events.find(e=>e.id===eventId)!;
+  const weights=objective==='cinematic'?CINEMATIC:EVIDENCE_WEIGHTS[event.kind];
+  const total=Object.values(weights).reduce((sum,w)=>sum+Math.abs(w??0),0);
+  const annotation=(id:string)=>manifest.angles.find(a=>a.id===id)!.evidence.find(e=>
+    e.event_id===eventId&&e.provenance==='human_reviewed');
+  const quality=(id:string,key:EvidenceDimension,weight:number):number=>{
+    const raw=annotation(id)?.[key];
+    return raw==null?0:weight<0?1-raw:raw;
+  };
+  while(selected.length<Math.min(count,ranked.length)){
+    const candidates=ranked.filter(r=>!selected.some(x=>x.camera_id===r.camera_id));
+    const marginal=(candidate:AngleRank)=>{
+      let gain=0;
+      for(const [key,weight] of Object.entries(weights) as [EvidenceDimension,number][]){
+        const present=Math.max(...selected.map(s=>quality(s.camera_id,key,weight)));
+        const added=quality(candidate.camera_id,key,weight);
+        gain+=Math.abs(weight)*Math.max(0,added-present);
+      }
+      const diverse=selected.some(s=>s.kind===candidate.kind)?0:0.02;
+      return gain/total+diverse;
+    };
+    candidates.sort((a,b)=>marginal(b)-marginal(a)||
+      (b.score??0)-(a.score??0)||a.camera_id.localeCompare(b.camera_id));
+    selected.push(candidates[0]);
   }
-  return result;
+  return selected;
 }
 /** Browser-only exact media matching; no network access or user-video upload.
  * A digest match establishes identity against the user-declared manifest only.
