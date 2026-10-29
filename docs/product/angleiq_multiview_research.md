@@ -47,6 +47,7 @@ decisions, source authenticity certification, or prediction features.**
   "schema_version": 1,
   "game_id": "2017090700",
   "play_id": "938",
+  "tracking_source_sha256": "REPLACE_WITH_64_CHARACTER_ORIGINAL_TRACKING_SHA256",
   "rights": {
     "declaration": "REPLACE WITH REVIEWED AND APPLICABLE SOURCE TERMS",
     "local_playback_authorized": true,
@@ -165,6 +166,8 @@ npm run build
 From the repository root, `pytest -q tests/product/test_angleiq_manifest.py`
 validates source-side constraints without requiring FFprobe by stubbing the
 duration probe in synthetic tests. Real CLI execution requires FFprobe.
+
+The manifest's `tracking_source_sha256` must exactly match the imported historical replay's declared original tracking CSV digest. This is a consistency check, not independent authentication of NFL source bytes.
 
 AngleIQ v1 is on a separate draft PR stacked atop the source-only Play Lab
 integration. Do not merge either to main before the underlying real-source
