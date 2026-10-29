@@ -142,12 +142,13 @@ def canonical_combine(
     step = 1.0 / config.nominal_hz
     segments: list[pd.DataFrame] = []
     trial_rows: list[dict] = []
+    attempt_starts = raw.groupby(keys[:-1], sort=False)["time"].min().to_dict()
     bad_intervals = 0
     discarded = 0
     bad_speed = 0
     for key, trial in raw.groupby(keys, sort=False, dropna=False):
         trial = trial.reset_index(drop=True)
-        t = (trial.time - trial.time.iloc[0]).dt.total_seconds().to_numpy(dtype=float)
+        t = (trial.time - attempt_starts[key[:-1]]).dt.total_seconds().to_numpy(dtype=float)
         x = trial.x.to_numpy(dtype=float)
         y = config.y_axis_sign * trial.y.to_numpy(dtype=float)
         interval = np.diff(t)
@@ -159,7 +160,9 @@ def canonical_combine(
         bad_speed += int((displacement > config.max_speed_yd_s * np.maximum(interval, 0)).sum())
         starts = np.r_[0, np.flatnonzero(breaks) + 1]
         ends = np.r_[starts[1:], len(trial)]
-        trial_id = ":".join(str(v) for v in key)
+        # event_id may denote a subevent within one actual attempt; never
+        # treat its presence as extra independent athletic replication.
+        trial_id = ":".join(str(v) for v in key[:-1])
         retained = 0
         for part, (start, end) in enumerate(zip(starts, ends, strict=True)):
             if end - start < config.min_frames_per_segment:
@@ -168,7 +171,7 @@ def canonical_combine(
             one = trial.iloc[start:end]
             seg = pd.DataFrame({
                 "source_kind": "combine", "source_id": str(key[3]),
-                "segment_id": f"{trial_id}:part{part}",
+                "segment_id": f"{trial_id}:event{key[-1]}:part{part}",
                 "independent_trial_id": trial_id, "player_id": str(key[1]),
                 "frame_id": np.arange(len(one), dtype=int),
                 "time_s": t[start:end],
@@ -183,11 +186,14 @@ def canonical_combine(
                            "draft_year": int(key[0]), "drill_name": str(key[3]),
                            "frames_total": len(trial), "frames_retained": retained,
                            "continuous_parts": int(sum((ends - starts) >= config.min_frames_per_segment)),
-                           "sample_gaps": int(breaks.sum())})
+                           "sample_gaps": int(breaks.sum()), "source_events": 1})
     columns = ["source_kind", "source_id", "segment_id", "independent_trial_id",
                "player_id", "frame_id", "time_s", "x", "y", "position", "draft_year", "drill_type"]
     canonical = pd.concat(segments, ignore_index=True) if segments else pd.DataFrame(columns=columns)
-    trials = pd.DataFrame(trial_rows)
+    trials = pd.DataFrame(trial_rows).groupby(
+        ["independent_trial_id", "player_id", "position", "draft_year", "drill_name"],
+        as_index=False,
+    )[["frames_total", "frames_retained", "continuous_parts", "sample_gaps", "source_events"]].sum()
     audit.update({"unique_trials": len(trials), "retained_frames": len(canonical),
                   "discarded_short_segment_frames": int(discarded),
                   "rejected_intervals": bad_intervals, "rejected_teleports": bad_speed,

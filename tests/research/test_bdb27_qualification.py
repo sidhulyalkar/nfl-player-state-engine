@@ -147,3 +147,19 @@ def test_missing_header_and_symlinks_fail_closed(tmp_path: Path):
     with pytest.raises(ValueError, match="symlinked"):
         qualify_directory(source, tmp_path / "audit", QualificationConfig(1),
                           source_rights_acknowledged=True)
+
+
+def test_multiple_event_ids_in_one_physical_attempt_are_not_independent():
+    e1 = attempt(13, side=1)
+    e2 = attempt(13, side=-1).assign(event_id="other-event")
+    e2["time"] = (pd.to_datetime(e2.time, utc=True, format="mixed") + pd.Timedelta(seconds=3)).astype(str)
+    canonical, trials, audit = canonical_combine(
+        pd.concat([e1, e2], ignore_index=True), players(), QualificationConfig(1))
+    assert audit["unique_trials"] == 1
+    assert len(trials) == 1 and trials.source_events.iloc[0] == 2
+    assert canonical.segment_id.nunique() == 2
+    assert canonical.independent_trial_id.nunique() == 1
+    events = extract_turn_events(canonical)
+    assert set(events.turn) == {"left", "right"}
+    assert events.time_s.max() > 3.0  # source-attempt clock, not per-subevent reset
+    assert asymmetry_profiles(events, bootstrap_samples=100).iloc[0].status == "insufficient_matched_evidence"
