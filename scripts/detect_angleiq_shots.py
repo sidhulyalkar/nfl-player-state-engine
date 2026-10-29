@@ -15,7 +15,10 @@ import stat
 import subprocess
 from pathlib import Path
 
-from scripts.build_angleiq_manifest import MAX_CLIP_BYTES, _digest, _duration
+if __package__:
+    from .build_angleiq_manifest import MAX_CLIP_BYTES, _digest, _duration
+else:
+    from build_angleiq_manifest import MAX_CLIP_BYTES, _digest, _duration
 
 SCENE_TIME = re.compile(r"pts_time:\s*([0-9]+(?:\.[0-9]+)?)")
 
