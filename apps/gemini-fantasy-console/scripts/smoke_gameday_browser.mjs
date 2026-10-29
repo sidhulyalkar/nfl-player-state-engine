@@ -308,7 +308,7 @@ try {
   const sourceHash=createHash('sha256').update(videoBytes).digest('hex');
   const angleManifest={
     schema_version:1,data_mode:'RIGHTS_DECLARED_VIDEO_RESEARCH',
-    game_id:'2017090700',play_id:'938',
+    game_id:'2017090700',play_id:'938',tracking_source_sha256:'c'.repeat(64),
     rights:{declaration:'CI GENERATED VIDEO FIXTURE ONLY; NO THIRD-PARTY RIGHTS',
       local_playback_authorized:true,derivative_analysis_authorized:true,
       redistribution_authorized:false},
