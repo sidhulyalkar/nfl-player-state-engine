@@ -120,10 +120,13 @@ def assemble_manifest(config: dict, media_dir: Path) -> dict:
     _require(config.get("schema_version") == 1, "Config requires schema_version 1")
     game_id = config.get("game_id")
     play_id = config.get("play_id")
+    tracking_sha = config.get("tracking_source_sha256")
     _require(isinstance(game_id, str) and re.fullmatch(r"\d{10}", game_id) is not None,
              "Invalid game ID")
     _require(isinstance(play_id, str) and re.fullmatch(r"\d{1,10}", play_id) is not None,
              "Invalid play ID")
+    _require(isinstance(tracking_sha, str) and re.fullmatch(r"[a-fA-F0-9]{64}", tracking_sha) is not None,
+             "Invalid original tracking file SHA-256")
     rights = config.get("rights")
     _require(isinstance(rights, dict) and
              isinstance(rights.get("declaration"), str) and
@@ -211,7 +214,8 @@ def assemble_manifest(config: dict, media_dir: Path) -> dict:
         })
     return {
         "schema_version": 1, "data_mode": "RIGHTS_DECLARED_VIDEO_RESEARCH",
-        "game_id": game_id, "play_id": play_id, "rights": rights,
+        "game_id": game_id, "play_id": play_id,
+        "tracking_source_sha256": tracking_sha, "rights": rights,
         "events": events, "angles": enriched,
     }
 
