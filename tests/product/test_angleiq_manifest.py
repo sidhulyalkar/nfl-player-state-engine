@@ -15,6 +15,7 @@ def _config() -> dict:
         "schema_version": 1,
         "game_id": "2017090700",
         "play_id": "938",
+        "tracking_source_sha256": "c" * 64,
         "rights": {
             "declaration": "Synthetic local unit-test source, not real NFL media",
             "local_playback_authorized": True,
@@ -69,6 +70,7 @@ def test_local_video_metadata_and_streamed_digest(tmp_path: Path) -> None:
 @pytest.mark.parametrize("mutate,message", [
     (lambda c: c["rights"].update(redistribution_authorized=True), "rights"),
     (lambda c: c["rights"].update(local_playback_authorized=False), "rights"),
+    (lambda c: c.update(tracking_source_sha256="INVALID"), "tracking file SHA"),
     (lambda c: c["angles"][0]["source"].update(filename="../other.mp4"), "filename"),
     (lambda c: c["angles"][0]["anchors"].append(
         {"event_time_s": 1.0, "media_time_s": 1.3}), "anchors"),
