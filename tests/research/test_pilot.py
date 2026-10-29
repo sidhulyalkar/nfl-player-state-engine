@@ -19,5 +19,6 @@ def test_offline_pilot_provenance_and_immutable_raw_input(tmp_path) -> None:
     assert result["authority"] == "RESEARCH_ONLY_NO_PROMOTION"
     assert result["events"] == 2
     assert result["estimated_profiles"] == 0
+    assert result["estimated_field_side_profiles"] == 0
     assert hashlib.sha256(input_csv.read_bytes()).hexdigest() == digest
     assert json.loads((tmp_path / "pilot" / "manifest.json").read_text())["source"] == "synthetic_fixture"

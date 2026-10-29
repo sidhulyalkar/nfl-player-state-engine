@@ -305,11 +305,15 @@ def asymmetry_profiles(
             (speed, angle) in intersection
             for speed, angle in zip(chunk.speed_bin, chunk.angle_bin, strict=True)
         ]].copy()
-        estimate = _matched_delta(subset)
+        # Unknown ball/drive context is not a meaningful field-side stratum.
+        # It must not become a statistically "estimated" field-side profile.
+        missing_context = any(value == "unknown" for value in key[4:])
+        estimate = None if missing_context else _matched_delta(subset)
         nleft = subset.loc[subset.turn == "left", "segment_id"].nunique()
         nright = subset.loc[subset.turn == "right", "segment_id"].nunique()
         record = dict(zip(groups, key, strict=True))
-        record.update({"status": "insufficient_matched_evidence", "asymmetry_pct": None,
+        record.update({"status": "missing_field_context" if missing_context else "insufficient_matched_evidence",
+                       "asymmetry_pct": None,
                        "ci_low_pct": None, "ci_high_pct": None,
                        "n_left": int((subset.turn == "left").sum()),
                        "n_right": int((subset.turn == "right").sum()),

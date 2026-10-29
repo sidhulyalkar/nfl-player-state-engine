@@ -200,6 +200,8 @@ def test_tagged_unknown_strata_never_misreport_boundary() -> None:
     tagged = tag_event_field_sides(extract_turn_events(data), data)
     result = asymmetry_profiles(tagged, strata_columns=("boundary_field",), bootstrap_samples=100)
     assert result.iloc[0].boundary_field == "unknown"
+    assert result.iloc[0].status == "missing_field_context"
+    assert pd.isna(result.iloc[0].asymmetry_pct)
     assert not (result.boundary_field == "boundary").any()
 
 
