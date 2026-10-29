@@ -109,3 +109,25 @@ test('exact local bytes selected by user, tampered bytes fail atomically',async(
   const denied=copy();denied.rights.derivative_analysis_authorized=false;
   await assert.rejects(verifyLocalAngleMedia(parseAngleIQManifest(denied),[file]),/not authorized/);
 });
+
+test('supplemental camera adds missing evidence instead of duplicating the top view',()=>{
+  const m=copy();
+  const lead=m.angles[0].evidence[0];
+  Object.assign(lead,{ball:1,boundary:1,control:.2,ground_contact:.1,
+    clarity:.8,continuity:.8,occlusion:0});
+  const nearCopy=structuredClone(m.angles[0]);
+  nearCopy.id='near_copy';nearCopy.name='Near-duplicate sideline';
+  nearCopy.source={type:'external_link',url:'https://example.com/duplicate'};
+  nearCopy.anchors=[];
+  const complement=structuredClone(m.angles[0]);
+  complement.id='ground';complement.name='Complementary angle';
+  complement.kind='end_zone';
+  complement.source={type:'external_link',url:'https://example.com/ground'};
+  complement.anchors=[];
+  Object.assign(complement.evidence[0],{ball:.2,boundary:.4,control:1,
+    ground_contact:1,clarity:.6,continuity:.6,occlusion:0});
+  m.angles=[m.angles[0],nearCopy,complement];
+  const parsed=parseAngleIQManifest(m);
+  assert.equal(rankAngleIQ(parsed,'catch')[0].camera_id,'sideline');
+  assert.equal(complementaryAngleIQ(parsed,'catch', 'evidence',2)[1].camera_id,'ground');
+});
