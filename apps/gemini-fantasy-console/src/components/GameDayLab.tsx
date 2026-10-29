@@ -343,7 +343,7 @@ export function GameDayLab() {
     return {x:a.x+(b.x-a.x)*u,y:a.y+(b.y-a.y)*u};
   },[time,play.kind]);
   return historical ? (angleIQOpen
-    ? <AngleIQPanel key={replayKey(historical)} gameId={historical.game_id} playId={historical.play_id} onBack={()=>setAngleIQOpen(false)}/>
+    ? <AngleIQPanel key={replayKey(historical)} gameId={historical.game_id} playId={historical.play_id} trackingSourceSha256={historical.source_file_sha256} onBack={()=>setAngleIQOpen(false)}/>
     : comparisonRight && selectReplay(replayLibrary,comparisonRight)
     ? <HistoricalPlayComparison left={historical} right={selectReplay(replayLibrary,comparisonRight)!}
         library={replayLibrary} leftVerified={verifiedReplayKeys.has(replayKey(historical))}
