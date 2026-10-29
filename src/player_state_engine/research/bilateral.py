@@ -199,6 +199,11 @@ def tag_event_field_sides(events: pd.DataFrame, tracking: pd.DataFrame) -> pd.Da
     """
     if not set(EVENT_COLUMNS).issubset(events.columns):
         raise ValueError("invalid movement event table")
+    if events.empty:
+        empty = events.copy()
+        for name in ("offense_left_right", "boundary_field", "distance_to_nearest_sideline_yd", "stadium_y"):
+            empty[name] = pd.Series(dtype=object)
+        return empty
     keys = ["source_kind", "source_id", "segment_id", "player_id", "frame_id"]
     required = set(keys + ["x", "y"])
     if not required.issubset(tracking.columns):

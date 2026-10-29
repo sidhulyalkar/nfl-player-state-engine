@@ -209,3 +209,14 @@ def test_field_side_invalid_values_fail_instead_of_guessing() -> None:
     data = trajectory("game", 1).assign(source_kind="nfl", offense_direction=0, ball_y=10)
     with pytest.raises(ValueError, match="offense_direction"):
         tag_event_field_sides(extract_turn_events(data), data)
+
+
+def test_empty_events_preserve_field_side_contract() -> None:
+    from player_state_engine.research.bilateral import tag_event_field_sides
+
+    raw = trajectory("static", 1).assign(x=10.0, y=10.0)
+    events = extract_turn_events(raw)
+    tagged = tag_event_field_sides(events, raw)
+    assert tagged.empty
+    assert "boundary_field" in tagged.columns
+    assert asymmetry_profiles(tagged, strata_columns=("boundary_field",)).empty
