@@ -9,7 +9,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from player_state_engine.research.bilateral import asymmetry_profiles, extract_turn_events
+from player_state_engine.research.bilateral import (
+    asymmetry_profiles,
+    extract_turn_events,
+    tag_event_field_sides,
+)
 
 
 def digest(path: Path) -> str:
@@ -27,11 +31,13 @@ def run(input_csv: Path, output_dir: Path, *, synthetic: bool = False) -> dict:
         raise ValueError("output must not overwrite input")
     raw_hash = digest(input_csv)
     raw = pd.read_csv(input_csv)
-    events = extract_turn_events(raw)
+    events = tag_event_field_sides(extract_turn_events(raw), raw)
     profiles = asymmetry_profiles(events)
+    side_profiles = asymmetry_profiles(events, strata_columns=("boundary_field",))
     output_dir.mkdir(parents=True, exist_ok=True)
     events.to_csv(output_dir / "events.csv", index=False)
     profiles.to_csv(output_dir / "asymmetry_profiles.csv", index=False)
+    side_profiles.to_csv(output_dir / "field_side_profiles.csv", index=False)
     manifest = {
         "schema_version": 1,
         "authority": "RESEARCH_ONLY_NO_PROMOTION",
@@ -41,6 +47,7 @@ def run(input_csv: Path, output_dir: Path, *, synthetic: bool = False) -> dict:
         "events": int(len(events)),
         "profiles": int(len(profiles)),
         "estimated_profiles": int(profiles.status.eq("estimated").sum()) if len(profiles) else 0,
+        "estimated_field_side_profiles": int(side_profiles.status.eq("estimated").sum()) if len(side_profiles) else 0,
         "limitations": [
             "path-left and path-right are not anatomical plant-leg identities",
             "no gaze, cognition, joint loading, or injury risk are inferred",

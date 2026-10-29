@@ -189,6 +189,52 @@ def extract_turn_events(
     return pd.DataFrame(rows, columns=EVENT_COLUMNS)
 
 
+
+def tag_event_field_sides(events: pd.DataFrame, tracking: pd.DataFrame) -> pd.DataFrame:
+    """Join explicit field context to detected events; never infer offense/ball data.
+
+    Optional tracking columns: `offense_direction` (+1/-1) and `ball_y` (yards).
+    Combine events deliberately carry UNKNOWN field labels. Stadium y and
+    distance-to-sideline are available when the source uses canonical geometry.
+    """
+    if not set(EVENT_COLUMNS).issubset(events.columns):
+        raise ValueError("invalid movement event table")
+    keys = ["source_kind", "source_id", "segment_id", "player_id", "frame_id"]
+    required = set(keys + ["x", "y"])
+    if not required.issubset(tracking.columns):
+        raise ValueError("missing canonical tracking coordinates/identities")
+    if tracking.duplicated(keys).any():
+        raise ValueError("ambiguous tracking event join")
+    fields = keys + ["x", "y"]
+    for name in ("offense_direction", "ball_y"):
+        if name in tracking.columns:
+            fields.append(name)
+    joined = events.merge(tracking[fields], on=keys, how="left", validate="many_to_one", indicator=True)
+    if (joined._merge != "both").any():
+        raise ValueError("unmatched event frames; cannot attach field side")
+    joined = joined.drop(columns="_merge")
+    context = []
+    for row in joined.itertuples(index=False):
+        if row.source_kind != "nfl":
+            # The Combine does not have an offense, ball hash or boundary side.
+            context.append({"offense_left_right": None, "boundary_field": None,
+                            "distance_to_nearest_sideline_yd": None, "stadium_y": None})
+            continue
+        direction = getattr(row, "offense_direction", None)
+        ball_y = getattr(row, "ball_y", None)
+        if pd.isna(direction):
+            direction = None
+        if pd.isna(ball_y):
+            ball_y = None
+        source = field_context(float(row.x), float(row.y),
+                               offense_direction=direction, ball_y=ball_y)
+        context.append({k: source[k] for k in
+                       ("offense_left_right", "boundary_field",
+                        "distance_to_nearest_sideline_yd", "stadium_y")})
+    return pd.concat([joined.drop(columns=["x", "y", "offense_direction", "ball_y"], errors="ignore").reset_index(drop=True),
+                      pd.DataFrame(context)], axis=1)
+
+
 def _matched_delta(subset: pd.DataFrame) -> float | None:
     differences: list[float] = []
     weights: list[int] = []
@@ -211,6 +257,7 @@ def asymmetry_profiles(
     minimum_independent_segments: int = 3,
     bootstrap_samples: int = 400,
     seed: int = 2027,
+    strata_columns: tuple[str, ...] = (),
 ) -> pd.DataFrame:
     """Compare right-versus-left *path turn* retention in matched demand bins.
 
@@ -223,15 +270,26 @@ def asymmetry_profiles(
         raise ValueError(f"missing event fields: {sorted(required - set(events.columns))}")
     if minimum_independent_segments < 2 or bootstrap_samples < 100:
         raise ValueError("insufficient uncertainty evaluation settings")
+    allowed_strata = {"offense_left_right", "boundary_field"}
+    if len(set(strata_columns)) != len(strata_columns) or not set(strata_columns).issubset(allowed_strata):
+        raise ValueError("strata_columns may contain only unique explicit field-side fields")
+    if not set(strata_columns).issubset(events.columns):
+        raise ValueError("missing explicit field-side tags; call tag_event_field_sides")
     if events.empty:
-        return pd.DataFrame(columns=["source_kind", "source_id", "player_id", "position", "status", "asymmetry_pct", "ci_low_pct", "ci_high_pct", "n_left", "n_right", "segments_left", "segments_right", "matched_bins"])
+        return pd.DataFrame(columns=["source_kind", "source_id", "player_id", "position", *strata_columns,
+                                     "status", "asymmetry_pct", "ci_low_pct", "ci_high_pct",
+                                     "n_left", "n_right", "segments_left", "segments_right", "matched_bins"])
     vals = pd.to_numeric(events.speed_retention, errors="coerce")
     if not np.isfinite(vals.to_numpy(dtype=float)).all() or (vals <= 0).any():
         raise ValueError("invalid retention metric")
     if not events.turn.isin(["left", "right"]).all():
         raise ValueError("event turn must be left or right")
     result: list[dict] = []
-    groups = ["source_kind", "source_id", "player_id", "position"]
+    groups = ["source_kind", "source_id", "player_id", "position", *strata_columns]
+    events = events.copy()
+    for col in strata_columns:
+        # Missing field context must remain explicitly UNKNOWN, not be dropped.
+        events[col] = events[col].fillna("unknown")
     for key, chunk in events.groupby(groups, sort=True):
         left = chunk.loc[chunk.turn == "left"]
         right = chunk.loc[chunk.turn == "right"]

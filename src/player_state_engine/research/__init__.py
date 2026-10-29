@@ -5,6 +5,7 @@ from .bilateral import (
     asymmetry_profiles,
     extract_turn_events,
     field_context,
+    tag_event_field_sides,
 )
 from .head_attention import CandidateTarget, HeadObservation, head_target_evidence
 
@@ -15,5 +16,6 @@ __all__ = [
     "asymmetry_profiles",
     "extract_turn_events",
     "field_context",
+    "tag_event_field_sides",
     "head_target_evidence",
 ]

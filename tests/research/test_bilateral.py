@@ -154,3 +154,58 @@ def test_asymmetry_abstains_without_matched_demands() -> None:
 
 def test_empty_event_contract() -> None:
     assert len(asymmetry_profiles(extract_turn_events(trajectory("static", 1).assign(x=0.0, y=10.0)))) == 0
+
+
+def test_tag_field_side_uses_exact_event_frame_and_explicit_ball() -> None:
+    from player_state_engine.research.bilateral import tag_event_field_sides
+
+    data = trajectory("game-play", 1)
+    data["source_kind"] = "nfl"
+    data["source_id"] = "game-1"
+    data["y"] += 14  # explicitly place the runner on the north side
+    data["offense_direction"] = -1
+    data["ball_y"] = 4.0
+    events = extract_turn_events(data)
+    tagged = tag_event_field_sides(events, data)
+    assert len(tagged) == 1
+    assert tagged.iloc[0].offense_left_right == "right"  # y near north, offense toward -X
+    assert tagged.iloc[0].boundary_field == "field"  # ball near south sideline
+    assert tagged.iloc[0].distance_to_nearest_sideline_yd > 0
+
+
+def test_tag_field_side_abstains_on_combine_and_missing_offense_ball() -> None:
+    from player_state_engine.research.bilateral import tag_event_field_sides
+
+    data = trajectory("combine", 1)
+    tagged = tag_event_field_sides(extract_turn_events(data), data)
+    assert pd.isna(tagged.iloc[0].boundary_field)
+    assert pd.isna(tagged.iloc[0].offense_left_right)
+    game = data.assign(source_kind="nfl")
+    tagged = tag_event_field_sides(extract_turn_events(game), game)
+    assert pd.isna(tagged.iloc[0].boundary_field)
+    assert pd.isna(tagged.iloc[0].offense_left_right)
+
+
+def test_stratified_asymmetry_rejects_implicit_untagged_data() -> None:
+    events = extract_turn_events(pd.concat([trajectory("l0", 1), trajectory("r0", -1)]))
+    with pytest.raises(ValueError, match="tag_event_field_sides"):
+        asymmetry_profiles(events, strata_columns=("boundary_field",))
+
+
+def test_tagged_unknown_strata_never_misreport_boundary() -> None:
+    from player_state_engine.research.bilateral import tag_event_field_sides
+
+    data = pd.concat([trajectory(f"l{i}", 1) for i in range(4)] +
+                     [trajectory(f"r{i}", -1) for i in range(4)], ignore_index=True)
+    tagged = tag_event_field_sides(extract_turn_events(data), data)
+    result = asymmetry_profiles(tagged, strata_columns=("boundary_field",), bootstrap_samples=100)
+    assert result.iloc[0].boundary_field == "unknown"
+    assert not (result.boundary_field == "boundary").any()
+
+
+def test_field_side_invalid_values_fail_instead_of_guessing() -> None:
+    from player_state_engine.research.bilateral import tag_event_field_sides
+
+    data = trajectory("game", 1).assign(source_kind="nfl", offense_direction=0, ball_y=10)
+    with pytest.raises(ValueError, match="offense_direction"):
+        tag_event_field_sides(extract_turn_events(data), data)

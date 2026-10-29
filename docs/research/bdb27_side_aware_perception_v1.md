@@ -28,6 +28,8 @@ One row per sample with exactly **explicitly constructed** keys:
 
 **Critical:** Official raw coordinate direction, drill attempt key, units, timestamps and field transforms must be verified against the downloaded official 2027 data dictionary. Do not feed CSVs directly based on older BDB schemas or infer anatomical sides from raw `dir`. The v1 package intentionally does not silently guess source field mappings. There is no authentication of source license/provenance from these files. Competition data stays outside Git.
 
+`tag_event_field_sides(events, tracking)` attaches field-side context to detected **NFL** turns by exact sample key, only when explicit optional `offense_direction` (+1/-1) and `ball_y` are present in the canonical input. Combine turns remain untagged. `asymmetry_profiles(events, strata_columns=("boundary_field",))` estimates separate boundary-versus-field profiles only when matched events are sufficient; otherwise `unknown` and abstention remain visible. The offline CLI emits `field_side_profiles.csv` alongside the main profile.
+
 When using a game scene, `field_context(x, y, offense_direction=+1/-1, ball_y=...)` returns **distinct** offensive left/right, boundary/field side, and distance to sideline. It abstains on boundary/field near a centered ball or without `ball_y`. The frame coordinate convention must be established for the source before using these labels. The ball hash, offensive direction, and actual assignment must not be conflated with anatomical handedness.
 
 ## Running the self-contained offline pilot
@@ -40,7 +42,7 @@ python scripts/run_bdb27_bilateral_pilot.py \
   --output-dir /local/bdb27_pilot
 ```
 
-Use `--synthetic-fixture` **only** for generated demonstration data. The script streams input SHA-256, doesn't modify/copy raw input, and emits `events.csv`, `asymmetry_profiles.csv`, and `manifest.json` with `RESEARCH_ONLY_NO_PROMOTION`. Put real and derived restricted data in an ignored, access-controlled local directory.
+Use `--synthetic-fixture` **only** for generated demonstration data. The script streams input SHA-256, doesn't modify/copy raw input, and emits `events.csv`, `asymmetry_profiles.csv`, `field_side_profiles.csv`, and `manifest.json` with `RESEARCH_ONLY_NO_PROMOTION`. Put real and derived restricted data in an ignored, access-controlled local directory.
 
 ## Scientific design
 
