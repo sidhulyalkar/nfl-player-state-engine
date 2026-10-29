@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from scripts.build_angleiq_manifest import assemble_manifest, _digest, _read_config
+from scripts.build_angleiq_manifest import _digest, _read_config, assemble_manifest
 
 
 def _config() -> dict:
