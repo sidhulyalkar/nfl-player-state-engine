@@ -18,7 +18,7 @@ def test_scene_timestamps_are_deduplicated_and_short_fragments_removed() -> None
         "[Parsed_showinfo_3] n:3 pts_time:2.10 pos:110\n"
         "[Parsed_showinfo_3] n:4 pts_time:2.88 pos:112\n"
     )
-    assert scene_candidates(log, 3) == [.55, 2.1, 2.88] if False else [.55, 2.1]
+    assert scene_candidates(log, 3) == [.55, 2.1]
     shots = shot_intervals([.55, 2.1], 3)
     assert len(shots) == 3
     assert shots[0]["start_video_s"] == 0
