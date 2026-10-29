@@ -171,7 +171,7 @@ def canonical_combine(
                 "segment_id": f"{trial_id}:part{part}",
                 "independent_trial_id": trial_id, "player_id": str(key[1]),
                 "frame_id": np.arange(len(one), dtype=int),
-                "time_s": t[start:end] - t[start],
+                "time_s": t[start:end],
                 "x": x[start:end], "y": y[start:end],
                 "position": str(one.combine_position.iloc[0]),
                 "draft_year": int(key[0]), "drill_type": str(key[2]),

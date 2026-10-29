@@ -44,7 +44,7 @@ def field_context(
     *,
     offense_direction: int | None,
     ball_y: float | None = None,
-    geometry: FieldFrame = FieldFrame(),
+    geometry: FieldFrame | None = None,
 ) -> dict[str, float | str | None]:
     """Report different field-side notions without conflating body and stadium sides.
 
@@ -52,6 +52,7 @@ def field_context(
     required for the short-side / wide-side distinction. In the middle of the
     field there is no defensible boundary/field classification, so abstain.
     """
+    geometry = geometry if geometry is not None else FieldFrame()
     w = geometry.field_width_yards
     if not all(np.isfinite(v) for v in (x, y)) or not 0 <= y <= w:
         raise ValueError("x/y must be finite and y within canonical field width")

@@ -55,6 +55,26 @@ Outputs include trial/play coverage tables, detected turn events, eligibility by
 5. **G4 Measurement validation:** Manually annotate a stratified sample of drill trajectories; predefine turn tolerance and compare detector precision/recall. Analyze detector sensitivity to windows, thresholds, clipping, dropout and coordinate reflections. No automatic promotion based on synthetic success.
 6. **G5 Prediction, future:** Freeze one DB or DL drill and an independently justified NFL endpoint. Compare conventional Combine baseline, simple sensor metrics and signed/sequence metrics on exactly the same player-disjoint, draft-cohort holdout. Report player-level confidence intervals, sample denominators and negative controls; do not select features on the final holdout.
 
+## Manual event-detector validation
+
+Before trusting any player asymmetry, independently review a prespecified, representative sample of complete raw drill attempts, including **no-turn trials**. Reviews should be blind to the model output. Save:
+
+- `reviewed_trials.csv`: one row per complete trial and annotator with `source_kind,source_id,player_id,independent_trial_id,annotator,complete_review` (boolean true).
+- `human_labels.csv`: one row per human-labeled event with those five identity fields plus `time_s,turn` (`left`/`right`). No-turn trials have **no positive label rows** but remain in reviewed_trials.
+- `turn_events_RESEARCH_ONLY.csv`: automatically generated detections with the same original-trial time base.
+
+Run:
+
+```bash
+python scripts/evaluate_bdb27_turn_annotations.py \
+  --detections /secure/research/combine/turn_events_RESEARCH_ONLY.csv \
+  --reviewed-trials /secure/research/reviewed_trials.csv \
+  --human-labels /secure/research/human_labels.csv \
+  --output-dir /secure/research/event-validation --tolerance-s 0.2
+```
+
+The evaluator uses one-to-one temporal matching within each original trial and direction, reports precision/recall/F1 **separately by annotator**, and does not confuse absent labels from unreviewed trials with true negatives. Review selection should include drills, positions, seasons, low/high speed, occlusion/low-quality examples, and random no-turn trials. Assess rater agreement and tune any detector only on development reviews, preserving a frozen held-out human-reviewed sample.
+
 ### Candidate negative controls
 
 - Shuffle player identities within position and draft class before linkage.

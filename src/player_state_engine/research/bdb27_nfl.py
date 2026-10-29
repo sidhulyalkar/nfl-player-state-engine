@@ -14,7 +14,11 @@ import numpy as np
 import pandas as pd
 
 from .bdb27_qualification import (
-    QualificationConfig, _header, _local_file, _prepare_players, source_digest,
+    QualificationConfig,
+    _header,
+    _local_file,
+    _prepare_players,
+    source_digest,
 )
 from .bilateral import asymmetry_profiles, extract_turn_events, tag_event_field_sides
 
@@ -125,7 +129,7 @@ def canonical_rookie_game(
                 "independent_trial_id": trial_id,
                 "player_id": str(key[3]),
                 "frame_id": np.arange(end-start, dtype=int),
-                "time_s": times[start:end] - times[start],
+                "time_s": times[start:end],
                 "x": xx[start:end], "y": yy[start:end],
                 "position": position, "draft_year": int(play.draft_year.iloc[0]),
             })

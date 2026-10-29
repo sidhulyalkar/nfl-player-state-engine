@@ -3,14 +3,14 @@ from __future__ import annotations
 
 import json
 
+import pandas as pd
 import pytest
 
-from scripts.build_bdb27_transfer_audit import build
 from player_state_engine.research.bdb27_nfl import run_rookie_game_audit
 from player_state_engine.research.bdb27_qualification import QualificationConfig, qualify_directory
+from scripts.build_bdb27_transfer_audit import build
 from tests.research.test_bdb27_nfl import games, nfl_frames
 from tests.research.test_bdb27_qualification import attempt, players
-import pandas as pd
 
 
 def test_audit_linkage_never_mistakes_synthetic_profiles_for_validated_outcomes(tmp_path):

@@ -5,11 +5,15 @@ import pandas as pd
 import pytest
 
 from player_state_engine.research.bdb27_nfl import (
-    canonical_rookie_game, rookie_linkage, run_rookie_game_audit,
+    canonical_rookie_game,
+    rookie_linkage,
+    run_rookie_game_audit,
 )
 from player_state_engine.research.bdb27_qualification import QualificationConfig
 from player_state_engine.research.bilateral import (
-    asymmetry_profiles, extract_turn_events, tag_event_field_sides,
+    asymmetry_profiles,
+    extract_turn_events,
+    tag_event_field_sides,
 )
 from tests.research.test_bdb27_qualification import attempt, players
 
