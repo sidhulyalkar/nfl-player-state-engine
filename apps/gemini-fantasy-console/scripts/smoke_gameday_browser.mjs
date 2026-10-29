@@ -295,6 +295,61 @@ try {
 
   console.log('PASS: real WebGL2 + 2D switch + synthetic CI replay import + recorded frame stepping + travel disclosure.');
 
+  // AngleIQ is tested with synthetic local metadata/video bytes only.
+  // No copyrighted NFL clips, source streams, or actual game findings.
+  const angleReplay={...fixture,game_id:'2017090700',play_id:'938'};
+  const addAngleReplay=await evalPage("(()=>{const input=document.querySelector('input[type=file][accept*=\\\"json\\\"]');if(!input)return false;const fixture="+JSON.stringify(angleReplay)+";const dt=new DataTransfer();dt.items.add(new File([JSON.stringify(fixture)],'ci-angle-research-replay.json',{type:'application/json'}));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));return true})()",sid);
+  assert.equal(addAngleReplay,true,'AngleIQ fixture needs historical replay input');
+  await until("document.querySelector('.gameday-head')?.textContent?.includes('2017090700')&&document.querySelector('.gameday-head')?.textContent?.includes('play 938')",sid,'synthetic numeric research identity');
+  const angleiqOpened=await evalPage("(()=>{const b=document.querySelector('button[aria-label=\\\"Open AngleIQ multi-angle review\\\"]');b?.click();return !!b})()",sid);
+  assert.equal(angleiqOpened,true,'AngleIQ entrypoint absent');
+  await until("document.querySelector('main[aria-label=\\\"AngleIQ research video review\\\"]')!==null",sid,'AngleIQ view');
+  const videoBytes='synthetic video bytes';
+  const sourceHash=createHash('sha256').update(videoBytes).digest('hex');
+  const angleManifest={
+    schema_version:1,data_mode:'RIGHTS_DECLARED_VIDEO_RESEARCH',
+    game_id:'2017090700',play_id:'938',tracking_source_sha256:'c'.repeat(64),
+    rights:{declaration:'CI GENERATED VIDEO FIXTURE ONLY; NO THIRD-PARTY RIGHTS',
+      local_playback_authorized:true,derivative_analysis_authorized:true,
+      redistribution_authorized:false},
+    events:[{id:'foot',event_time_s:.2,label:'Boundary review',question:'Can this view show ball and foot?',kind:'boundary_catch'}],
+    angles:[
+      {id:'sideline',name:'Synthetic sideline',kind:'sideline',
+        source:{type:'local_file',filename:'synthetic-angle.mp4',sha256:sourceHash,bytes:21,duration_s:3},
+        anchors:[{event_time_s:0,media_time_s:.4},{event_time_s:.3,media_time_s:.7}],
+        evidence:[{event_id:'foot',provenance:'human_reviewed',ball:1,boundary:1,control:1,
+          ground_contact:1,field_context:.1,clarity:.9,continuity:1,occlusion:0,note:'CI synthetic annotation'}]},
+      {id:'external',name:'Example external reference',kind:'broadcast',
+        source:{type:'external_link',url:'https://example.com/synthetic-external-viewer'},
+        anchors:[],evidence:[]},
+    ],
+  };
+  const manifestInBrowser=(value)=>"(()=>{const input=document.querySelector('input[aria-label=\\\"Import AngleIQ manifest\\\"]');if(!input)return false;const data="+JSON.stringify(value)+";const dt=new DataTransfer();dt.items.add(new File([JSON.stringify(data)],'ci-angleiq.json',{type:'application/json'}));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));return true})()";
+  assert.equal(await evalPage(manifestInBrowser({...angleManifest,game_id:'2017090800'}),sid),true);
+  await until("document.querySelector('[role=\\\"alert\\\"]')?.textContent?.includes('different game/play')",sid,'AngleIQ rejects wrong game');
+  assert.equal(await evalPage(manifestInBrowser(angleManifest),sid),true);
+  await until("document.querySelector('[aria-label=\\\"AngleIQ camera rankings\\\"]')?.querySelectorAll('.angleiq-rank-list button').length===2",sid,'AngleIQ ranked camera list');
+  assert.match(await evalPage("document.querySelector('.angleiq-rank-list button:first-child')?.textContent",sid),/Synthetic sideline/);
+  assert.equal(await evalPage("document.querySelector('video.angleiq-video')===null",sid),true,'Unverified video should not render');
+  const consent=await evalPage("(()=>{const box=document.querySelector('.angleiq-media-auth input[type=checkbox]');box?.click();return !!box})()",sid);
+  assert.equal(consent,true);
+  const selectAngleMedia=(payload)=>"(()=>{const input=document.querySelector('input[aria-label=\\\"Load authorized local camera videos\\\"]');if(!input)return false;const dt=new DataTransfer();dt.items.add(new File(["+JSON.stringify(payload)+"],'synthetic-angle.mp4',{type:'video/mp4'}));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));return true})()";
+  assert.equal(await evalPage(selectAngleMedia('synthetic video bytex'),sid),true);
+  await until("document.querySelector('[role=\\\"alert\\\"]')?.textContent?.includes('SHA-256 mismatch')",sid,'AngleIQ video digest rejection');
+  assert.equal(await evalPage("document.querySelector('video.angleiq-video')===null",sid),true,'Corrupt media became playable');
+  assert.equal(await evalPage(selectAngleMedia(videoBytes),sid),true);
+  await until("document.querySelector('.angleiq-stage-footer')?.textContent?.includes('Selected bytes verified')",sid,'AngleIQ verified media');
+  assert.equal(await evalPage("document.querySelector('video.angleiq-video')!==null",sid),true);
+  await capture(sid,'playlab-angleiq-synthetic-review.png');
+  const externalClicked=await evalPage("(()=>{const b=[...document.querySelectorAll('.angleiq-rank-list button')].find(b=>b.textContent?.includes('Example external reference'));b?.click();return !!b})()",sid);
+  assert.equal(externalClicked,true);
+  await until("document.querySelector('.angleiq-stage-footer a[href=\\\"https://example.com/synthetic-external-viewer\\\"]')!==null",sid,'external source link only');
+  assert.equal(await evalPage("document.querySelector('video.angleiq-video')===null",sid),true,'External URLs must never be embedded as video');
+  const exitedAngleIQ=await evalPage("(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent?.includes('Back to replay'));b?.click();return !!b})()",sid);
+  assert.equal(exitedAngleIQ,true);
+  await until("document.querySelector('.gameday-head h1')?.textContent?.includes('Recorded movement, not reconstructed guesses')",sid,'return from AngleIQ');
+  console.log('PASS: AngleIQ identity, rights-confirmed local SHA, rankings and external-viewer boundary.');
+
   // Opt-in private, complete batch verification. CDP sets the *local* file
   // input directly: no HTTP upload, no serialized tracking bytes in messages,
   // no real-source screenshots, and no raw source included in output logs.
