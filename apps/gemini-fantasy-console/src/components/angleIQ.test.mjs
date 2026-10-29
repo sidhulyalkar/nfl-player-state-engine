@@ -9,7 +9,7 @@ import {
 const sha=createHash('sha256').update('synthetic video bytes').digest('hex');
 const good={
   schema_version:1,data_mode:'RIGHTS_DECLARED_VIDEO_RESEARCH',
-  game_id:'2017090700',play_id:'938',
+  game_id:'2017090700',play_id:'938',tracking_source_sha256:'c'.repeat(64),
   rights:{declaration:'Synthetic generated fixture: no third-party NFL footage',
     local_playback_authorized:true,derivative_analysis_authorized:true,
     redistribution_authorized:false},
@@ -45,7 +45,7 @@ test('versioned research manifest and original source declarations are parsed',(
 });
 test('reject source identity, duplicate source paths and unsafe external links',()=>{
   for(const bad of [
-    m=>{m.game_id='fake';},m=>{m.angles[1].id='sideline';},
+    m=>{m.game_id='fake';},m=>{m.tracking_source_sha256='wrong';},m=>{m.angles[1].id='sideline';},
     m=>{m.angles[1].source.url='javascript:alert(1)';},
     m=>{m.angles[1].source.url='http://localhost:8000/media';},
     m=>{m.angles[0].source.filename='../secret.mp4';},
