@@ -20,7 +20,7 @@ FRAME_COLUMNS = ("source_kind", "source_id", "segment_id", "player_id", "frame_i
 EVENT_COLUMNS = (
     "source_kind", "source_id", "segment_id", "player_id", "frame_id", "time_s",
     "turn", "turn_angle_deg", "entry_speed_yd_s", "exit_speed_yd_s",
-    "speed_retention", "speed_bin", "angle_bin", "position",
+    "speed_retention", "speed_bin", "angle_bin", "position", "independent_trial_id",
 )
 
 
@@ -44,7 +44,7 @@ def field_context(
     *,
     offense_direction: int | None,
     ball_y: float | None = None,
-    geometry: FieldFrame = FieldFrame(),
+    geometry: FieldFrame | None = None,
 ) -> dict[str, float | str | None]:
     """Report different field-side notions without conflating body and stadium sides.
 
@@ -52,6 +52,7 @@ def field_context(
     required for the short-side / wide-side distinction. In the middle of the
     field there is no defensible boundary/field classification, so abstain.
     """
+    geometry = geometry if geometry is not None else FieldFrame()
     w = geometry.field_width_yards
     if not all(np.isfinite(v) for v in (x, y)) or not 0 <= y <= w:
         raise ValueError("x/y must be finite and y within canonical field width")
@@ -184,6 +185,10 @@ def extract_turn_events(
                 "speed_bin": _speed_bin(s0),
                 "angle_bin": _angle_bin(abs(angle)),
                 "position": str(seg.iloc[t]["position"]) if "position" in seg else "unassigned",
+                # Use original drill attempt / NFL play, not a derivative-driven split,
+                # as the independent unit of observation.
+                "independent_trial_id": str(seg.iloc[t]["independent_trial_id"])
+                if "independent_trial_id" in seg else str(meta["segment_id"]),
             })
             rows.append(meta)
     return pd.DataFrame(rows, columns=EVENT_COLUMNS)
@@ -266,8 +271,9 @@ def asymmetry_profiles(
 ) -> pd.DataFrame:
     """Compare right-versus-left *path turn* retention in matched demand bins.
 
-    Resamples whole segments, not 10 Hz tracking rows. Abstains when either
-    direction lacks independent segments or bins do not overlap. Results do NOT
+    Resamples whole independent trials (attempts or plays), not 10 Hz frames or
+    the chunks from discontinuous tracking. Abstains without trial replication.
+    Results do NOT
     imply joint strain, injury risk, perception or true physical dominance.
     """
     required = set(EVENT_COLUMNS)
@@ -309,8 +315,8 @@ def asymmetry_profiles(
         # It must not become a statistically "estimated" field-side profile.
         missing_context = any(value == "unknown" for value in key[4:])
         estimate = None if missing_context else _matched_delta(subset)
-        nleft = subset.loc[subset.turn == "left", "segment_id"].nunique()
-        nright = subset.loc[subset.turn == "right", "segment_id"].nunique()
+        nleft = subset.loc[subset.turn == "left", "independent_trial_id"].nunique()
+        nright = subset.loc[subset.turn == "right", "independent_trial_id"].nunique()
         record = dict(zip(groups, key, strict=True))
         record.update({"status": "missing_field_context" if missing_context else "insufficient_matched_evidence",
                        "asymmetry_pct": None,
@@ -322,16 +328,16 @@ def asymmetry_profiles(
         if nleft >= minimum_independent_segments and nright >= minimum_independent_segments and estimate is not None:
             # Global block bootstrap preserves within-segment left/right dependence.
             rng = np.random.default_rng(seed)
-            segments = subset.segment_id.drop_duplicates().to_list()
+            segments = subset.independent_trial_id.drop_duplicates().to_list()
             boot: list[float] = []
-            blocks = {s: subset.loc[subset.segment_id == s] for s in segments}
+            blocks = {s: subset.loc[subset.independent_trial_id == s] for s in segments}
             for _ in range(bootstrap_samples):
                 draw = rng.choice(len(segments), size=len(segments), replace=True)
                 resampled = pd.concat([blocks[segments[j]] for j in draw], ignore_index=True)
                 d = _matched_delta(resampled)
                 if (d is not None
-                        and resampled.loc[resampled.turn == "left", "segment_id"].nunique() >= 2
-                        and resampled.loc[resampled.turn == "right", "segment_id"].nunique() >= 2):
+                        and resampled.loc[resampled.turn == "left", "independent_trial_id"].nunique() >= 2
+                        and resampled.loc[resampled.turn == "right", "independent_trial_id"].nunique() >= 2):
                     boot.append(d)
             if len(boot) >= bootstrap_samples * 0.8:
                 lo, hi = np.quantile(boot, [0.025, 0.975])
