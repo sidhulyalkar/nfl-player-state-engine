@@ -328,7 +328,7 @@ try {
   assert.equal(await evalPage(manifestInBrowser({...angleManifest,game_id:'2017090800'}),sid),true);
   await until("document.querySelector('[role=\\\"alert\\\"]')?.textContent?.includes('different game/play')",sid,'AngleIQ rejects wrong game');
   assert.equal(await evalPage(manifestInBrowser(angleManifest),sid),true);
-  await until("document.querySelector('section[aria-label=\\\"AngleIQ camera rankings\\\"]')?.querySelectorAll('.angleiq-rank-list button').length===2",sid,'AngleIQ ranked camera list');
+  await until("document.querySelector('[aria-label=\\\"AngleIQ camera rankings\\\"]')?.querySelectorAll('.angleiq-rank-list button').length===2",sid,'AngleIQ ranked camera list');
   assert.match(await evalPage("document.querySelector('.angleiq-rank-list button:first-child')?.textContent",sid),/Synthetic sideline/);
   assert.equal(await evalPage("document.querySelector('video.angleiq-video')===null",sid),true,'Unverified video should not render');
   const consent=await evalPage("(()=>{const box=document.querySelector('.angleiq-media-auth input[type=checkbox]');box?.click();return !!box})()",sid);
