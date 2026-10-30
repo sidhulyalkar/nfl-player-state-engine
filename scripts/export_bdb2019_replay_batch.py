@@ -18,7 +18,10 @@ from pathlib import Path
 from player_state_engine.product.bdb2019_source_qualification import (
     verify_file_identities,
 )
-from scripts.select_bdb2019_pilot import validate_selection
+if __package__:
+    from .select_bdb2019_pilot import validate_selection
+else:
+    from select_bdb2019_pilot import validate_selection
 
 from player_state_engine.product.bdb2019_batch_replay import export_bdb2019_replay_batch
 
