@@ -95,7 +95,7 @@ def _export_twelve(tmp_path: Path) -> tuple[Path, dict]:
 
 def _node_preflight(directory: Path) -> subprocess.CompletedProcess[str]:
     script = """
-import {inspectPrivateResearchSession} from process.argv[2] ? await import(process.argv[2]) : {};
+const {inspectPrivateResearchSession}=await import(process.argv[2]);
 try {
   const result=await inspectPrivateResearchSession(process.argv[1],{
     expectedPlayCount:12,licenseIdentifier:process.argv[3],
@@ -117,10 +117,6 @@ try {
 """
     # Node's input -e argv begins with the session directory at argv[1].
     # Import the exact first-party .mjs module, not a copied mock parser.
-    script = script.replace(
-        "import {inspectPrivateResearchSession} from process.argv[2] ? await import(process.argv[2]) : {};",
-        "const {inspectPrivateResearchSession}=await import(process.argv[2]);",
-    )
     return subprocess.run(
         [
             "node", "--input-type=module", "--eval", script,
