@@ -411,8 +411,16 @@ try {
     }
     const elapsed=performance.now()-started;
     const browserMemory=await evalPage("performance.memory?.usedJSHeapSize??null",sid);
+    const browserVersion=await send('Browser.getVersion');
+    const manifestDigest=createHash('sha256')
+      .update(await readFile(privateSession.manifest_file)).digest('hex');
     const redacted={
       qualification:'LOCAL_BROWSER_RESEARCH_SESSION',
+      evidence_created_at:new Date().toISOString(),
+      browser_product:browserVersion.product,
+      input_manifest_sha256:manifestDigest,
+      declared_tracking_source_sha256:privateSession.tracking_source_sha256,
+      original_source_bytes_authenticated_by_browser:false,
       status:'PASS_BROWSER_FILE_AND_MANIFEST_CONSISTENCY_ONLY',
       play_count:privateSession.play_count,
       full_replay_render_count:privateSession.play_count,
