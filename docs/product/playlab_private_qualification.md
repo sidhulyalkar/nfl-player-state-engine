@@ -92,8 +92,15 @@ qualification step:
   Measures wall time and available browser JavaScript heap after import.
 - Writes only a small redacted research report if
   `PLAYLAB_LOCAL_REPORT_PATH` is supplied. The report file must not already
-  exist, and is written with user-only permissions. No private-real-data
-  screenshot or original tracking coordinates appear in it.
+  exist, and is written with user-only permissions. It records source and
+  export-manifest SHA-256 identities, browser product/version, timestamp,
+  import/switch latency and optional JavaScript heap measurement. It does
+  **not** claim that the browser authenticated original NFL source bytes.
+  No private-real-data screenshot or original tracking coordinates appear in it.
+- The same exported synthetic 12-play package is now passed through the **real
+  Python exporter and Node preflight** in a CI cross-runtime regression test.
+  A tampered replay must fail. This qualifies interoperability only, not the
+  original NFL data or external rights.
 
 Run the qualification on a private workstation trusted to hold the data.
 Chromium still reads the selected source replay files into its local browser
