@@ -103,6 +103,7 @@ export async function inspectPrivateResearchSession(
     original_source_bytes_authenticity_confirmed_by_this_preflight:false,
     trust_boundary:'EXPORT_HASH_MATCH_ONLY_NOT_SOURCE_CSV_AUTHENTICATION',
     game_id:m.game_id,qualification_status:m.qualification_status,
+    tracking_source_sha256:m.source_file_sha256,
     source_video_alignment_verified:false,model_training_authorized:false,
     commercial_reuse_authorized:false,
     play_count:results.length,manifest_file:manifestPath,
