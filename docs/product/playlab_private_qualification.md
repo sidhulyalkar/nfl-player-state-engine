@@ -16,33 +16,40 @@ coverage assignments or game-film alignment is implied.
 4. Create a **new** private session directory with
    `scripts/export_bdb2019_replay_batch.py` and 12 distinct play IDs.
 
-Example: select 12 actual source IDs from your local catalog. This takes the
-first 12 IDs in catalog order for **technical smoke testing only**, not as a
-representative statistical sample or a claim about coaching tactics.
+The pilot selector creates a **deterministic technical-coverage sample** from
+the pinned source catalog: tutorial plays 938 and 2756 plus diverse recorded
+frame spans, source gaps, excluded positions, ball availability and source
+events. This is not a randomized sample or a claim about league-wide coverage.
+The selection is position-free, SHA-256-bound to the audited original tracking
+CSV, and cannot be reused with different source data or different license terms.
+
+Unlike Bash `mapfile`, the commands below work directly on macOS.
 
 ```bash
-mapfile -t PLAY_IDS < <(python - <<'PY'
-import json
-with open('/tmp/pse-recorded-play-catalog.json', encoding='utf-8') as f:
-    catalog = json.load(f)
-plays = catalog['plays']
-if len(plays) < 12:
-    raise SystemExit('At least 12 recorded plays required')
-for play in plays[:12]:
-    print(play['play_id'])
-PY
-)
-ARGS=()
-for pid in "${PLAY_IDS[@]}"; do
-  ARGS+=(--play-id "$pid")
-done
+python scripts/build_bdb2019_play_catalog.py \
+  --csv data/external/bdb2019-private/tracking_gameId_2017090700.csv \
+  --output /tmp/pse-recorded-play-catalog.json \
+  --license-id "YOUR_ACTUAL_REVIEWED_TERMS_IDENTIFIER" \
+  --acknowledge-source-terms
+
+python scripts/select_bdb2019_pilot.py \
+  --catalog /tmp/pse-recorded-play-catalog.json \
+  --output /tmp/pse-private-pilot-selection.json \
+  --license-id "YOUR_ACTUAL_REVIEWED_TERMS_IDENTIFIER" \
+  --acknowledge-source-terms
+
 python scripts/export_bdb2019_replay_batch.py \
   --source-dir data/external/bdb2019-private \
   --output-dir /tmp/pse-private-2017-session-v1 \
-  "${ARGS[@]}" \
+  --selection-file /tmp/pse-private-pilot-selection.json \
   --license-id "YOUR_ACTUAL_REVIEWED_TERMS_IDENTIFIER" \
   --acknowledge-source-terms
 ```
+
+The exporter re-verifies the pinned official source files and rejects a
+selection made from a different tracking SHA-256. It never grants new rights.
+A preexisting selection/output path is not overwritten.
+
 
 Make sure the catalog file was generated from the same pinned source. The
 export fails atomically if any requested play is absent. Avoid committing the
