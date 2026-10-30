@@ -25,6 +25,7 @@ jobs:
             scripts/build_bdb2019_play_catalog.py \
             scripts/build_bdb2019_game_timeline.py \
             scripts/export_bdb2019_replay_batch.py \
+            scripts/select_bdb2019_pilot.py \
             scripts/build_angleiq_manifest.py \
             scripts/detect_angleiq_shots.py \
             scripts/acquire_game_intelligence_sources.py \
