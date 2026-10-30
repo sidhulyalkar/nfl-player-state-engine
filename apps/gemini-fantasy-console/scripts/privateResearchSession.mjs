@@ -9,7 +9,7 @@ import path from 'node:path';
 
 const SHA=/^[0-9a-f]{64}$/i;
 const SHA1=/^[0-9a-f]{40}$/i;
-const CSV=/^[a-zA-Z0-9_.-]+\\.csv$/;
+const CSV=/^[a-zA-Z0-9_.-]+\.csv$/;
 const ID=/^[0-9]{10}$/;
 const PLAY=/^[0-9]{1,10}$/;
 const MAX_MANIFEST=2_000_000;
