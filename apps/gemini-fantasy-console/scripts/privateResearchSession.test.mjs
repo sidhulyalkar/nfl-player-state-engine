@@ -44,6 +44,7 @@ test('local preflight checks exact bytes and produces position-free report',asyn
     assert.equal(out.play_count,1);
     assert.equal(out.plays[0].recorded_frames,2);
     assert.equal(out.model_training_authorized,false);
+    assert.equal(out.tracking_source_sha256,'a'.repeat(64));
     assert.equal(out.original_source_bytes_authenticity_confirmed_by_this_preflight,false);
     assert.equal(out.plays[0].missing_source_frames,1);
     assert.equal(out.source_video_alignment_verified,false);
